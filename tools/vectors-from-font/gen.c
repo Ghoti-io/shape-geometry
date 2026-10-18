@@ -1,17 +1,20 @@
-/* Throwaway generator of known answers from font's own flattener.
+/* Throwaway generator of known answers from font's own flattener (revision 2).
  *
- * Built outside every repository: it #includes a copy of libs/font/src/raster/raster.c
- * that differs from the original in two inserted lines (see gen.sh), which record the
- * end point of every line gfnt_raster_line() is given and return, so that the
- * unmodified gfnt_raster_quad() and gfnt_raster_cubic() are what produces the points.
- * Prints tests/flatten_vectors.h of shape-geometry.
+ * Built outside every repository: it #includes font's src/raster/flatten.c itself
+ * (the unmodified file; see make.sh) and calls gfnt_flatten_quad and
+ * gfnt_flatten_cubic at tolerance 4 with an emit callback that records every
+ * vertex.  Prints tests/flatten_vectors.h of shape-geometry.
  */
-#include "src/raster/raster.c"
+#include "src/raster/flatten.c"
 #include <stdio.h>
+#include <stdlib.h>
 
 static GFNT_Point rec[1 << 20];
 static unsigned rec_n;
-void scratch_record(GFNT_Point to) { rec[rec_n++] = to; }
+static void record(void * user, GFNT_Point to, uint32_t leaf, int level) {
+  (void)user; (void)leaf; (void)level;
+  rec[rec_n++] = to;
+}
 
 static uint64_t rs = UINT64_C(0x2545F4914F6CDD1D);
 static uint64_t nx(void) { rs ^= rs >> 12; rs ^= rs << 25; rs ^= rs >> 27; return rs * UINT64_C(2685821657736338717); }
@@ -26,16 +29,16 @@ static uint64_t fnv_i32(uint64_t h, int32_t v) {
   return h;
 }
 
-static GFNT_Raster R;
 typedef struct { int kind; int32_t p[4][2]; } Vec;
 
 static uint64_t run(const Vec *v, unsigned *count) {
   rec_n = 0;
-  R.tolerance = GFNT_RASTER_TOLERANCE;
   GFNT_Point p[4];
   for (int i = 0; i < 4; i++) { p[i].x = v->p[i][0]; p[i].y = v->p[i][1]; }
-  if (v->kind == 2) gfnt_raster_quad(&R, p[0], p[1], p[2], GFNT_RASTER_DEPTH);
-  else gfnt_raster_cubic(&R, p[0], p[1], p[2], p[3], GFNT_RASTER_DEPTH);
+  int forced;
+  if (v->kind == 2) forced = gfnt_flatten_quad(4, p[0], p[1], p[2], record, 0);
+  else forced = gfnt_flatten_cubic(4, p[0], p[1], p[2], p[3], record, 0);
+  if (forced) { fprintf(stderr, "the depth cap forced a piece\n"); exit(1); }
   uint64_t h = UINT64_C(0xcbf29ce484222325);
   for (unsigned i = 0; i < rec_n; i++) { h = fnv_i32(h, rec[i].x); h = fnv_i32(h, rec[i].y); }
   *count = rec_n;
@@ -51,7 +54,8 @@ static Vec mk3(int32_t a, int32_t b, int32_t c, int32_t d, int32_t e, int32_t f,
 
 int main(void) {
   Vec ex[256]; int nex = 0;
-  /* hand-picked, explicit lists */
+  /* hand-picked, explicit lists (their vertices are revision 2's; the thresholds
+   in the comments are in units: a piece is flat at 4 * (t - 1) = 12) */
   ex[nex++] = mk2(0, 0, 32, 0, 64, 0);          /* straight, flat */
   ex[nex++] = mk2(0, 0, 0, 0, 0, 0);            /* a point */
   ex[nex++] = mk2(10, 10, 10, 10, 10, 10);
@@ -62,9 +66,9 @@ int main(void) {
   ex[nex++] = mk2(-640, -640, 0, 640, 640, -640);
   ex[nex++] = mk2(-1, -1, 0, 0, 1, 1);
   ex[nex++] = mk2(7, 7, 7, 7, 700, 7);          /* p1 = p0 */
-  ex[nex++] = mk2(0, 0, 33, 33, 64, 0);         /* d = 66 + 0: just over the threshold */
-  ex[nex++] = mk2(0, 0, 8, 8, 16, 0);           /* d = 16: at the threshold */
-  ex[nex++] = mk2(0, 0, 8, 9, 16, 0);           /* d = 18: just over */
+  ex[nex++] = mk2(0, 0, 33, 33, 64, 0);         /* d = 66: well over the threshold */
+  ex[nex++] = mk2(0, 0, 6, 6, 12, 0);           /* d = 12: at the threshold */
+  ex[nex++] = mk2(0, 0, 6, 7, 12, 0);           /* d = 14: just over */
   ex[nex++] = mk2(0, 0, 1 << 24, 1 << 24, 1 << 25, 0);
   ex[nex++] = mk2(-(1 << 26), -(1 << 26), 0, 1 << 26, 1 << 26, -(1 << 26));
   ex[nex++] = mk3(0, 0, 0, 0, 0, 0, 0, 0);
@@ -86,13 +90,14 @@ int main(void) {
     else ex[nex] = mk3(rr(bits), rr(bits), rr(bits), rr(bits), rr(bits), rr(bits), rr(bits), rr(bits));
     nex++;
   }
-  printf("// Generated: known answers of font's flattener (libs/font/src/raster/raster.c,\n"
-         "// gfnt_raster_quad and gfnt_raster_cubic at font commit 588437c), recorded by the\n"
-         "// throwaway program described in the story 7 spec.  Do not edit.\n"
+  printf("// Generated: known answers of font's flattener, revision 2 (libs/font/src/raster/\n"
+         "// flatten.c, gfnt_flatten_quad and gfnt_flatten_cubic at tolerance 4, font commit\n"
+         "// 69d1860), recorded by tools/vectors-from-font (story 7a).  Do not edit.\n"
          "// Each vector is a quadratic (kind 2) or cubic (kind 3) in 26.6, the number of\n"
          "// lines font emits, the FNV-1a 64 of their end points (x then y, int32 little-endian),\n"
          "// and, for those with an offset, the end points themselves.\n\n"
          "#ifndef GHOTI_IO_GSHGEOM_FLATTEN_VECTORS_H\n#define GHOTI_IO_GSHGEOM_FLATTEN_VECTORS_H\n\n#include <cstdint>\n\n"
+         "// The flattener revision these vertices are those of.\nstatic const int kFlattenVectorsRevision = 2;\n\n"
          "struct FlattenVector {\n  int kind;\n  std::int32_t p[4][2];\n  unsigned count;\n  std::uint64_t hash;\n  unsigned offset;  // into kFlattenPoints; UINT32_MAX when only the hash is kept\n};\n\n");
   /* explicit points first */
   static int32_t pts[1 << 20]; unsigned npts = 0;

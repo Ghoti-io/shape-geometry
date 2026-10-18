@@ -11,7 +11,8 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   `orient2d` and `orient3d`, and the grid-aligned route predicate.
 - The 26.6 device path: the one rounding rule `floor(x * 64 + 0.5)`, a model
   path under a map converted to it, and the integer flattener (1/16 pixel,
-  ported from `font`'s scan converter) producing a flattened path.
+  revision 2, proved within the tolerance for every `int32` curve; ported from
+  `font`'s scan converter) producing a flattened path.
 - Along-path parametrization: a measured path built once from a model path (any
   curve kind, 2D or 3D, any number of subpaths) gives its arc length and, at any
   distance along it, the point, the unit tangent and the left normal. The arc

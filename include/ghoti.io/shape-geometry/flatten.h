@@ -28,14 +28,52 @@
  * and a raster sink uses it so that no two sinks flatten differently.  Its
  * tolerance is part of the definition (AD-12) and is not a parameter.
  *
- * A quadratic is split at its midpoint, each midpoint the floor of the half sum
- * of integers, until `|2 p1 - p0 - p2|` summed over both axes is at most four
- * tolerances; a cubic until both `|3 p1 - 2 p0 - p3|` and `|3 p2 - p0 - 2 p3|`
- * (each summed over both axes) are; to at most ::GSHGEOM_FLATTEN_MAX_DEPTH
- * levels.  The end point of every line produced is emitted, duplicates
- * included, in order.  Arithmetic is 64-bit.  The deviation of the polyline
- * from the curve through the (integer) control points is at most the tolerance;
- * the integer midpoints add a little (tests state what they measured).
+ * ## The guarantee (flattener revision 2)
+ *
+ * For every curve whose control points are any `int32` values, every point of
+ * the curve is within the tolerance less 0.12 units of the emitted polyline: at
+ * most 3.88 units (a little over 1/17 pixel) for the tolerance of 4 units
+ * (::GSHGEOM_FLATTEN_TOLERANCE, 1/16 pixel), and the depth cap is never what
+ * ends a piece.  The proof is stated above the code (src/flatten/flatten.c) and
+ * in documentation/design.md, and tests/unit/test_flatten.cpp checks the bound
+ * against dense exact evaluation on every size class up to the whole `int32`
+ * range.
+ *
+ * The proof holds for any tolerance of 2 units (1/32 pixel) and up, with the
+ * flatness threshold derived from it.  The tolerance is not a parameter of
+ * this library, so there is no value below 2 to refuse here; the compile-time
+ * check in flatten.c refuses a ::GSHGEOM_FLATTEN_TOLERANCE under 2.  `font`'s
+ * rasteriser, which does take a tolerance, returns `GFNT_ERR_INVALID` for 1 or
+ * a negative value; this library's contract is the same one, held at the only
+ * value it has.
+ *
+ * ## The algorithm
+ *
+ * Points are widened by eight fractional bits and a curve is split at the
+ * midpoint of its widened control points (each midpoint rounded half up, as
+ * `floor((u + v + 1) / 2)`) until a quadratic's `|2 p1 - p0 - p2|`, or both of
+ * a cubic's `|3 p1 - 2 p0 - p3|` and `|3 p2 - p0 - 2 p3|` (each summed over
+ * both axes), are at most `4 * (t - 1)` units, i.e. 12 units at `t = 4`; to at
+ * most ::GSHGEOM_FLATTEN_MAX_DEPTH levels.  The end point of every piece is
+ * rounded once to 26.6, to nearest with ties upward (`floor((v + 128) / 256)`
+ * of the widened value), and emitted; duplicates are included, in order.
+ * Arithmetic is 64-bit and uses no shift of a negative value.
+ *
+ * ## The revision
+ *
+ * The flattener is versioned, and its polyline is what a rebaseline of every
+ * sink's goldens follows.  ::GSHGEOM_FLATTEN_REVISION (and
+ * ::gshgeom_flatten_revision) is the number; it is recorded where a rebaseline
+ * lives (a golden's header, a vector file) and is in no hash: the flattened
+ * path's spelling (::gshgeom_flat_path_hash) is unchanged, and two revisions
+ * that gave the same polyline hash the same.  There is no way to ask for an
+ * older revision.
+ *
+ * | Revision | Meaning |
+ * |---|---|
+ * | 1 | `font`'s flattener as ported in story 7: every midpoint floored to 26.6, flat at `4 * t` units, depth 16.  Its error against the exact curve reached 13 units on a large curve (13.1 over the `int32` range), 2 to 4 on a tiny one. |
+ * | 2 | The above: widened by eight bits, a vertex rounded once, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12` units. |
+ *
  */
 
 #ifndef GHOTI_IO_GSHGEOM_FLATTEN_H
@@ -59,8 +97,15 @@ extern "C" {
 /** The flattening tolerance: 4 units of 1/64 pixel, i.e. 1/16 pixel. */
 #define GSHGEOM_FLATTEN_TOLERANCE 4
 
-/** How deep a curve may be subdivided before its chord is used as it is. */
-#define GSHGEOM_FLATTEN_MAX_DEPTH 16
+/**
+ * How deep a curve may be subdivided before its chord is used as it is.  The
+ * proof shows the cap is never reached; it is 20, not 16, because at 16 a
+ * curve spanning the `int32` range would still be over the threshold.
+ */
+#define GSHGEOM_FLATTEN_MAX_DEPTH 20
+
+/** The revision of the flattener's definition; see the table above. */
+#define GSHGEOM_FLATTEN_REVISION 2
 
 /** The opaque flattened path: polylines in 26.6, open or closed. */
 typedef struct GSHGEOM_Flat_Path GSHGEOM_Flat_Path;
@@ -75,6 +120,13 @@ typedef struct GSHGEOM_Flat_Subpath {
   size_t count;  ///< Number of points (at least 1).
   int closed;    ///< 1 if the subpath was closed.
 } GSHGEOM_Flat_Subpath;
+
+/**
+ * @brief The flattener revision this library implements
+ *        (::GSHGEOM_FLATTEN_REVISION), for a caller that records or checks it
+ *        across a dynamic-link boundary.
+ */
+GSHGEOM_API int gshgeom_flatten_revision(void);
 
 /**
  * @brief Flatten a device path with the integer flattener.

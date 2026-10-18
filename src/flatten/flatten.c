@@ -21,17 +21,131 @@
 /**
  * @file
  *
- * The integer flattener (flatten.h) and the flattened path.
+ * The integer flattener (flatten.h), revision 2, the proof that its polyline
+ * stays within the tolerance of the curve, and the flattened path.
  *
- * Ported from `font`'s scan converter (`gfnt_raster_quad`, `gfnt_raster_cubic`
- * and the midpoint they use), whose recursion it keeps exactly: the tests
- * compare its output with the points `font`'s functions produced for the same
- * input, bit for bit.  Two things differ, neither visible in the output: the
- * deviation sums are 64-bit (`font`'s 32-bit ones overflow for a coordinate past
- * about 2^29), and a line is appended to the flattened path instead of being
- * deposited into scan converter cells.
+ * Ported, as code of this library, from `font`'s `src/raster/flatten.c` at
+ * `font` commit 69d1860, whose recursion it keeps exactly: the tests compare
+ * its output with the vertices `font`'s flattener produced for the same input
+ * (at tolerance 4), bit for bit.  There is no dependency on `font`.  A line is
+ * appended to the flattened path instead of being handed to an emit callback,
+ * and the library has one tolerance, not a parameter.
  *
  * A failed call frees what it made and writes nothing to its output.
+ *
+ * ## What is done
+ *
+ * A curve is halved at its midpoint until its control polygon is flat, and the
+ * end point of each flat piece is a vertex.  Three things make the bound below
+ * true, and each was a defect of revision 1 (story 7's port of `font`):
+ *
+ * 1. **The subdivision is done in widened integers**: every point is multiplied
+ *    by 2^FLAT_EXTRA (256) on entry and all halving and both flatness tests
+ *    run on those.  Revision 1 rounded every midpoint to 26.6, so each level
+ *    moved the control points of every later level and the errors added up
+ *    with the depth: measured against the exact curve it reached 13 units on a
+ *    large curve, where 4 was promised.
+ * 2. **A vertex is rounded to 26.6 once**, when it is emitted, to nearest with
+ *    ties upward.  That is the only rounding of a coordinate that is not
+ *    2^-9 of a unit.
+ * 3. **The flatness threshold leaves room for that one rounding**: a piece is
+ *    flat when its L1 deviation sum is at most `4 * 256 * (t - 1)` widened
+ *    units, i.e. `4 * (t - 1)` units, for the tolerance `t` (here 4: 3,072
+ *    widened, 12 units).  Revision 1 spent the whole tolerance on the flatness
+ *    test (`4 * t`) and had none to spare for rounding.
+ *
+ * No float, no libm, no shift of a negative value (a widening is a
+ * multiplication, a narrowing a floor division), no overflow: the proof below
+ * gives the ranges.  The result is the same on every target.
+ *
+ * ## The theorem
+ *
+ * Let the curve have control points with int32 coordinates (any value of the
+ * type) and let `t >= 2` be the tolerance in 26.6 units; this library's is
+ * ::GSHGEOM_FLATTEN_TOLERANCE, 4.  Then every point of the curve is within
+ * `t - 0.12` units (so, here, 3.88, and within `t`) of the emitted polyline,
+ * and the depth cap never forces a piece.  The proof is for every `t >= 2`
+ * because the threshold is derived from `t`; the library has no other
+ * tolerance, and a compile-time check below refuses a smaller one.
+ *
+ * ## The proof
+ *
+ * Units are 26.6 units unless called "widened" (1 widened = 1/256 unit).  Write
+ * W = 256, T = 4W(t-1), E = 30.
+ *
+ * **(a) Ranges.** Every coordinate of every point the recursion makes lies in
+ * the interval spanned by the corresponding input coordinates, widened, so
+ * within +-2^39 widened: the inputs are there, and the half-up midpoint
+ * `floor((u+v+1)/2)` of two integers in an interval `[lo, hi]` is in it (the
+ * sum is at most `2 hi + 1`, whose half floors to `hi`).  Hence 3p, 2p and sums
+ * of up to six such terms are below 2^42, far inside int64.  Narrowing
+ * `floor((v + 128) / 256)` of a widened value in that interval returns a value
+ * in [-2^31, 2^31-1] (monotonic, and exact at the end points), so the cast to
+ * int32 does not truncate.  No statement depends on the input being a glyph.
+ *
+ * **(b) The midpoints are close to the true ones.** Take the control points Q
+ * of a piece reached by `k` halvings and the control points P of the same
+ * parameter interval of the exact curve (the exact de Casteljau points, which
+ * are rational).  If every point of the parent is within `e` of its exact
+ * counterpart on each axis, each new point is: it is the average of two parent
+ * points (error at most `e`) plus the half-up rounding, at most 1/2 widened.  A
+ * quadratic produces `a, b` (error +1/2) and `m = mid(a, b)` (+1); a cubic
+ * `a, b, c` (+1/2), `d, e` (+1) and `m` (+3/2).  The root's points are exact.
+ * So after `k <= GSHGEOM_FLATTEN_MAX_DEPTH = 20` halvings every point is within
+ * `1.5 * 20 = 30 = E` widened per axis, for either degree.
+ *
+ * **(c) The flatness test measures the piece it has.** The test is made on Q.
+ * For a quadratic piece, `B(s) - L(s) = s(1-s)(2Q1 - Q0 - Q2)`, where L is the
+ * chord, because the Bernstein form minus linear interpolation leaves only the
+ * middle coefficient.  So the piece is within `|2Q1-Q0-Q2|_2 / 4 <= (dx+dy) / 4`
+ * of the chord, and the test accepts at `dx+dy <= T`: within `T/4 = W(t-1)`
+ * widened, which is `t - 1` units.  For a cubic, with `e1 = Q1 - (2Q0+Q3)/3`
+ * and `e2 = Q2 - (Q0+2Q3)/3`, the same identity gives
+ * `B(s) - L(s) = 3s(1-s)((1-s) e1 + s e2)`, at most `(3/4) max(|e1|, |e2|)`;
+ * and `|e1|_2 <= |e1|_1 = d1/3`, `|e2|_2 <= d2/3` for the sums d1, d2 the code
+ * computes.  So the piece is within `max(d1, d2) / 4 <= T/4`: `t - 1` units.
+ *
+ * **(d) The piece is near the exact curve.** The piece's Bezier curve, built on
+ * Q, and the exact curve over the same interval, built on P, are the same
+ * convex combination of Q and of P at every parameter, so they are within
+ * `max |Q_i - P_i|_2 <= sqrt(2) E / 256 <= 0.166` units of each other at the
+ * same parameter, by (b).
+ *
+ * **(e) The vertex rounding.** The segment emitted joins `narrow(Q0)` and
+ * `narrow(Qk)`: the previous vertex is the narrowing of the same point (the
+ * shared `m`; for the first piece the input point, which narrows to itself).
+ * Each narrowing moves a point by at most 1/2 unit per axis, so at most
+ * `sqrt(2)/2 = 0.7072` units, and a point of the chord is a convex combination
+ * of the two ends, so it moves by at most that.
+ *
+ * **(f) Together**, for any point B(s) of the curve and the piece containing s:
+ * `0.166 (d) + (t - 1) (c) + 0.7072 (e) = t - 0.1268 < t - 0.12`.  QED, given
+ * that the cap does not bind:
+ *
+ * **(g) The depth cap does not bind** for `t >= 2`, over the whole int32 range.
+ * A piece is forced only after 20 halvings; its control polygon then has the
+ * exact deviation of the sub-curve plus the error of (b).  The exact part: a
+ * quadratic's `2Q1-Q0-Q2` for a piece of parameter length `h` is
+ * `h^2 (P0 - 2P1 + P2)` (per axis at most `2^33 h^2` units), so with
+ * `h = 2^-20` it is at most `2^34 / 2^40` units for both axes together: 4
+ * widened.  A cubic's `3Q1-2Q0-Q3` is the negative of a Taylor remainder of the
+ * piece, `<= (h^2/2) max |B''|` per axis, and `|B''| <= 6 * 2^33` per axis for
+ * int32 control points, so `d1` and `d2` are each at most
+ * `2 * 3 * 2^33 * 2^-40` units = 12 widened.  The error part: coefficients
+ * (2,1,1) and (3,2,1) times `E` per axis, both axes: at most `8 * 20 = 160`
+ * widened for a quadratic and `12 * 30 = 360` for a cubic.  The most is 372,
+ * and the threshold at this library's `t = 4` is `T = 3072` (at the smallest
+ * `t = 2` it is 1024).  So every piece is accepted at or before depth 20.
+ * (This is why the depth is 20 and was 16: at 16 a curve spanning the int32
+ * range is still 4 (quadratic) or 12 (cubic) units of deviation sum from flat.)
+ *
+ * ## What checks the proof
+ *
+ * tests/unit/test_flatten.cpp evaluates the curve exactly and measures the
+ * distance to the polyline, on every size class up to the whole int32 range,
+ * and asserts the bound; it pins vertex lists from `font`'s flattener and from
+ * an independent big-integer model (tools/gen-hash-vectors.py).  That it finds
+ * a violation was shown by planting (tools/check-planted.py).
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
@@ -95,20 +209,56 @@ static GSHGEOM_Result begin_subpath(GSHGEOM_Flat_Path * fp, Pt p) {
   return r;
 }
 
-/* The midpoint of two points, floored (font's gfnt_raster_mid). */
-static int32_t mid(int32_t a, int32_t b) {
-  int64_t sum = (int64_t)a + b;
-  int64_t q = sum / 2;
-  if (sum % 2 != 0 && sum < 0) {
+/** Extra fractional bits the subdivision carries beyond 26.6. */
+#define FLAT_EXTRA 8
+
+/** 2^FLAT_EXTRA, the widening factor. */
+#define FLAT_SCALE ((int64_t)1 << FLAT_EXTRA)
+
+/* The proof (a theorem for t >= 2) needs the tolerance to be at least 2. */
+_Static_assert(GSHGEOM_FLATTEN_TOLERANCE >= 2,
+    "the flattener's guarantee is proved for tolerances of 2 units and up");
+
+/** The L1 flatness limit, widened: 4 * 256 * (t - 1) (3,072 at t = 4). */
+#define FLAT_THRESHOLD \
+  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))
+
+/** A point in widened units: 26.6 times 2^FLAT_EXTRA. */
+typedef struct WPt {
+  int64_t x;
+  int64_t y;
+} WPt;
+
+/* floor(a / b) for b > 0, without shifting a negative value. */
+static int64_t floor_div(int64_t a, int64_t b) {
+  int64_t q = a / b;
+  if (a % b != 0 && a < 0) {
     q -= 1;
   }
-  return (int32_t)q;
+  return q;
 }
 
-static Pt mid_pt(Pt a, Pt b) {
-  Pt m;
-  m.x = mid(a.x, b.x);
-  m.y = mid(a.y, b.y);
+/* A multiplication, not a shift: the operand may be negative. */
+static WPt widen(Pt p) {
+  WPt w;
+  w.x = (int64_t)p.x * FLAT_SCALE;
+  w.y = (int64_t)p.y * FLAT_SCALE;
+  return w;
+}
+
+/* A widened point back to 26.6: to nearest, ties upward. */
+static Pt narrow(WPt w) {
+  Pt p;
+  p.x = (int32_t)floor_div(w.x + FLAT_SCALE / 2, FLAT_SCALE);
+  p.y = (int32_t)floor_div(w.y + FLAT_SCALE / 2, FLAT_SCALE);
+  return p;
+}
+
+/* The midpoint of two widened points: to nearest, ties upward. */
+static WPt mid_pt(WPt a, WPt b) {
+  WPt m;
+  m.x = floor_div(a.x + b.x + 1, 2);
+  m.y = floor_div(a.y + b.y + 1, 2);
   return m;
 }
 
@@ -116,43 +266,45 @@ static int64_t abs64(int64_t v) {
   return v < 0 ? -v : v;
 }
 
-/* A quadratic's deviation from its chord is |2 p1 - p0 - p2| / 4 at its
- * midpoint, so the test is that sum against four tolerances. */
+/* A quadratic piece is flat when |2 p1 - p0 - p2| summed over both axes is at
+ * most the threshold (its deviation from its chord is a quarter of that).  The
+ * flatness test comes before the cap, as in the proof. */
 static GSHGEOM_Result quad(
-    GSHGEOM_Flat_Path * fp, Pt p0, Pt p1, Pt p2, int depth) {
-  int64_t dx = abs64(2 * (int64_t)p1.x - p0.x - p2.x);
-  int64_t dy = abs64(2 * (int64_t)p1.y - p0.y - p2.y);
-  if (depth <= 0 || dx + dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {
-    return add_point(fp, p2);
+    GSHGEOM_Flat_Path * fp, WPt p0, WPt p1, WPt p2, int depth) {
+  int64_t sum = abs64(2 * p1.x - p0.x - p2.x) + abs64(2 * p1.y - p0.y - p2.y);
+  if (sum <= FLAT_THRESHOLD || depth <= 0) {
+    return add_point(fp, narrow(p2));
   }
-  Pt a = mid_pt(p0, p1);
-  Pt b = mid_pt(p1, p2);
-  Pt m = mid_pt(a, b);
+  WPt a = mid_pt(p0, p1);
+  WPt b = mid_pt(p1, p2);
+  WPt m = mid_pt(a, b);
   GSHGEOM_Result r = quad(fp, p0, a, m, depth - 1);
   return r != GSHGEOM_OK ? r : quad(fp, m, b, p2, depth - 1);
 }
 
-/* A cubic's deviation is bounded by three quarters of the larger of its two
- * control-point deviations, so both are measured. */
+/* A cubic piece is flat when both control-point deviations d1 and d2, each
+ * summed over both axes, are at most the threshold. */
 static GSHGEOM_Result cubic(
-    GSHGEOM_Flat_Path * fp, Pt p0, Pt p1, Pt p2, Pt p3, int depth) {
-  int64_t d1 = abs64(3 * (int64_t)p1.x - 2 * (int64_t)p0.x - p3.x) +
-      abs64(3 * (int64_t)p1.y - 2 * (int64_t)p0.y - p3.y);
-  int64_t d2 = abs64(3 * (int64_t)p2.x - p0.x - 2 * (int64_t)p3.x) +
-      abs64(3 * (int64_t)p2.y - p0.y - 2 * (int64_t)p3.y);
-  if (depth <= 0 ||
-      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE &&
-          d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {
-    return add_point(fp, p3);
+    GSHGEOM_Flat_Path * fp, WPt p0, WPt p1, WPt p2, WPt p3, int depth) {
+  int64_t d1 = abs64(3 * p1.x - 2 * p0.x - p3.x) +
+      abs64(3 * p1.y - 2 * p0.y - p3.y);
+  int64_t d2 = abs64(3 * p2.x - p0.x - 2 * p3.x) +
+      abs64(3 * p2.y - p0.y - 2 * p3.y);
+  if ((d1 <= FLAT_THRESHOLD && d2 <= FLAT_THRESHOLD) || depth <= 0) {
+    return add_point(fp, narrow(p3));
   }
-  Pt a = mid_pt(p0, p1);
-  Pt b = mid_pt(p1, p2);
-  Pt c = mid_pt(p2, p3);
-  Pt d = mid_pt(a, b);
-  Pt e = mid_pt(b, c);
-  Pt m = mid_pt(d, e);
+  WPt a = mid_pt(p0, p1);
+  WPt b = mid_pt(p1, p2);
+  WPt c = mid_pt(p2, p3);
+  WPt d = mid_pt(a, b);
+  WPt e = mid_pt(b, c);
+  WPt m = mid_pt(d, e);
   GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);
   return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);
+}
+
+int gshgeom_flatten_revision(void) {
+  return GSHGEOM_FLATTEN_REVISION;
 }
 
 static void flat_destroy_parts(GSHGEOM_Flat_Path * fp) {
@@ -209,11 +361,13 @@ GSHGEOM_Result gshgeom_device_path_flatten(const GSHGEOM_Device_Path * path,
       current = el.p[0];
       break;
     case GSHGEOM_DEVICE_QUADRATIC:
-      r = quad(fp, current, el.p[0], el.p[1], GSHGEOM_FLATTEN_MAX_DEPTH);
+      r = quad(fp, widen(current), widen(el.p[0]), widen(el.p[1]),
+          GSHGEOM_FLATTEN_MAX_DEPTH);
       current = el.p[1];
       break;
     case GSHGEOM_DEVICE_CUBIC:
-      r = cubic(fp, current, el.p[0], el.p[1], el.p[2], GSHGEOM_FLATTEN_MAX_DEPTH);
+      r = cubic(fp, widen(current), widen(el.p[0]), widen(el.p[1]),
+          widen(el.p[2]), GSHGEOM_FLATTEN_MAX_DEPTH);
       current = el.p[2];
       break;
     case GSHGEOM_DEVICE_CLOSE:

@@ -1,9 +1,9 @@
 # Design
 
-**Status:** parts 1 and 2 of the shape-geometry plan: curves, model paths,
+**Status:** parts 1 to 4 of the shape-geometry plan: curves, model paths,
 bounds and the hash spelling; maps, the orientation rules, the exact
-predicates and the route predicate. The 26.6 device path and the flattener are
-later parts.
+predicates and the route predicate; the 26.6 device path and the integer
+flattener (revision 2); along-path parametrization.
 
 Paths, transforms and flattening for the shape family, bit-identical on every host.
 
@@ -102,22 +102,74 @@ parameter 1/2, until its projected control points are within 1/32 pixel of the
 chord *segment* (convexity of positive weights makes that a bound), and becomes
 lines.
 
-`flatten.h` is `font`'s integer flattener, kept exactly: split at the midpoint
-(each midpoint the floor of the half sum of integers) until `|2 p1 - p0 - p2|`,
-or both `|3 p1 - 2 p0 - p3|` and `|3 p2 - p0 - 2 p3|`, summed over both axes, is
-at most four tolerances (the tolerance is 4 units, 1/16 pixel, and a constant:
-AD-12 makes it part of the definition). It emits the end point of every line,
-duplicates included. The recursion bounds the deviation of the *integer*
-control polygon's curve; the floor of each midpoint then moves the pieces, and
-the drift adds up with the depth, so the deviation from the true curve is the
-threshold for small curves and up to about three times it for curves of
-thousands of pixels (`tests/unit/test_flatten.cpp` measures it, and the story's
-notes give the table). The output is a flattened path: polylines, each with a
-closed flag, the closing line implicit.
+`flatten.h` is the integer flattener, **revision 2**, ported from `font`'s
+`src/raster/flatten.c` (as of `font` commit 69d1860; shape-geometry has its own
+copy of the code and does not depend on `font`). Points are widened by eight
+fractional bits and a curve is split at the midpoint of its widened control
+points (each midpoint `floor((u + v + 1) / 2)`, half up) until `|2 p1 - p0 - p2|`,
+or both `|3 p1 - 2 p0 - p3|` and `|3 p2 - p0 - 2 p3|`, summed over both axes,
+is at most `4 * 256 * (t - 1)` widened units, i.e. `4 * (t - 1)` units for the
+tolerance `t` (`t` is 4 units, 1/16 pixel, a constant: AD-12 makes it part of
+the definition, so the threshold is 12 units, 3,072 widened); to at most 20
+levels. A vertex is rounded to 26.6 once, half up (`floor((v + 128) / 256)`),
+when it is emitted, and the end point of every piece is emitted, duplicates
+included. The output is a flattened path: polylines, each with a closed flag,
+the closing line implicit. All arithmetic is `int64`; no shift of a negative
+value, no float, no libm.
 
-`tests/flatten_vectors.h` holds 960 curves with the lines `font`'s own functions
-produced for them; `tools/vectors-from-font/` records how (it is the only place
-`font` is named; nothing here includes or links it).
+### The guarantee and its proof
+
+Every point of the curve is within `t - 0.12` units of the polyline (3.88 units
+for `t = 4`), for every curve whose control points are any `int32` values, and
+no piece is forced by the depth cap. The proof is stated above the code in
+`src/flatten/flatten.c`; in outline: (a) all points stay between the inputs, so
+widened coordinates are below 2^39 and every sum below 2^43; (b) a point made by
+`k` halvings is within `1.5 k` widened of the exact de Casteljau point (30 at
+depth 20); (c) a flat piece is within `T/4 = t - 1` units of its chord
+(quadratic: `B - L = s(1-s)(2 Q1 - Q0 - Q2)`; cubic: `B - L = 3s(1-s)((1-s) e1 +
+s e2)` with `|e|_2 <= |e|_1 = d/3`); (d) the piece built on the noisy points is
+within `sqrt(2) * 30 / 256 = 0.166` units of the exact curve at the same
+parameter; (e) narrowing moves a vertex, and a point of a chord, by at most
+`sqrt(2)/2 = 0.7072`; (f) together `t - 0.1268 < t - 0.12`; (g) after 20
+halvings a piece's exact deviation sum is at most 4 (quadratic) or 12 (cubic)
+widened, the noise at most 160 or 360, against a threshold of 3,072: the cap
+never binds. The proof holds for every tolerance of 2 units and up (the
+threshold being derived from `t`); this library has the one value, 4, and a
+`_Static_assert` refuses a smaller one. `font`, which takes a tolerance as a
+parameter, refuses 1 and below 0 with `GFNT_ERR_INVALID`.
+
+`tests/unit/test_flatten.cpp` checks it against the curve, not against pixels:
+inside every piece the flattener made, thirty-three exact points of the curve
+(Bernstein form in `long double` at dyadic parameters) are measured to that
+piece's segment, on every size class from coordinates below 2^4 up to the whole
+`int32` range, and on the corners of the `int32` square (about 53,000 vertices
+for a cubic); the smallest margin seen is recorded as a test property. Which
+parameter interval a piece covers is recovered by a model of the recursion in the
+test, which must first reproduce the library's vertices exactly. Nine vertex lists
+are pinned from an independent big-integer Python model
+(`tools/gen-hash-vectors.py`, `flatten_model`), which catches a wrong rounding
+rule that stays inside the bound (a floor midpoint at eight extra bits does).
+
+### The revision
+
+The flattener is versioned: `GSHGEOM_FLATTEN_REVISION` and
+`gshgeom_flatten_revision()` (2). It is a number recorded where a rebaseline
+lives (the header of a golden, `tests/flatten_vectors.h`), checked against the
+code, and in no hash: the flattened path's spelling and its format version (1) are
+unchanged, and two revisions that gave equal output hash equal. There is no
+selector for an older revision.
+
+| Revision | What it was |
+|---|---|
+| 1 | `font`'s flattener as ported in story 7, bit for bit: every midpoint floored to 26.6, flat at `4 * t` units, depth 16. The midpoints' error accumulated with the depth, so against the exact curve it reached 2 to 4 units on a tiny curve, 7.7 below 2^16 and 11 to 13 on a large one (13.1 over the `int32` range), where 4 was promised. |
+| 2 | Widened by eight bits, one rounding of each vertex, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12`. Story 7a. |
+
+`tests/flatten_vectors.h` holds 960 curves with the vertices `font`'s flattener
+(revision 2, tolerance 4) produced for them; `tools/vectors-from-font/` records
+how (it is the only place `font` is named; nothing here includes or links it),
+and `tools/gen-hash-vectors.py --check-flatten tests/flatten_vectors.h` runs the
+independent model over all of them. The cross-target hash of the corpus probe
+(`tests/corpus/geometry.hash`) was re-measured for this revision.
 
 ## Along-path parametrization
 

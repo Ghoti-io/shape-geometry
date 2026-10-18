@@ -1,11 +1,13 @@
 /**
  * @file
  *
- * The integer flattener and the flattened path (CAP-3, CAP-13): bit-for-bit
- * agreement with `font`'s flattener on recorded vectors, the tolerance in
- * device pixels against dense exact evaluation, flattening after the map, the
- * structure of the result, the limits, and the hash and the dump pinned by
- * known answers.
+ * The integer flattener, revision 2, and the flattened path (CAP-3, CAP-13):
+ * bit-for-bit agreement with `font`'s flattener (at `font` commit 69d1860) on
+ * recorded vectors, the guarantee (every point of the curve within the
+ * tolerance less 0.12 units of the polyline) against dense exact evaluation on
+ * every size class up to the whole `int32` range, vertex lists pinned by an
+ * independent big-integer model, flattening after the map, the structure of
+ * the result, the limits, and the hash and the dump pinned by known answers.
  *
  * Copyright 2026 by Corey Pennycuff
  */
@@ -98,29 +100,6 @@ GSHGEOM_Device_Path * curve_path(const FlattenVector & v) {
   return dp;
 }
 
-// The exact numerators of a curve at t = j / 1024, in 64-bit integers (the vectors'
-// coordinates are below 2^27, so a numerator is below 2^57); the division by a
-// power of two is exact in a double.
-void exact_curve_point(const FlattenVector & v, int j, double * x, double * y) {
-  const int64_t N = 1024;
-  int64_t s = N - j;
-  int64_t t = j;
-  int64_t nx, ny, den;
-  if (v.kind == 2) {
-    int64_t b0 = s * s, b1 = 2 * s * t, b2 = t * t;
-    nx = b0 * v.p[0][0] + b1 * v.p[1][0] + b2 * v.p[2][0];
-    ny = b0 * v.p[0][1] + b1 * v.p[1][1] + b2 * v.p[2][1];
-    den = N * N;
-  } else {
-    int64_t b0 = s * s * s, b1 = 3 * s * s * t, b2 = 3 * s * t * t, b3 = t * t * t;
-    nx = b0 * v.p[0][0] + b1 * v.p[1][0] + b2 * v.p[2][0] + b3 * v.p[3][0];
-    ny = b0 * v.p[0][1] + b1 * v.p[1][1] + b2 * v.p[2][1] + b3 * v.p[3][1];
-    den = N * N * N;
-  }
-  *x = (double)nx / (double)den;
-  *y = (double)ny / (double)den;
-}
-
 double dist_to_segment(double px, double py, const Dp & a, const Dp & b) {
   double dx = (double)b.x - a.x, dy = (double)b.y - a.y;
   double len2 = dx * dx + dy * dy;
@@ -128,21 +107,6 @@ double dist_to_segment(double px, double py, const Dp & a, const Dp & b) {
   u = u < 0 ? 0 : (u > 1 ? 1 : u);
   double qx = a.x + u * dx - px, qy = a.y + u * dy - py;
   return std::sqrt(qx * qx + qy * qy);
-}
-
-// The largest distance from the exact curve to the flattened polyline.
-double deviation(const FlattenVector & v, const Dp * pts, size_t n) {
-  double worst = 0;
-  for (int j = 0; j <= 1024; j++) {
-    double x, y;
-    exact_curve_point(v, j, &x, &y);
-    double best = 1e300;
-    for (size_t i = 0; i + 1 < n; i++) {
-      best = std::min(best, dist_to_segment(x, y, pts[i], pts[i + 1]));
-    }
-    worst = std::max(worst, best);
-  }
-  return worst;
 }
 
 }  // namespace
@@ -187,16 +151,17 @@ TEST(FlattenAgainstFont, EveryRecordedVectorMatchesBitForBit) {
 }
 
 TEST(FlattenAgainstFont, TheThresholdIsWhereFontPutsIt) {
-  // d = |2 p1 - p0 - p2| summed over axes: 16 stays one line, 18 splits.
+  // d = |2 p1 - p0 - p2| summed over axes: 12 units (4 * (4 - 1)) stays one
+  // line, 14 splits.
   struct Case {
     int32_t p1x, p1y;
     size_t points;
   };
-  const Case cases[] = {{8, 8, 2}, {8, 9, 3}, {9, 8, 3}, {0, 0, 2}, {8, 7, 2}, {8, -8, 2}, {-9, -8, 3}};
+  const Case cases[] = {{6, 6, 2}, {6, 7, 3}, {7, 6, 3}, {0, 0, 2}, {6, 5, 2}, {6, -6, 2}, {-7, -6, 3}};
   for (const Case & c : cases) {
     GSHGEOM_Device_Path * dp = dev_path();
     ASSERT_EQ(gshgeom_device_path_move_to(dp, D(0, 0)), GSHGEOM_OK);
-    ASSERT_EQ(gshgeom_device_path_quadratic_to(dp, D(c.p1x, c.p1y), D(16, 0)), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_device_path_quadratic_to(dp, D(c.p1x, c.p1y), D(12, 0)), GSHGEOM_OK);
     GSHGEOM_Flat_Path * fp = flatten(dp);
     EXPECT_EQ(gshgeom_flat_path_point_count(fp) == 2, c.points == 2) << c.p1x << "," << c.p1y;
     gshgeom_flat_path_destroy(fp);
@@ -208,8 +173,8 @@ TEST(FlattenAgainstFont, TheThresholdIsWhereFontPutsIt) {
     bool one_line;
   };
   // p0 = (0,0), p3 = (30, 0): d1 = |3 c1x - 30|, d2 = |3 c2x - 60|, y = 0.
-  const CCase ccases[] = {{10, 20, true}, {15, 20, true}, {16, 20, false}, {10, 25, true},
-      {10, 26, false}, {5, 20, true}, {4, 20, false}, {10, 15, true}, {10, 14, false}};
+  const CCase ccases[] = {{10, 20, true}, {14, 20, true}, {15, 20, false}, {10, 24, true},
+      {10, 25, false}, {6, 20, true}, {5, 20, false}, {10, 16, true}, {10, 15, false}};
   for (const CCase & c : ccases) {
     GSHGEOM_Device_Path * dp = dev_path();
     ASSERT_EQ(gshgeom_device_path_move_to(dp, D(0, 0)), GSHGEOM_OK);
@@ -220,7 +185,42 @@ TEST(FlattenAgainstFont, TheThresholdIsWhereFontPutsIt) {
     gshgeom_device_path_destroy(dp);
   }
   EXPECT_EQ(GSHGEOM_FLATTEN_TOLERANCE, 4);
-  EXPECT_EQ(GSHGEOM_FLATTEN_MAX_DEPTH, 16);
+  EXPECT_EQ(GSHGEOM_FLATTEN_MAX_DEPTH, 20);
+}
+
+TEST(FlattenRevision, TheFunctionTheMacroAndTheVectorsAgree) {
+  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 2);
+  EXPECT_EQ(gshgeom_flatten_revision(), GSHGEOM_FLATTEN_REVISION);
+  EXPECT_EQ(kFlattenVectorsRevision, gshgeom_flatten_revision())
+      << "tests/flatten_vectors.h was recorded from another revision";
+}
+
+TEST(FlattenRevision, TheRevisionIsInNoHash) {
+  // A flattened path hashes its points, not the revision: the same points hash
+  // the same, whatever produced them (AD-21; the format version stays 1).
+  GSHGEOM_Device_Path * dp = dev_path();
+  ASSERT_EQ(gshgeom_device_path_move_to(dp, D(0, 0)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_device_path_line_to(dp, D(64, 0)), GSHGEOM_OK);
+  GSHGEOM_Flat_Path * fp = flatten(dp);
+  const Dp pts[2] = {D(0, 0), D(64, 0)};
+  // The hash of a path of two points, spelled out here: version 1, kind FLAT,
+  // one subpath, open, two points.
+  uint64_t h = UINT64_C(0xcbf29ce484222325);
+  auto byte = [&h](uint8_t b) { h = (h ^ b) * UINT64_C(0x100000001b3); };
+  auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) byte((v >> (8 * i)) & 0xff); };
+  auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) byte((v >> (8 * i)) & 0xff); };
+  u32(1);
+  u32(0x54414c46u);
+  u64(1);
+  byte(0);
+  u64(2);
+  for (const Dp & q : pts) {
+    u32((uint32_t)q.x);
+    u32((uint32_t)q.y);
+  }
+  EXPECT_EQ(gshgeom_flat_path_hash(fp), h);
+  gshgeom_flat_path_destroy(fp);
+  gshgeom_device_path_destroy(dp);
 }
 
 TEST(FlattenAgainstFont, CoordinatesPastWhatFontsInt32SumsHandleDoNotOverflow) {
@@ -256,50 +256,345 @@ TEST(FlattenAgainstFont, CoordinatesPastWhatFontsInt32SumsHandleDoNotOverflow) {
 // The tolerance
 // ---------------------------------------------------------------------------
 
-TEST(FlattenTolerance, DeviationFromTheExactCurveIsTheThresholdPlusTheIntegerMidpointsDrift) {
-  // What is asserted is what dense exact evaluation of every vector measures.
-  // The recursion stops when a piece deviates by at most the tolerance (4 units,
-  // 1/16 pixel) from its chord, and that holds for the curve through the
-  // integer control points of the piece.  But each integer midpoint is a floor,
-  // so the pieces' control points are not the true curve's, and the drift adds
-  // up with the depth: a small curve stays within about the tolerance, a curve
-  // spanning thousands of pixels strays by up to about three times it.  `font`
-  // flattens exactly this way, bit for bit, and the pure move keeps it, so this
-  // is the definition's real accuracy; the bound for each size is the measured
-  // worst case plus a margin (story 7's notes give the table).
-  struct Bucket {
-    int bits;  // the largest coordinate is below 2^bits
-    double bound;
+// ---------------------------------------------------------------------------
+// The guarantee (flattener revision 2)
+// ---------------------------------------------------------------------------
+//
+// src/flatten/flatten.c proves one property: for every curve with int32
+// control points, every point of the curve is within 4 - 0.12 units of the
+// polyline, and the depth cap never decides a piece.  Pixels cannot test that,
+// so these tests evaluate the curve exactly (the Bernstein form in `long
+// double` at dyadic parameters, which are exact in the type; the only error is
+// the arithmetic of the sum, far below the 0.12 margin) at thirty-three
+// parameters inside every piece the flattener made, and assert the distance to
+// that piece's segment.  A piece-by-piece measure is used because a curve
+// spanning the int32 range is 2^33 units long, so no affordable uniform
+// sampling would see a unit of deviation between two samples; inside a piece
+// the deviation is a smooth function of the parameter.
+//
+// Which parameter interval a piece covers is not part of the library's output,
+// so a model of the recursion in this file (a second statement of the
+// algorithm, in int64) recovers it; the model is first required to produce
+// exactly the library's vertices, so a difference in either is a failure.
+
+namespace {
+
+struct WP {
+  int64_t x, y;
+};
+
+struct Piece {
+  Dp at;
+  uint32_t leaf;
+  int level;
+};
+
+int64_t fdiv(int64_t a, int64_t b) {
+  int64_t q = a / b;
+  if (a % b != 0 && a < 0) {
+    q -= 1;
+  }
+  return q;
+}
+
+WP wmid(WP a, WP b) {
+  return WP{fdiv(a.x + b.x + 1, 2), fdiv(a.y + b.y + 1, 2)};
+}
+
+WP widen(Dp p) {
+  return WP{(int64_t)p.x * 256, (int64_t)p.y * 256};
+}
+
+Dp narrow(WP p) {
+  return Dp{(int32_t)fdiv(p.x + 128, 256), (int32_t)fdiv(p.y + 128, 256)};
+}
+
+const int64_t kThreshold = 4 * 256 * (GSHGEOM_FLATTEN_TOLERANCE - 1);
+const int kDepth = 20;
+
+struct Model {
+  std::vector<Piece> out;
+  int forced = 0;
+};
+
+void model_quad(Model & m, WP p0, WP p1, WP p2, uint32_t leaf, int level) {
+  int64_t sum = std::llabs(2 * p1.x - p0.x - p2.x) + std::llabs(2 * p1.y - p0.y - p2.y);
+  if (sum <= kThreshold || level >= kDepth) {
+    m.forced += sum > kThreshold;
+    m.out.push_back({narrow(p2), leaf, level});
+    return;
+  }
+  WP a = wmid(p0, p1), b = wmid(p1, p2), c = wmid(a, b);
+  model_quad(m, p0, a, c, leaf * 2, level + 1);
+  model_quad(m, c, b, p2, leaf * 2 + 1, level + 1);
+}
+
+void model_cubic(Model & m, WP p0, WP p1, WP p2, WP p3, uint32_t leaf, int level) {
+  int64_t d1 = std::llabs(3 * p1.x - 2 * p0.x - p3.x) + std::llabs(3 * p1.y - 2 * p0.y - p3.y);
+  int64_t d2 = std::llabs(3 * p2.x - p0.x - 2 * p3.x) + std::llabs(3 * p2.y - p0.y - 2 * p3.y);
+  bool flat = d1 <= kThreshold && d2 <= kThreshold;
+  if (flat || level >= kDepth) {
+    m.forced += !flat;
+    m.out.push_back({narrow(p3), leaf, level});
+    return;
+  }
+  WP a = wmid(p0, p1), b = wmid(p1, p2), c = wmid(p2, p3);
+  WP d = wmid(a, b), e = wmid(b, c), mm = wmid(d, e);
+  model_cubic(m, p0, a, d, mm, leaf * 2, level + 1);
+  model_cubic(m, mm, e, c, p3, leaf * 2 + 1, level + 1);
+}
+
+struct Curve {
+  bool cubic;
+  Dp p[4];
+};
+
+Model model_of(const Curve & c) {
+  Model m;
+  if (c.cubic) {
+    model_cubic(m, widen(c.p[0]), widen(c.p[1]), widen(c.p[2]), widen(c.p[3]), 0, 0);
+  } else {
+    model_quad(m, widen(c.p[0]), widen(c.p[1]), widen(c.p[2]), 0, 0);
+  }
+  return m;
+}
+
+GSHGEOM_Device_Path * path_of(const Curve & c) {
+  GSHGEOM_Device_Path * dp = dev_path();
+  EXPECT_EQ(gshgeom_device_path_move_to(dp, c.p[0]), GSHGEOM_OK);
+  if (c.cubic) {
+    EXPECT_EQ(gshgeom_device_path_cubic_to(dp, c.p[1], c.p[2], c.p[3]), GSHGEOM_OK);
+  } else {
+    EXPECT_EQ(gshgeom_device_path_quadratic_to(dp, c.p[1], c.p[2]), GSHGEOM_OK);
+  }
+  return dp;
+}
+
+struct LVec {
+  long double x, y;
+};
+
+LVec evaluate(const Curve & c, long double s) {
+  const long double r = 1.0L - s;
+  long double b[4];
+  if (c.cubic) {
+    b[0] = r * r * r;
+    b[1] = 3 * s * r * r;
+    b[2] = 3 * s * s * r;
+    b[3] = s * s * s;
+  } else {
+    b[0] = r * r;
+    b[1] = 2 * s * r;
+    b[2] = s * s;
+    b[3] = 0;
+  }
+  LVec out{0, 0};
+  for (int i = 0; i < (c.cubic ? 4 : 3); ++i) {
+    out.x += b[i] * c.p[i].x;
+    out.y += b[i] * c.p[i].y;
+  }
+  return out;
+}
+
+long double seg_distance(LVec q, Dp a, Dp b) {
+  const long double dx = (long double)b.x - a.x, dy = (long double)b.y - a.y;
+  const long double len2 = dx * dx + dy * dy;
+  long double along = 0;
+  if (len2 > 0) {
+    along = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2;
+    along = along < 0 ? 0 : (along > 1 ? 1 : along);
+  }
+  const long double ex = q.x - (a.x + along * dx), ey = q.y - (a.y + along * dy);
+  return std::sqrt(ex * ex + ey * ey);
+}
+
+const int kSamples = 32;
+
+long double piece_deviation(const Curve & c, const std::vector<Piece> & pieces) {
+  long double worst = 0;
+  Dp from = c.p[0];
+  for (const Piece & v : pieces) {
+    const long double span = std::ldexp(1.0L, v.level);
+    for (int i = 0; i <= kSamples; ++i) {
+      const long double s = ((long double)v.leaf + (long double)i / kSamples) / span;
+      worst = std::max(worst, seg_distance(evaluate(c, s), from, v.at));
+    }
+    from = v.at;
+  }
+  return worst;
+}
+
+// The pieces tile [0, 1]: each starts where the one before ended.
+bool tiles(const std::vector<Piece> & pieces) {
+  if (pieces.empty() || pieces[0].leaf != 0) {
+    return false;
+  }
+  for (size_t i = 0; i + 1 < pieces.size(); i++) {
+    const Piece &a = pieces[i], &b = pieces[i + 1];
+    if (((uint64_t)a.leaf + 1) << b.level != (uint64_t)b.leaf << a.level) {
+      return false;
+    }
+  }
+  const Piece & last = pieces.back();
+  return (uint64_t)last.leaf + 1 == (uint64_t)1 << last.level;
+}
+
+// 4 - 0.12, with the arithmetic's own slack.
+const long double kBound = (long double)GSHGEOM_FLATTEN_TOLERANCE - 0.12L + 1e-4L;
+
+// Flatten with the library, require the model to agree vertex for vertex,
+// assert the bound; `worst` is the smallest margin seen (the proof says at
+// least 0.12).
+void check(const Curve & c, long double & worst, size_t & most) {
+  GSHGEOM_Device_Path * dp = path_of(c);
+  GSHGEOM_Flat_Path * fp = flatten(dp);
+  ASSERT_NE(fp, nullptr);
+  Model m = model_of(c);
+  const size_t n = gshgeom_flat_path_point_count(fp);
+  const Dp * pts = gshgeom_flat_path_points(fp);
+  ASSERT_EQ(n, m.out.size() + 1) << "the model and the library disagree on the vertex count";
+  for (size_t i = 0; i < m.out.size(); i++) {
+    ASSERT_TRUE(pts[i + 1].x == m.out[i].at.x && pts[i + 1].y == m.out[i].at.y)
+        << "vertex " << i << " differs from the model";
+  }
+  EXPECT_EQ(m.forced, 0) << "the depth cap decided a piece";
+  EXPECT_TRUE(tiles(m.out)) << "the pieces do not tile the parameter interval";
+  const long double d = piece_deviation(c, m.out);
+  EXPECT_LE(d, kBound) << (c.cubic ? "cubic" : "quadratic") << " strays " << (double)d
+                       << " units; first point " << c.p[0].x << "," << c.p[0].y;
+  worst = std::min(worst, (long double)GSHGEOM_FLATTEN_TOLERANCE - d);
+  most = std::max(most, m.out.size());
+  gshgeom_flat_path_destroy(fp);
+  gshgeom_device_path_destroy(dp);
+}
+
+struct Random {
+  uint64_t state;
+  uint64_t next() {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    return state * UINT64_C(0x2545F4914F6CDD1D);
+  }
+  // A coordinate in [-2^bits, 2^bits), the whole int32 range for 31.
+  int32_t coordinate(int bits) {
+    const uint64_t span = (uint64_t)1 << (bits + 1);
+    return (int32_t)((int64_t)(next() % span) - ((int64_t)1 << bits));
+  }
+};
+
+Curve random_curve(Random & r, bool cubic, int bits) {
+  Curve c{cubic, {}};
+  for (int i = 0; i < (cubic ? 4 : 3); ++i) {
+    c.p[i] = D(r.coordinate(bits), r.coordinate(bits));
+  }
+  return c;
+}
+
+Curve corner_curve(Random & r, bool cubic) {
+  Curve c{cubic, {}};
+  for (int i = 0; i < (cubic ? 4 : 3); ++i) {
+    c.p[i] = D((r.next() & 1u) ? INT32_MAX : INT32_MIN, (r.next() & 1u) ? INT32_MAX : INT32_MIN);
+  }
+  return c;
+}
+
+}  // namespace
+
+TEST(FlattenTolerance, EveryPieceOfEveryCurveIsWithinTheToleranceLessAFewHundredthsOfTheCurve) {
+  Random random{UINT64_C(0x9E3779B97F4A7C15)};
+  const int classes[] = {4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 31};
+  for (const int bits : classes) {
+    const int curves = bits <= 16 ? 40 : (bits <= 24 ? 10 : 4);
+    long double worst = 1e9L;
+    size_t most = 0;
+    for (int i = 0; i < curves; ++i) {
+      check(random_curve(random, false, bits), worst, most);
+      check(random_curve(random, true, bits), worst, most);
+    }
+    RecordProperty("smallest_margin_below_2_pow_" + std::to_string(bits), std::to_string((double)worst));
+    EXPECT_GE(worst, 0.12L) << "coordinates below 2^" << bits;
+  }
+}
+
+TEST(FlattenTolerance, TheExtremeCurvesOfTheInt32SquareAreWithinTheTolerance) {
+  Random random{UINT64_C(0x0123456789ABCDEF)};
+  long double worst = 1e9L;
+  size_t most = 0;
+  for (int i = 0; i < 8; ++i) {
+    check(corner_curve(random, false), worst, most);
+    check(corner_curve(random, true), worst, most);
+  }
+  EXPECT_GE(worst, 0.12L);
+  EXPECT_GE(most, 10000u) << "the corners make the longest polylines";
+  // The two vectors the vertex lists below pin, by hand.
+  const Curve q{false, {D(INT32_MIN, INT32_MAX), D(INT32_MAX, INT32_MIN), D(INT32_MIN, INT32_MIN)}};
+  const Curve k{true, {D(INT32_MIN, INT32_MIN), D(INT32_MAX, INT32_MIN), D(INT32_MIN, INT32_MAX), D(INT32_MAX, INT32_MAX)}};
+  check(q, worst, most);
+  check(k, worst, most);
+}
+
+// A sum that wraps in 32 bits must not be taken for a small one: with p0 = p3
+// and one control point 2^24 units away, 3 * 2^24 * 256 is a multiple of 2^32,
+// so a 32-bit d1 (or d2) reads 0 and the curve would be called flat.
+TEST(FlattenTolerance, ASumThatWrapsIn32BitsIsNotTakenForASmallOne) {
+  const int32_t a = 1 << 24;
+  const Curve curves[] = {
+      {true, {D(0, 0), D(a, 0), D(0, 0), D(0, 0)}},
+      {true, {D(0, 0), D(0, 0), D(a, 0), D(0, 0)}},
+      {true, {D(0, 0), D(0, a), D(0, 0), D(0, 0)}},
+      {true, {D(0, 0), D(0, 0), D(0, a), D(0, 0)}},
+      {false, {D(0, 0), D(a, 0), D(0, 0), D(0, 0)}},
   };
-  const Bucket buckets[] = {{4, 4.0}, {8, 5.5}, {16, 8.5}, {28, 12.5}};
-  double worst[4] = {0, 0, 0, 0};
-  unsigned count[4] = {0, 0, 0, 0};
-  for (unsigned i = 0; i < kFlattenVectorCount; i++) {
-    const FlattenVector & v = kFlattenVectors[i];
-    int64_t biggest = 0;
-    for (int k = 0; k < (v.kind == 2 ? 3 : 4); k++) {
-      biggest = std::max<int64_t>(biggest, std::llabs((int64_t)v.p[k][0]));
-      biggest = std::max<int64_t>(biggest, std::llabs((int64_t)v.p[k][1]));
-    }
-    size_t b = 0;
-    while (b < 3 && biggest >= ((int64_t)1 << buckets[b].bits)) {
-      b++;
-    }
-    GSHGEOM_Device_Path * dp = curve_path(v);
+  long double worst = 1e9L;
+  size_t most = 0;
+  for (const Curve & c : curves) {
+    check(c, worst, most);
+    EXPECT_GT(most, 100u);
+  }
+}
+
+// Vertex lists worked out by an independent model: Python, unbounded integers,
+// tools/gen-hash-vectors.py (flatten_model), sharing no code with the C.  Each
+// is the vertex count, the FNV-1a 64 of the vertices, and the first and last
+// vertex.  They pin the rounding rules - ties upward at both the midpoints and
+// the narrowing, floors of negative values - that the distance test is too
+// coarse to notice (a floor midpoint at eight extra bits stays inside the
+// bound).  The first, second and fourth are also the lists `font`'s own test
+// pins for its revision 2 at tolerance 4.
+TEST(FlattenTolerance, TheVertexListsAreWhatTheIndependentModelSays) {
+  struct Known {
+    bool cubic;
+    Dp p[4];
+    size_t count;
+    uint64_t hash;
+    Dp first, last;
+  };
+  const Known known[] = {
+      {false, {D(0, 0), D(3001, 4999), D(8003, 1), D(0, 0)}, 32, UINT64_C(0x5e9fe3e61234e30b), D(190, 303), D(8003, 1)},
+      {false, {D(-1000, -777), D(-3001, 5001), D(777, -9999), D(0, 0)}, 64, UINT64_C(0x4bbe0f147b91fd7d), D(-1061, -602), D(777, -9999)},
+      {false, {D(0, 0), D(400, -1200), D(800, 0), D(0, 0)}, 16, UINT64_C(0x90b0755175c5a1bc), D(50, -141), D(800, 0)},
+      {true, {D(0, 0), D(1000, 3001), D(-2001, 4001), D(5000, -7)}, 59, UINT64_C(0xdd37fa8b0432a31f), D(44, 139), D(5000, -7)},
+      {true, {D(-31, 17), D(-8003, 2999), D(9001, -6001), D(64, -64)}, 98, UINT64_C(0xc7393744da8497e9), D(-213, 85), D(64, -64)},
+      {false, {D(INT32_MIN, INT32_MAX), D(INT32_MAX, INT32_MIN), D(INT32_MIN, INT32_MIN), D(0, 0)}, 32768,
+          UINT64_C(0xf6d691a5fcc16620), D(-2147221512, 2147221507), D(INT32_MIN, INT32_MIN)},
+      {true, {D(INT32_MIN, INT32_MIN), D(INT32_MAX, INT32_MIN), D(INT32_MIN, INT32_MAX), D(INT32_MAX, INT32_MAX)}, 53054,
+          UINT64_C(0xce3c26488e495407), D(-2147287046, -2147483645), D(INT32_MAX, INT32_MAX)},
+      {false, {D(-3, -3), D(-1, -1), D(1, 1), D(0, 0)}, 1, UINT64_C(0x29c7dd317360ac35), D(1, 1), D(1, 1)},
+      {false, {D(0, 0), D(1, 13), D(2, 0), D(0, 0)}, 2, UINT64_C(0x05e8f83edd3d7f31), D(1, 7), D(2, 0)},
+  };
+  for (const Known & k : known) {
+    Curve c{k.cubic, {k.p[0], k.p[1], k.p[2], k.p[3]}};
+    GSHGEOM_Device_Path * dp = path_of(c);
     GSHGEOM_Flat_Path * fp = flatten(dp);
-    double d = deviation(v, gshgeom_flat_path_points(fp), gshgeom_flat_path_point_count(fp));
-    EXPECT_LE(d, buckets[b].bound) << "vector " << i << " coordinates below 2^" << buckets[b].bits;
-    worst[b] = std::max(worst[b], d);
-    count[b]++;
+    ASSERT_EQ(gshgeom_flat_path_point_count(fp), k.count + 1);
+    const Dp * pts = gshgeom_flat_path_points(fp);
+    EXPECT_EQ(points_hash(pts + 1, k.count), k.hash);
+    EXPECT_TRUE(pts[1].x == k.first.x && pts[1].y == k.first.y);
+    EXPECT_TRUE(pts[k.count].x == k.last.x && pts[k.count].y == k.last.y);
     gshgeom_flat_path_destroy(fp);
     gshgeom_device_path_destroy(dp);
   }
-  for (size_t b = 0; b < 4; b++) {
-    EXPECT_GT(count[b], 20u) << "bucket " << b;
-    RecordProperty("worst_deviation_below_2_pow_" + std::to_string(buckets[b].bits), std::to_string(worst[b]));
-  }
-  // The smallest curves meet the tolerance itself.
-  EXPECT_LE(worst[0], (double)GSHGEOM_FLATTEN_TOLERANCE);
 }
 
 TEST(FlattenTolerance, FlatteningHappensAfterTheMap) {
@@ -337,7 +632,7 @@ TEST(FlattenTolerance, FlatteningHappensAfterTheMap) {
       }
       worst = std::max(worst, best);
     }
-    EXPECT_LE(worst, (double)GSHGEOM_FLATTEN_TOLERANCE + 0.5) << "scale " << scale;
+    EXPECT_LE(worst, (double)GSHGEOM_FLATTEN_TOLERANCE - 0.12 + 1e-3) << "scale " << scale;
     gshgeom_flat_path_destroy(fp);
   }
   gshgeom_path_destroy(mp);
