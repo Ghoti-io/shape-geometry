@@ -84,6 +84,41 @@ aligned to the smallest exponent and added in a 7,168-bit two's complement
 accumulator. Nothing is rounded, so subnormals and values near `DBL_MAX` are
 exact. The expansion is in the raw coordinates (no difference is formed first).
 
+## The 26.6 device path and the flattener
+
+`device.h` is the exit from model space. `gshgeom_round_26_6` is the one
+conversion from `double`, `floor(x * 64 + 0.5)`, round half up: `x * 64` is
+exact, so the floor and the fraction are exact, and no addition can round (the
+double expression `floor(t + 0.5)` is wrong for the one `t` just below a half).
+A result outside `int32` is `ERR_LIMIT`, never wrapped and never clipped;
+clipping in `double` is a sink's decision. The device path is a builder over
+`int32` points (move, line, quadratic, cubic, close; no weights, because 26.6 has
+no rational form), and a verb after a close stores a move at the closed
+subpath's start, so every stored subpath begins with a move.
+`gshgeom_device_path_from_model` maps each point in `double` (`gshgeom_map_apply_point`)
+and rounds it; every control point must round into range. A rational curve is
+subdivided in `double` after the map, in homogeneous coordinates at the
+parameter 1/2, until its projected control points are within 1/32 pixel of the
+chord *segment* (convexity of positive weights makes that a bound), and becomes
+lines.
+
+`flatten.h` is `font`'s integer flattener, kept exactly: split at the midpoint
+(each midpoint the floor of the half sum of integers) until `|2 p1 - p0 - p2|`,
+or both `|3 p1 - 2 p0 - p3|` and `|3 p2 - p0 - 2 p3|`, summed over both axes, is
+at most four tolerances (the tolerance is 4 units, 1/16 pixel, and a constant:
+AD-12 makes it part of the definition). It emits the end point of every line,
+duplicates included. The recursion bounds the deviation of the *integer*
+control polygon's curve; the floor of each midpoint then moves the pieces, and
+the drift adds up with the depth, so the deviation from the true curve is the
+threshold for small curves and up to about three times it for curves of
+thousands of pixels (`tests/unit/test_flatten.cpp` measures it, and the story's
+notes give the table). The output is a flattened path: polylines, each with a
+closed flag, the closing line implicit.
+
+`tests/flatten_vectors.h` holds 960 curves with the lines `font`'s own functions
+produced for them; `tools/vectors-from-font/` records how (it is the only place
+`font` is named; nothing here includes or links it).
+
 ## Tests and gates
 
 `make test` runs the unit tests and the gates; `make check-planted` builds

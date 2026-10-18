@@ -44,6 +44,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 static GSHGEOM_Hash total;
 static unsigned long count;
@@ -88,6 +89,14 @@ static void feed_point(GSHGEOM_Point p, int dim) {
 }
 
 static void feed_int(int v) {
+#ifdef SHAPE_GEOM_PLANT_BIT_INT
+  /* A late result of story 7's rounding, device path or flattener. */
+  static int flipped;
+  if (count >= 160000 && !flipped) {
+    flipped = 1;
+    v ^= 1;
+  }
+#endif
   count++;
   gshgeom_hash_u32(&total, (uint32_t)v);
 }
@@ -387,6 +396,195 @@ int main(void) {
       feed_int(s);
       if (gshgeom_orient3d(o, big1, big2, big3, &s) != GSHGEOM_OK) return fail("orient3d failed");
       feed_int(s);
+    }
+  }
+
+  /* Story 7: the rounding rule, the device path and the integer flattener. */
+  {
+    /* The rule, on values around the half-way points and the range limit. */
+    for (int i = 0; i < 6000; i++) {
+      double x;
+      switch (i % 3) {
+      case 0:
+        x = coord() * (double)(1 << (i % 24));
+        break;
+      case 1:
+        x = ((double)((int64_t)(next() >> 32) - ((int64_t)1 << 31)) + 0.5) / 64.0;
+        break;
+      default:
+        x = ((double)(int64_t)(next() >> 40) - 8388608.0) / 64.0 + 1.0 / 128.0;
+        break;
+      }
+      int32_t v = 0;
+      GSHGEOM_Result r = gshgeom_round_26_6(x, &v);
+      feed_int((int)r);
+      if (r == GSHGEOM_OK) {
+        feed_int((int)v);
+      }
+    }
+    /* The edges: half-way points, the range limit and the neighbours of each,
+     * one unit in the last place either side. */
+    {
+      static const double edges[] = {2147483647.0, 2147483647.5, 2147483646.5,
+          -2147483648.0, -2147483648.5, -2147483649.0, 0.5, -0.5, 1.5, -1.5,
+          0.49999999999999994, -0.49999999999999994, 4294967296.0, 0.0};
+      for (unsigned e = 0; e < sizeof edges / sizeof edges[0]; e++) {
+        for (int d = -1; d <= 1; d++) {
+          double x = edges[e] / 64.0;
+          /* One unit in the last place of the magnitude, either sign: the
+           * sign bit is separate, so adding to the pattern changes |x|. */
+          uint64_t bits = gshgeom_f64_bits(x);
+          if (x == 0.0) {
+            bits = (d < 0) ? UINT64_C(0x8000000000000001) : (d > 0 ? 1u : 0u);
+          } else {
+            bits += (uint64_t)(int64_t)d;
+          }
+          double y;
+          memcpy(&y, &bits, sizeof y);
+          int32_t v = 0;
+          GSHGEOM_Result r = gshgeom_round_26_6(y, &v);
+          feed_int((int)r);
+          if (r == GSHGEOM_OK) {
+            feed_int((int)v);
+          }
+        }
+      }
+    }
+    /* Random 2D paths of every verb under random maps, mapped, rounded and
+     * flattened: the device path's and the flattened path's hashes. */
+    for (int i = 0; i < 300; i++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("path create failed");
+      }
+      GSHGEOM_Point m0 = random_point(2);
+      GSHGEOM_Result r = gshgeom_path_move_to(path, m0);
+      int steps = 3 + (int)(next() % 8);
+      for (int s = 0; s < steps && r == GSHGEOM_OK; s++) {
+        double w3[3];
+        double w4[4];
+        for (int k = 0; k < 4; k++) {
+          w4[k] = weight();
+        }
+        for (int k = 0; k < 3; k++) {
+          w3[k] = weight();
+        }
+        GSHGEOM_Point q1 = random_point(2);
+        GSHGEOM_Point q2 = random_point(2);
+        GSHGEOM_Point q3 = random_point(2);
+        switch (next() % 7) {
+        case 0:
+          r = gshgeom_path_line_to(path, q1);
+          break;
+        case 1:
+          r = gshgeom_path_quadratic_to(path, q1, q2);
+          break;
+        case 2:
+          r = gshgeom_path_cubic_to(path, q1, q2, q3);
+          break;
+        case 3:
+          r = gshgeom_path_rational_quadratic_to(path, q1, q2, w3);
+          break;
+        case 4:
+          r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4);
+          break;
+        case 5:
+          r = gshgeom_path_close(path);
+          break;
+        default:
+          r = gshgeom_path_move_to(path, q1);
+          break;
+        }
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a path step was refused");
+      }
+      GSHGEOM_Map map;
+      switch (i % 4) {
+      case 0: {
+        /* Drawn into variables: the order of a call's arguments is unspecified
+         * (the first run of this section printed one hash on x86 and another on
+         * every other target). */
+        double sx = weight() * 16.0;
+        double sy = weight() * 16.0;
+        r = gshgeom_map_scale(2, sx, sy, 1.0, &map);
+        break;
+      }
+      case 1: {
+        GSHGEOM_Map rot, sc;
+        double angle = coord() * 20.0;
+        double sx = weight() * 8.0;
+        double sy = weight() * 8.0;
+        r = gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, angle, &rot);
+        if (r == GSHGEOM_OK) {
+          r = gshgeom_map_scale(2, sx, sy, 1.0, &sc);
+        }
+        if (r == GSHGEOM_OK) {
+          r = gshgeom_map_compose(&sc, &rot, &map);
+        }
+        break;
+      }
+      case 2: {
+        double scale = weight() * 12.0;
+        double tx = coord();
+        double ty = coord();
+        r = gshgeom_map_design_to_model(scale, tx, ty, &map);
+        break;
+      }
+      default:
+        r = gshgeom_map_scale(2, 0x1p20, 0x1p20, 1.0, &map);
+        break;
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a map was refused");
+      }
+      GSHGEOM_Device_Path * dp = NULL;
+      r = gshgeom_device_path_from_model(path, &map, NULL, NULL, &dp);
+      feed_int((int)r);
+      if (r == GSHGEOM_OK) {
+        count++;
+        gshgeom_hash_u64(&total, gshgeom_device_path_hash(dp));
+        GSHGEOM_Flat_Path * fp = NULL;
+        r = gshgeom_device_path_flatten(dp, NULL, NULL, &fp);
+        feed_int((int)r);
+        if (r == GSHGEOM_OK) {
+          count++;
+          gshgeom_hash_u64(&total, gshgeom_flat_path_hash(fp));
+          gshgeom_flat_path_destroy(fp);
+        }
+        gshgeom_device_path_destroy(dp);
+      }
+      gshgeom_path_destroy(path);
+    }
+    /* The flattener on integer curves across scales, as font would see them. */
+    for (int i = 0; i < 400; i++) {
+      GSHGEOM_Device_Path * dp = NULL;
+      if (gshgeom_device_path_create(NULL, NULL, &dp) != GSHGEOM_OK) {
+        return fail("device path create failed");
+      }
+      int bits = 4 + (int)(next() % 22);
+      int64_t span = (int64_t)1 << (bits + 1);
+      GSHGEOM_Device_Point q[4];
+      for (int k = 0; k < 4; k++) {
+        q[k].x = (int32_t)((int64_t)(next() % (uint64_t)span) - ((int64_t)1 << bits));
+        q[k].y = (int32_t)((int64_t)(next() % (uint64_t)span) - ((int64_t)1 << bits));
+      }
+      GSHGEOM_Result r = gshgeom_device_path_move_to(dp, q[0]);
+      if (r == GSHGEOM_OK) {
+        r = (i & 1) ? gshgeom_device_path_quadratic_to(dp, q[1], q[2])
+                    : gshgeom_device_path_cubic_to(dp, q[1], q[2], q[3]);
+      }
+      GSHGEOM_Flat_Path * fp = NULL;
+      if (r == GSHGEOM_OK) {
+        r = gshgeom_device_path_flatten(dp, NULL, NULL, &fp);
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a curve was not flattened");
+      }
+      count++;
+      gshgeom_hash_u64(&total, gshgeom_flat_path_hash(fp));
+      gshgeom_flat_path_destroy(fp);
+      gshgeom_device_path_destroy(dp);
     }
   }
 

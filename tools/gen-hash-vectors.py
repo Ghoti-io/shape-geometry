@@ -312,6 +312,149 @@ def orient3d_cases():
     return cases
 
 
+# --- story 7: the 26.6 rounding, the device path, the flattened path ----------
+INT32_MIN, INT32_MAX = -(1 << 31), (1 << 31) - 1
+
+
+def round_ref(x):
+    """floor(x * 64 + 1/2) in exact rational arithmetic; None outside int32."""
+    r = math.floor(Fraction(x) * 64 + Fraction(1, 2))
+    return r if INT32_MIN <= r <= INT32_MAX else None
+
+
+def round_naive(x):
+    """The same expression evaluated in double: floor(fl(fl(x * 64) + 0.5))."""
+    return math.floor(x * 64.0 + 0.5)
+
+
+def round_cases():
+    cases = []
+    half = 0.5 - 2.0 ** -54
+    ks = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 100, -100, 1000, -1000, (1 << 20) + 1, -(1 << 20) - 1,
+          (1 << 30) - 1, -(1 << 30), INT32_MAX - 1, INT32_MAX, INT32_MIN, INT32_MIN + 1,
+          INT32_MAX + 1, INT32_MIN - 1]
+    for k in ks:
+        x = (k + 0.5) / 64.0
+        cases += [math.nextafter(x, -math.inf), x, math.nextafter(x, math.inf)]
+        y = k / 64.0
+        cases += [math.nextafter(y, -math.inf), y, math.nextafter(y, math.inf)]
+    cases += [half / 64.0, -half / 64.0, (1 + half) / 64.0, (-1 + half) / 64.0, (-1 - half) / 64.0,
+              0.5 / 64.0, -0.5 / 64.0, 1.5 / 64.0, -1.5 / 64.0, 0.25 / 64.0, 0.75 / 64.0, -0.75 / 64.0]
+    cases += [0.0, -0.0, 2.0 ** -1074, -(2.0 ** -1074), 2.0 ** -1022, 2.0 ** -200, 2.0 ** -8, -(2.0 ** -8),
+              1.0, -1.0, 0.1, -0.1, 33554432.0, -33554432.0, 33554431.984375, -33554432.015625,
+              1e10, -1e10, 1.7976931348623157e308, -1.7976931348623157e308, 2.0 ** 1000, -(2.0 ** 1000)]
+    rng = random.Random(20261020)
+    for _ in range(600):
+        e = rng.randrange(-30, 27)
+        x = math.ldexp(rng.randrange(1 << 52, 1 << 53), e - 52)
+        cases.append(-x if rng.random() < 0.5 else x)
+    for _ in range(150):
+        # within a few units of a half-way point, in the last bits of the double
+        k = rng.randrange(-(1 << 24), 1 << 24)
+        x = (k + 0.5) / 64.0
+        for _ in range(rng.randrange(0, 4)):
+            x = math.nextafter(x, math.inf if rng.random() < 0.5 else -math.inf)
+        cases.append(x)
+    return cases
+
+
+# Device path: the same sequence the test makes through the builder.  Verbs:
+# M 0, L 1, Q 2, C 3, Z 4; a verb after a close stores a move first.
+DEV_VERB = {"M": 0, "L": 1, "Q": 2, "C": 3, "Z": 4}
+DEV_FIXTURE = [
+    ("M", [(64, -128)]),
+    ("L", [(192, 256)]),
+    ("Q", [(320, 416), (448, 512)]),
+    ("C", [(576, 640), (720, 768), (832, -896)]),
+    ("Z", []),
+    ("M", [(64, -128)]),  # the move the builder stores for the line below
+    ("L", [(-2147483648, 2147483647)]),
+    ("Z", []),
+]
+
+
+def dev_bytes(els):
+    out = u32(1) + u32(0x50564544) + u64(len(els))
+    for name, pts in els:
+        out += u8(DEV_VERB[name])
+        for x, y in pts:
+            out += i32(x) + i32(y)
+    return out
+
+
+def hex32(v):
+    return "%08x" % (v & 0xFFFFFFFF)
+
+
+def dev_dump(els):
+    lines = ["gshgeom.device-path 1 elements=%d hash=%016x" % (len(els), fnv(dev_bytes(els)))]
+    for name, pts in els:
+        lines.append(name + "".join(" %s %s" % (hex32(x), hex32(y)) for x, y in pts))
+    return "\n".join(lines) + "\n"
+
+
+# Flattened path: (closed, [points]) per subpath.
+FLAT_FIXTURE = [
+    (0, [(0, 0), (64, 0), (128, 0), (192, 3)]),
+    (1, [(-1000, 1000), (1100, 1000), (-5, -7)]),
+    (0, [(5, 5)]),
+]
+
+
+def flat_bytes(subs):
+    out = u32(1) + u32(0x54414C46) + u64(len(subs))
+    for closed, pts in subs:
+        out += u8(closed) + u64(len(pts))
+        for x, y in pts:
+            out += i32(x) + i32(y)
+    return out
+
+
+def flat_dump(subs):
+    npts = sum(len(p) for _, p in subs)
+    lines = ["gshgeom.flat-path 1 subpaths=%d points=%d hash=%016x" % (len(subs), npts, fnv(flat_bytes(subs)))]
+    for closed, pts in subs:
+        lines.append("S closed=%d points=%d" % (closed, len(pts)))
+        for x, y in pts:
+            lines.append("P %s %s" % (hex32(x), hex32(y)))
+    return "\n".join(lines) + "\n"
+
+
+# A model path under a map to the device: all numbers are dyadic, so the map's
+# arithmetic is exact in double and the reference is exact rational arithmetic.
+MODEL_DEV_PATH = [
+    ("M", [(0.0078125, -0.0078125)]),
+    ("L", [(1.5, -2.25)]),
+    ("Q", [(3.0, 4.5), (5.0, 1.0)]),
+    ("C", [(6.0, 7.0), (8.25, 9.0), (10.0, 11.5)]),
+    ("Z", []),
+    ("L", [(2.5, 3.5)]),
+]
+MODEL_DEV_MAP = ([2.0, 0.0, 0.0, 4.0], [0.2421875, 0.0234375])
+
+
+def model_to_device():
+    m, t = MODEL_DEV_MAP
+    els = []
+    closed = False
+    start = None
+    for name, pts in MODEL_DEV_PATH:
+        dev = []
+        for x, y in pts:
+            fx = Fraction(m[0]) * Fraction(x) + Fraction(m[1]) * Fraction(y) + Fraction(t[0])
+            fy = Fraction(m[2]) * Fraction(x) + Fraction(m[3]) * Fraction(y) + Fraction(t[1])
+            rx, ry = round_ref(float(fx)), round_ref(float(fy))
+            assert float(fx) == fx and float(fy) == fy and rx is not None and ry is not None
+            dev.append((rx, ry))
+        if name == "M":
+            start = dev[0]
+        if closed and name in ("L", "Q", "C"):
+            els.append(("M", [start]))
+        closed = name == "Z"
+        els.append((name, dev))
+    return els
+
+
 def main():
     o = sys.stdout
     o.write("// Generated by tools/gen-hash-vectors.py.  Do not edit.\n")
@@ -379,6 +522,32 @@ def main():
         o.write("    {{%s}, {%s}, {%s}, {%s}, %d},\n" % tuple(
             [", ".join(hexf(v) for v in p) for p in (a, b, c, d)] + [exact3(a, b, c, d)]))
     o.write("};\n")
+
+    # --- story 7 ---
+    cases = round_cases()
+    o.write("\nstruct RoundCase {\n  double x;\n  int limit;  // 1 when the result does not fit an int32\n  std::int32_t value;\n};\n")
+    o.write("static const unsigned kNaiveRoundWrong = %d;\n" % sum(
+        1 for x in cases if round_ref(x) is not None and round_naive(x) != round_ref(x)))
+    o.write("static const RoundCase kRoundCases[] = {\n")
+    for x in cases:
+        r = round_ref(x)
+        o.write("    {%s, %d, %d},\n" % (hexf(x), 1 if r is None else 0, 0 if r is None else r))
+    o.write("};\n")
+    o.write("static const double kNaiveRoundWrongInput = %s;\n" % hexf((0.5 - 2.0 ** -54) / 64.0))
+    assert round_naive((0.5 - 2.0 ** -54) / 64.0) == 1 and round_ref((0.5 - 2.0 ** -54) / 64.0) == 0
+    def c64(name, value):
+        o.write("static const std::uint64_t %s = UINT64_C(0x%016x);\n" % (name, value))
+
+    c64("kDevicePathHash", fnv(dev_bytes(DEV_FIXTURE)))
+    c64("kFlatPathHash", fnv(flat_bytes(FLAT_FIXTURE)))
+    md = model_to_device()
+    c64("kModelDeviceHash", fnv(dev_bytes(md)))
+    for name, text in (("kDevicePathDump", dev_dump(DEV_FIXTURE)), ("kFlatPathDump", flat_dump(FLAT_FIXTURE)),
+                       ("kModelDeviceDump", dev_dump(md))):
+        o.write("static const char %s[] =\n" % name)
+        for line in text.splitlines():
+            o.write('    "%s\\n"\n' % line)
+        o.write("    ;\n")
     o.write("\n#endif\n")
 
 

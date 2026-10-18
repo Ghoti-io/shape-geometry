@@ -139,6 +139,8 @@ TEST(Core, LimitsDefaultsAndZeroMeansDefault) {
   gshgeom_limits_default(&l);
   EXPECT_EQ(l.max_elements, GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS);
   EXPECT_EQ(GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS, (size_t)4194304);
+  EXPECT_EQ(l.max_points, GSHGEOM_LIMITS_DEFAULT_MAX_POINTS);
+  EXPECT_EQ(GSHGEOM_LIMITS_DEFAULT_MAX_POINTS, (size_t)4194304);
   for (unsigned char b : l._reserved) {
     EXPECT_EQ(b, 0);
   }

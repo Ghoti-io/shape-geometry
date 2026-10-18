@@ -30,6 +30,8 @@
 #include <ghoti.io/shape-geometry/allocator.h>
 #include <ghoti.io/shape-geometry/core.h>
 #include <ghoti.io/shape-geometry/curve.h>
+#include <ghoti.io/shape-geometry/device.h>
+#include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/hash.h>
 #include <ghoti.io/shape-geometry/macros.h>
 #include <ghoti.io/shape-geometry/map.h>

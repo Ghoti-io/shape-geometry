@@ -51,6 +51,29 @@ Story 6 adds (ids start with x-, o-, m-, mh-, md- and route-):
            value test, the grid it returns
   mh-, md- the map's hash fields and dump text
 
+Story 7 adds (ids start with r-, dp-, b-, h-, fm-, rat-, fl- and fh-):
+
+  r-       the rounding rule: the bounds of the range and whether each edge is
+           inclusive, the half-way comparison, the double expression `floor(t +
+           0.5)` that is wrong at 0.5 - 2^-54, round-half-away and truncation,
+           the factor 64, a write on failure, the refusal of NaN
+  dp-      the point function: the dimension, which coordinate is rounded
+  b-       the device path builder: the verb codes, the limit and the all-or-
+           nothing move, what a close stores, the verb after a close, readback,
+           release and allocation failure
+  h-       the device path's hash fields and dump text
+  fm-      a model path under a map: the dimensions, the order of elements, the
+           mapped points of each verb, the leak on failure, the range rule
+  rat-     the rational subdivision: the tolerance, the flatness test, the
+           clamp to the chord's segment, the de Casteljau halves, the weights
+  fl-      the flattener: the midpoint's floor, the deviation sums term by term,
+           the threshold, the order and the propagation of errors, the limit,
+           the subpath bookkeeping
+  fh-      the flattened path's readback, hash fields and dump text
+
+A plant of kind ``srch`` changes an internal header under src/ and rebuilds
+what includes it (device.c and flatten.c).
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 
@@ -93,6 +116,47 @@ changes no result, cannot be seen by any test:
   - the check of the first write in ``gshgeom_map_dump`` as a check: every
     later write is checked too, and a stream that failed once fails again, so
     the header's check only changes which line reports the error
+  - ``RATIONAL_MAX_DEPTH`` and ``GSHGEOM_FLATTEN_MAX_DEPTH`` raised, and the
+    depth test of ``quad`` and ``cubic`` made ``< 0``, or ``depth - 1`` left as
+    ``depth``: the flat test is met long before the cap (the deviation falls by
+    a factor of four a level and the floor's drift settles), so the cap is
+    reached by no input within the int32 range; lowering it is planted
+  - the guard that the first flattened element is a move: the builder
+    guarantees it
+  - the guard `path->el_n > path->max_elements` in `append` (the element count
+    never exceeds the limit, so the subtraction after it cannot wrap), and the
+    `grown > SIZE_MAX / size` test of `gshgeom_grow` (an array of that size is
+    refused by the allocator long before; the doubling test above it is the one
+    a caller can reach)
+  - the check of one write in a dump other than the first (the newline after a
+    device path element, the numbers of a device path element, a flattened path's
+    subpath line or point line): a
+    glibc stream that fails a write keeps the data it could not write, so the
+    final `fflush` fails too, and the dump returns ``ERR_IO`` from there; only a
+    libc whose streams discard failed data would show the difference. The first
+    write's check and the flush are planted, and the first write is the one a
+    read-only stream fails
+  - the `!map` in `gshgeom_device_path_from_model`'s first test (the map check
+    that follows refuses NULL with the same result), the result of
+    `gshgeom_map_apply_point` in `map_scaled` (a model point and a map that were
+    both validated cannot give a non-finite point: 2^100 times 2^100 is far
+    below DBL_MAX), the result of `gshgeom_device_path_element` in the
+    flattener (the index is in range), and the `!out` test of
+    `gshgeom_path_flatten` (the flattener it calls refuses NULL the same way,
+    after wasting the conversion)
+  - ``fp->sub_n--`` after a refused first point of a subpath: the whole result
+    is freed on any failure
+  - the explicit ``len2`` guard's comparison (``> 0`` against ``!= 0``) and the
+    dropped ``map_check`` in ``gshgeom_device_point``: the callee repeats them
+  - the ``p[0]`` against ``p[1]`` of a move in ``convert_element``: for a move
+    the two are the same point
+  - ``grow.h``'s starting capacity, doubling and the ``*cap`` update: they
+    change only how often the allocator is called (the pointer update and the
+    refusal are planted)
+  - ``add_pt`` without the stored move: the array has slack up to its capacity
+    of 16 and a plain run cannot see a store past the need (``make test-asan``
+    is the instrument for it, and the sweep in ``DevicePathAllocation`` grows
+    the arrays through it)
   - the 200-step cap of ``bisect`` as a cap: it is reached only for roots
     closer than 2^-200 to an end, where 2^-200 is not a double of interest
 """
@@ -131,6 +195,9 @@ JOBS = int(env("PLANT_JOBS", "4"))
 # own plants): for re-running the few that a change to a test touched.  The
 # control always runs.  Unset, every plant runs, which is what `make test` wants.
 ONLY = os.environ.get("PLANT_ONLY")
+# PLANT_PROBE_ONLY=1: the control and the probe's own plants, no source plant
+# (for re-running the probe's gate after a change to the probe alone).
+PROBE_ONLY = bool(os.environ.get("PLANT_PROBE_ONLY"))
 
 
 def test_object(test):
@@ -203,7 +270,7 @@ PLANTS = [
      "    for (size_t k = verb_points(e->verb) - 1; k < verb_points(e->verb); k++) {\n      hash_point(&h, &path->pt[e->point + k], path->dim);", PT),
     ("path-weights-first-only", "src", P, "    for (size_t k = 0; k < verb_weights(e->verb); k++) {\n      gshgeom_hash_f64",
      "    for (size_t k = 0; k < (verb_weights(e->verb) ? 1u : 0u); k++) {\n      gshgeom_hash_f64", PT),
-    ("verb-code-quadratic", "hdr", PH, "GSHGEOM_VERB_QUADRATIC = 2,", "GSHGEOM_VERB_QUADRATIC = 7,", PT),
+    ("verb-code-quadratic", "hdr", PH, "GSHGEOM_VERB_QUADRATIC = 2,", "GSHGEOM_VERB_QUADRATIC = 9,", PT),
     ("verb-code-close", "hdr", PH, "GSHGEOM_VERB_CLOSE = 6,", "GSHGEOM_VERB_CLOSE = 8,", PT),
     ("kind-code-cubic", "hdr", CH, "GSHGEOM_CURVE_CUBIC = 2,", "GSHGEOM_CURVE_CUBIC = 6,", CT + PT),
 
@@ -290,7 +357,7 @@ PLANTS = [
     ("limit-off-by-one-low", "src", P, "if (path->el_n >= path->max_elements) {", "if (path->el_n + 1 >= path->max_elements) {", PT),
     ("zero-limit-is-zero", "src", P, "path->max_elements = (limits && limits->max_elements)\n      ? limits->max_elements\n      : GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS;",
      "path->max_elements = limits ? limits->max_elements\n      : GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS;", PT),
-    ("default-limit-const", "hdr", KH, "((size_t)1 << 22)", "((size_t)1 << 21)", PT),
+    ("default-limit-const", "hdr", KH, "#define GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS ((size_t)1 << 22)", "#define GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS ((size_t)1 << 21)", PT),
     ("close-without-move", "src", P, "GSHGEOM_Result gshgeom_path_close(GSHGEOM_Path * path) {\n  if (!path || !path->has_current) {",
      "GSHGEOM_Result gshgeom_path_close(GSHGEOM_Path * path) {\n  if (!path) {", PT),
     ("line-without-move", "src", P, "GSHGEOM_Result gshgeom_path_line_to(GSHGEOM_Path * path, GSHGEOM_Point p) {\n  if (!path || !path->has_current) {",
@@ -590,6 +657,308 @@ FLAG_PLANTS = [
 ]
 
 
+# --- story 7: the rounding, the device path, the flattener ---------------------
+DV = "src/device/device.c"
+FL = "src/flatten/flatten.c"
+GR = "src/core/grow.h"
+DH = "include/ghoti.io/shape-geometry/device.h"
+FH = "include/ghoti.io/shape-geometry/flatten.h"
+DT = ["testDevice"]
+FT = ["testFlatten"]
+DFT = ["testDevice", "testFlatten"]
+
+PLANTS += [
+    # --- the rounding rule ----------------------------------------------------
+    ("r-max-bound", "src", DV, "#define ROUND_T_MAX 2147483647.5", "#define ROUND_T_MAX 2147483648.5", DT),
+    ("r-max-bound-low", "src", DV, "#define ROUND_T_MAX 2147483647.5", "#define ROUND_T_MAX 2147483646.5", DT),
+    ("r-min-bound", "src", DV, "#define ROUND_T_MIN (-2147483648.5)", "#define ROUND_T_MIN (-2147483649.5)", DT),
+    ("r-min-bound-high", "src", DV, "#define ROUND_T_MIN (-2147483648.5)", "#define ROUND_T_MIN (-2147483647.5)", DT),
+    ("r-max-inclusive", "src", DV, "if (!(t < ROUND_T_MAX) || t < ROUND_T_MIN) {", "if (!(t <= ROUND_T_MAX) || t < ROUND_T_MIN) {", DT),
+    ("r-min-inclusive", "src", DV, "if (!(t < ROUND_T_MAX) || t < ROUND_T_MIN) {", "if (!(t < ROUND_T_MAX) || t <= ROUND_T_MIN) {", DT),
+    ("r-max-unchecked", "src", DV, "if (!(t < ROUND_T_MAX) || t < ROUND_T_MIN) {", "if (t < ROUND_T_MIN) {", DT),
+    ("r-min-unchecked", "src", DV, "if (!(t < ROUND_T_MAX) || t < ROUND_T_MIN) {", "if (!(t < ROUND_T_MAX)) {", DT),
+    ("r-half-goes-down", "src", DV, "double r = (t - f) >= 0.5 ? f + 1.0 : f;", "double r = (t - f) > 0.5 ? f + 1.0 : f;", DT),
+    ("r-half-always-up", "src", DV, "double r = (t - f) >= 0.5 ? f + 1.0 : f;", "double r = (t - f) >= 0.25 ? f + 1.0 : f;", DT),
+    ("r-double-expression", "src", DV, "double r = (t - f) >= 0.5 ? f + 1.0 : f;", "double r = f * 0.0 + gmath_floor(t + 0.5);", DT),
+    ("r-half-away-from-zero", "src", DV, "double r = (t - f) >= 0.5 ? f + 1.0 : f;", "double r = f * 0.0 + gmath_round(t);", DT),
+    ("r-truncated", "src", DV, "double f = gmath_floor(t);", "double f = (double)(int64_t)t;", DT),
+    ("r-ceiling", "src", DV, "double r = (t - f) >= 0.5 ? f + 1.0 : f;", "double r = (t - f) > 0.0 ? f + 1.0 : f;", DT),
+    ("r-scale", "src", DV, "return round_scaled(x * SCALE, out);", "return round_scaled(x * 32.0, out);", DT),
+    ("r-writes-on-limit", "src", DV, "    return GSHGEOM_ERR_LIMIT;\n  }\n  double f = gmath_floor(t);",
+     "    *out = 0;\n    return GSHGEOM_ERR_LIMIT;\n  }\n  double f = gmath_floor(t);", DT),
+    ("r-nan-not-refused", "src", DV, "if (!out || !((x - x) == 0.0)) {", "if (!out) {", DT),
+    ("r-out-unchecked", "src", DV, "if (!out || !((x - x) == 0.0)) {", "if (!((x - x) == 0.0)) {", DT),
+    ("r-infinity-as-finite", "src", DV, "if (!out || !((x - x) == 0.0)) {", "if (!out || x != x) {", DT),
+    ("r-device-one", "hdr", DH, "#define GSHGEOM_DEVICE_ONE 64", "#define GSHGEOM_DEVICE_ONE 32", DT),
+
+    # --- the point function ---------------------------------------------------
+    ("dp-no-2d-check", "src", DV, "  if (map->dim != 2) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Point m;",
+     "  GSHGEOM_Point m;", DT),
+    ("dp-y-from-x", "src", DV, "r = gshgeom_round_26_6(m.y, &d.y);", "r = gshgeom_round_26_6(m.x, &d.y);", DT),
+    ("dp-x-from-y", "src", DV, "r = gshgeom_round_26_6(m.x, &d.x);", "r = gshgeom_round_26_6(m.y, &d.x);", DT),
+    ("dp-writes-on-failure", "src", DV, "  if (r == GSHGEOM_OK) {\n    *out = d;\n  }\n  return r;\n}", "  *out = d;\n  return r;\n}", DT),
+    ("dp-null-out", "src", DV, "GSHGEOM_Device_Point * out) {\n  if (!map || !out) {", "GSHGEOM_Device_Point * out) {\n  if (!map) {", DT),
+
+    # --- the device path builder ----------------------------------------------
+    ("b-verb-move", "hdr", DH, "GSHGEOM_DEVICE_MOVE = 0,", "GSHGEOM_DEVICE_MOVE = 8,", DT),
+    ("b-verb-line", "hdr", DH, "GSHGEOM_DEVICE_LINE = 1,", "GSHGEOM_DEVICE_LINE = 8,", DT),
+    ("b-verb-quadratic", "hdr", DH, "GSHGEOM_DEVICE_QUADRATIC = 2,", "GSHGEOM_DEVICE_QUADRATIC = 7,", DT),
+    ("b-verb-cubic", "hdr", DH, "GSHGEOM_DEVICE_CUBIC = 3,", "GSHGEOM_DEVICE_CUBIC = 6,", DT),
+    ("b-verb-close", "hdr", DH, "GSHGEOM_DEVICE_CLOSE = 4,", "GSHGEOM_DEVICE_CLOSE = 9,", DT),
+    ("b-limit-allows-one-more", "src", DV, "add_el > path->max_elements - path->el_n) {", "add_el > path->max_elements - path->el_n + 1) {", DT),
+    ("b-limit-one-short", "src", DV, "add_el > path->max_elements - path->el_n) {", "add_el >= path->max_elements - path->el_n) {", DT),
+        ("b-move-counts-one", "src", DV, "size_t add_el = with_move ? 2 : 1;", "size_t add_el = 1;", DT),
+    ("b-zero-limit-is-zero", "src", DV, "path->max_elements = (limits && limits->max_elements)\n      ? limits->max_elements\n      : GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS;",
+     "path->max_elements = limits ? limits->max_elements\n      : GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS;", DT),
+    ("b-close-flag-never", "src", DV, "path->closed = verb == GSHGEOM_DEVICE_CLOSE;", "path->closed = 0;", DT),
+    ("b-close-flag-sticky", "src", DV, "path->closed = verb == GSHGEOM_DEVICE_CLOSE;", "path->closed = path->closed || verb == GSHGEOM_DEVICE_CLOSE;", DT),
+    ("b-close-flag-not-move", "src", DV, "path->closed = verb == GSHGEOM_DEVICE_CLOSE;", "path->closed = verb != GSHGEOM_DEVICE_MOVE;", DT),
+    ("b-move-forgets-start", "src", DV, "    path->has_current = 1;\n    path->start = p;", "    path->has_current = 1;", DT),
+    ("b-close-to-current", "src", DV, "GSHGEOM_Device_Point start = path->start;\n  return append(path, GSHGEOM_DEVICE_CLOSE", "GSHGEOM_Device_Point start = path->pt[path->pt_n - 1];\n  return append(path, GSHGEOM_DEVICE_CLOSE", DT),
+    ("b-stored-move-is-origin", "src", DV, "    path->pt[path->pt_n] = path->start;", "    path->pt[path->pt_n] = pts[0];", DT),
+    ("b-stored-move-verb", "src", DV, "    path->el[path->el_n].verb = GSHGEOM_DEVICE_MOVE;\n    path->el[path->el_n].point = path->pt_n;\n    path->pt[path->pt_n] = path->start;",
+     "    path->el[path->el_n].verb = GSHGEOM_DEVICE_LINE;\n    path->el[path->el_n].point = path->pt_n;\n    path->pt[path->pt_n] = path->start;", DT),
+    ("b-line-without-move", "src", DV, "GSHGEOM_Result gshgeom_device_path_line_to(\n    GSHGEOM_Device_Path * path, GSHGEOM_Device_Point p) {\n  if (!path || !path->has_current) {",
+     "GSHGEOM_Result gshgeom_device_path_line_to(\n    GSHGEOM_Device_Path * path, GSHGEOM_Device_Point p) {\n  if (!path) {", DT),
+    ("b-quadratic-without-move", "src", DV, "GSHGEOM_Device_Point c, GSHGEOM_Device_Point p) {\n  if (!path || !path->has_current) {", "GSHGEOM_Device_Point c, GSHGEOM_Device_Point p) {\n  if (!path) {", DT),
+    ("b-cubic-without-move", "src", DV, "GSHGEOM_Device_Point c2, GSHGEOM_Device_Point p) {\n  if (!path || !path->has_current) {", "GSHGEOM_Device_Point c2, GSHGEOM_Device_Point p) {\n  if (!path) {", DT),
+    ("b-close-without-move", "src", DV, "GSHGEOM_Result gshgeom_device_path_close(GSHGEOM_Device_Path * path) {\n  if (!path || !path->has_current) {",
+     "GSHGEOM_Result gshgeom_device_path_close(GSHGEOM_Device_Path * path) {\n  if (!path) {", DT),
+    ("b-line-no-stored-move", "src", DV, "return append(path, GSHGEOM_DEVICE_LINE, &p, path->closed);", "return append(path, GSHGEOM_DEVICE_LINE, &p, 0);", DT),
+    ("b-quadratic-no-stored-move", "src", DV, "return append(path, GSHGEOM_DEVICE_QUADRATIC, pts, path->closed);", "return append(path, GSHGEOM_DEVICE_QUADRATIC, pts, 0);", DT),
+    ("b-cubic-no-stored-move", "src", DV, "return append(path, GSHGEOM_DEVICE_CUBIC, pts, path->closed);", "return append(path, GSHGEOM_DEVICE_CUBIC, pts, 0);", DT),
+    ("b-close-stored-move", "src", DV, "return append(path, GSHGEOM_DEVICE_CLOSE, &start, 0);", "return append(path, GSHGEOM_DEVICE_CLOSE, &start, path->closed);", DT),
+    ("b-move-stored-move", "src", DV, "GSHGEOM_Result r = append(path, GSHGEOM_DEVICE_MOVE, &p, 0);", "GSHGEOM_Result r = append(path, GSHGEOM_DEVICE_MOVE, &p, path->closed);", DT),
+    ("b-quadratic-order", "src", DV, "GSHGEOM_Device_Point pts[2] = {c, p};", "GSHGEOM_Device_Point pts[2] = {p, c};", DT),
+    ("b-cubic-order", "src", DV, "GSHGEOM_Device_Point pts[3] = {c1, c2, p};", "GSHGEOM_Device_Point pts[3] = {c2, c1, p};", DT),
+    ("b-points-line", "src", DV, "  case GSHGEOM_DEVICE_MOVE:\n  case GSHGEOM_DEVICE_LINE:\n  case GSHGEOM_DEVICE_CLOSE:\n    return 1;",
+     "  case GSHGEOM_DEVICE_MOVE:\n  case GSHGEOM_DEVICE_LINE:\n  case GSHGEOM_DEVICE_CLOSE:\n    return 2;", DT),
+    ("b-points-quadratic", "src", DV, "  case GSHGEOM_DEVICE_QUADRATIC:\n    return 2;", "  case GSHGEOM_DEVICE_QUADRATIC:\n    return 3;", DT),
+    ("b-points-cubic", "src", DV, "  case GSHGEOM_DEVICE_CUBIC:\n    return 3;", "  case GSHGEOM_DEVICE_CUBIC:\n    return 2;", DT),
+    ("b-readback-points", "src", DV, "    el.p[i] = path->pt[e->point + i];", "    el.p[i] = path->pt[e->point];", DT),
+    ("b-readback-count", "src", DV, "  el.count = verb_points(e->verb);", "  el.count = 1;", DT),
+    ("b-readback-verb", "src", DV, "  el.verb = (GSHGEOM_Device_Verb)e->verb;", "  el.verb = GSHGEOM_DEVICE_LINE;", DT),
+    ("b-readback-unzeroed", "src", DV, "  GSHGEOM_Device_Element el;\n  memset(&el, 0, sizeof el);", "  GSHGEOM_Device_Element el;\n  memset(&el, 0xff, sizeof el);", DT),
+    ("b-element-index", "src", DV, "if (!path || !out || index >= path->el_n) {", "if (!path || !out) {", DT),
+    ("b-element-index-off-by-one", "src", DV, "if (!path || !out || index >= path->el_n) {", "if (!path || !out || index > path->el_n) {", DT),
+    ("b-count-null", "src", DV, "return path ? path->el_n : 0;", "return path->el_n;", DT),
+    ("b-destroy-leaks-elements", "src", DV, "  gcu_allocator_free(&alloc, path->el);\n  gcu_allocator_free(&alloc, path->pt);\n  gcu_allocator_free(&alloc, path);",
+     "  gcu_allocator_free(&alloc, path->pt);\n  gcu_allocator_free(&alloc, path);", DT),
+    ("b-destroy-leaks-points", "src", DV, "  gcu_allocator_free(&alloc, path->el);\n  gcu_allocator_free(&alloc, path->pt);\n  gcu_allocator_free(&alloc, path);",
+     "  gcu_allocator_free(&alloc, path->el);\n  gcu_allocator_free(&alloc, path);", DT),
+    ("b-destroy-leaks-path", "src", DV, "  gcu_allocator_free(&alloc, path->el);\n  gcu_allocator_free(&alloc, path->pt);\n  gcu_allocator_free(&alloc, path);",
+     "  gcu_allocator_free(&alloc, path->el);\n  gcu_allocator_free(&alloc, path->pt);", DT),
+    ("b-create-oom-code", "src", DV, "  if (!path) {\n    return GSHGEOM_ERR_OOM;\n  }\n  path->alloc = *alloc;", "  if (!path) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  path->alloc = *alloc;", DT),
+    ("b-create-null-out", "src", DV, "GSHGEOM_Device_Path ** out) {\n  if (!out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "GSHGEOM_Device_Path ** out) {\n  if (!alloc) {", DT),
+    ("b-elements-grow-oom-code", "src", DV, "  GSHGEOM_Result r = gshgeom_grow(&path->alloc, &grown, &path->el_cap,\n      path->el_n + add_el, sizeof *path->el);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }",
+     "  GSHGEOM_Result r = gshgeom_grow(&path->alloc, &grown, &path->el_cap,\n      path->el_n + add_el, sizeof *path->el);\n  if (r != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INTERNAL;\n  }", DT),
+    ("b-points-grow-unchecked", "src", DV, "  r = gshgeom_grow(&path->alloc, &grown, &path->pt_cap, path->pt_n + add_pt,\n      sizeof *path->pt);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }",
+     "  r = gshgeom_grow(&path->alloc, &grown, &path->pt_cap, path->pt_n + add_pt,\n      sizeof *path->pt);", DT),
+    ("b-grow-keeps-old-pointer", "srch", GR, "  *array = bigger;\n", "", DFT),
+    ("b-grow-oom-ok", "srch", GR, "  if (!bigger) {\n    return GSHGEOM_ERR_OOM;\n  }\n  *array = bigger;", "  if (!bigger) {\n    return GSHGEOM_OK;\n  }\n  *array = bigger;", DFT),
+        # --- the device path's hash and dump --------------------------------------
+    ("h-version", "src", DV, "#define DEVICE_FORMAT_VERSION 1u", "#define DEVICE_FORMAT_VERSION 2u", DT),
+    ("h-kind", "src", DV, "#define DEVICE_KIND 0x50564544u", "#define DEVICE_KIND 0x50564545u", DT),
+    ("h-no-kind", "src", DV, "  gshgeom_hash_u32(&h, DEVICE_KIND);\n", "", DT),
+    ("h-count-u32", "src", DV, "gshgeom_hash_u64(&h, (uint64_t)path->el_n);", "gshgeom_hash_u32(&h, (uint32_t)path->el_n);", DT),
+    ("h-no-verb", "src", DV, "    gshgeom_hash_u8(&h, e->verb);\n    if (e->verb == GSHGEOM_DEVICE_CLOSE) {", "    if (e->verb == GSHGEOM_DEVICE_CLOSE) {", DT),
+    ("h-close-hashes-a-point", "src", DV, "    if (e->verb == GSHGEOM_DEVICE_CLOSE) {\n      continue;\n    }\n    for (unsigned k = 0; k < verb_points(e->verb); k++) {\n      gshgeom_hash_i32",
+     "    for (unsigned k = 0; k < verb_points(e->verb); k++) {\n      gshgeom_hash_i32", DT),
+    ("h-y-for-x", "src", DV, "      gshgeom_hash_i32(&h, path->pt[e->point + k].x);", "      gshgeom_hash_i32(&h, path->pt[e->point + k].y);", DT),
+    ("h-no-y", "src", DV, "      gshgeom_hash_i32(&h, path->pt[e->point + k].y);\n    }\n  }\n  return gshgeom_hash_value(&h);\n}\n\nstatic int put_i32", "    }\n  }\n  return gshgeom_hash_value(&h);\n}\n\nstatic int put_i32", DT),
+    ("h-last-point-only", "src", DV, "    for (unsigned k = 0; k < verb_points(e->verb); k++) {\n      gshgeom_hash_i32", "    for (unsigned k = verb_points(e->verb) - 1; k < verb_points(e->verb); k++) {\n      gshgeom_hash_i32", DT),
+    ("h-null-path", "src", DV, "  if (!path) {\n    return gshgeom_hash_value(&h);\n  }\n  gshgeom_hash_u32(&h, DEVICE_FORMAT_VERSION);", "  if (!path) {\n    return 0;\n  }\n  gshgeom_hash_u32(&h, DEVICE_FORMAT_VERSION);", DT),
+    ("h-dump-header", "src", DV, '"gshgeom.device-path %u elements=%llu hash=%016llx\\n"', '"gshgeom.device_path %u elements=%llu hash=%016llx\\n"', DT),
+    ("h-dump-hash-width", "src", DV, "elements=%llu hash=%016llx", "elements=%llu hash=%llx", DT),
+    ("h-dump-letters", "src", DV, "{'M', 'L', 'Q', 'C', 'Z'}", "{'M', 'L', 'C', 'Q', 'Z'}", DT),
+    ("h-dump-number-width", "src", DV, 'return fprintf(out, " %08x", (unsigned)(uint32_t)v);', 'return fprintf(out, " %x", (unsigned)(uint32_t)v);', DT),
+    ("h-dump-signed", "src", DV, 'return fprintf(out, " %08x", (unsigned)(uint32_t)v);', 'return fprintf(out, " %08d", (int)v);', DT),
+    ("h-dump-close-points", "src", DV, "    if (e->verb != GSHGEOM_DEVICE_CLOSE) {\n      for (unsigned k = 0; k < verb_points(e->verb); k++) {\n        if (put_i32",
+     "    if (1) {\n      for (unsigned k = 0; k < verb_points(e->verb); k++) {\n        if (put_i32", DT),
+    ("h-dump-ignores-flush", "src", DV, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", DT + ["testFlatten"][:0]),
+    ("h-dump-ignores-header-error", "src", DV, "(unsigned long long)gshgeom_device_path_hash(path)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_device_path_hash(path)) < 0) {\n    return GSHGEOM_OK;", DT),
+        # --- a model path under a map ---------------------------------------------
+    ("fm-3d-path-ok", "src", DV, "if (!path || !map || !out || gshgeom_path_dimension(path) != 2) {", "if (!path || !map || !out) {", DT),
+    ("fm-null-out", "src", DV, "if (!path || !map || !out || gshgeom_path_dimension(path) != 2) {", "if (!path || !map || gshgeom_path_dimension(path) != 2) {", DT),
+        ("fm-3d-map-ok", "src", DV, "  if (map->dim != 2) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Device_Path * dp;", "  GSHGEOM_Device_Path * dp;", DT),
+    ("fm-skips-first-element", "src", DV, "for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Element el;", "for (size_t i = 1; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Element el;", DT),
+    ("fm-skips-last-element", "src", DV, "for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Element el;", "for (size_t i = 0; i + 1 < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Element el;", DT),
+    ("fm-leaks-on-failure", "src", DV, "  if (r != GSHGEOM_OK) {\n    gshgeom_device_path_destroy(dp);\n    return r;\n  }\n  *out = dp;", "  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  *out = dp;", DT),
+    ("fm-line-from-start", "src", DV, "    r = map_rounded(map, c->p[1], &q[0]);\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_line_to(dp, q[0]);",
+     "    r = map_rounded(map, c->p[0], &q[0]);\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_line_to(dp, q[0]);", DT),
+    ("fm-quadratic-swapped", "src", DV, "gshgeom_device_path_quadratic_to(dp, q[0], q[1]);", "gshgeom_device_path_quadratic_to(dp, q[1], q[0]);", DT),
+    ("fm-quadratic-end-twice", "src", DV, "      r = map_rounded(map, c->p[2], &q[1]);\n    }\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_quadratic_to",
+     "      r = map_rounded(map, c->p[1], &q[1]);\n    }\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_quadratic_to", DT),
+    ("fm-cubic-swapped", "src", DV, "gshgeom_device_path_cubic_to(dp, q[0], q[1], q[2]);", "gshgeom_device_path_cubic_to(dp, q[0], q[2], q[1]);", DT),
+    ("fm-cubic-end", "src", DV, "      r = map_rounded(map, c->p[3], &q[2]);", "      r = map_rounded(map, c->p[2], &q[2]);", DT),
+    ("fm-close-as-line", "src", DV, "  case GSHGEOM_VERB_CLOSE:\n    return gshgeom_device_path_close(dp);", "  case GSHGEOM_VERB_CLOSE:\n    return GSHGEOM_OK;", DT),
+    ("fm-scale", "src", DV, "double sx = m.x * SCALE;", "double sx = m.x * 32.0;", DT),
+    ("fm-scale-y", "src", DV, "double sy = m.y * SCALE;", "double sy = m.y * 32.0;", DT),
+    ("fm-y-range-unchecked", "src", DV, "  r = round_scaled(sx, &probe);\n  if (r == GSHGEOM_OK) {\n    r = round_scaled(sy, &probe);\n  }", "  r = round_scaled(sx, &probe);", DT),
+    ("fm-x-range-unchecked", "src", DV, "  r = round_scaled(sx, &probe);\n  if (r == GSHGEOM_OK) {\n    r = round_scaled(sy, &probe);\n  }", "  r = round_scaled(sy, &probe);", DT),
+        # --- the rational subdivision ---------------------------------------------
+    ("rat-tolerance-loose", "src", DV, "#define RATIONAL_TOLERANCE_SQ 4.0", "#define RATIONAL_TOLERANCE_SQ 400.0", DT),
+    ("rat-tolerance-tight", "src", DV, "#define RATIONAL_TOLERANCE_SQ 4.0", "#define RATIONAL_TOLERANCE_SQ 0.0001", DT),
+    ("rat-depth-shallow", "src", DV, "#define RATIONAL_MAX_DEPTH 16", "#define RATIONAL_MAX_DEPTH 2", DT),
+    ("rat-always-flat", "src", DV, "  if (depth <= 0 || flat) {\n    GSHGEOM_Device_Point d;", "  (void)flat;\n  if (1) {\n    GSHGEOM_Device_Point d;", DT),
+    ("rat-never-flat", "src", DV, "  if (depth <= 0 || flat) {\n    GSHGEOM_Device_Point d;", "  (void)flat;\n  if (depth <= 0) {\n    GSHGEOM_Device_Point d;", DT),
+    ("rat-flat-inverted", "src", DV, "if (dist2_to_segment(px, py, sx, sy, ex, ey) > RATIONAL_TOLERANCE_SQ) {", "if (dist2_to_segment(px, py, sx, sy, ex, ey) < RATIONAL_TOLERANCE_SQ) {", DT),
+    ("rat-first-control-only", "src", DV, "  for (int i = 1; i < n - 1; i++) {\n    double px", "  for (int i = 1; i < 2; i++) {\n    double px", DT),
+    ("rat-last-control-only", "src", DV, "  for (int i = 1; i < n - 1; i++) {\n    double px", "  for (int i = n - 2; i < n - 1; i++) {\n    double px", DT),
+    ("rat-controls-unprojected", "src", DV, "    double px = h[i].x / h[i].w;\n    double py = h[i].y / h[i].w;", "    double px = h[i].x;\n    double py = h[i].y;", DT),
+    ("rat-y-unprojected", "src", DV, "    double py = h[i].y / h[i].w;", "    double py = h[i].y;", DT),
+    ("rat-distance-to-line", "src", DV, "  if (u < 0.0) {\n    u = 0.0;\n  } else if (u > 1.0) {\n    u = 1.0;\n  }\n", "", DT),
+    ("rat-clamp-low-only", "src", DV, "  } else if (u > 1.0) {\n    u = 1.0;\n  }\n", "  }\n", DT),
+    ("rat-clamp-high-only", "src", DV, "  if (u < 0.0) {\n    u = 0.0;\n  } else if (u > 1.0) {", "  if (u > 1.0) {", DT),
+    ("rat-degenerate-chord", "src", DV, "  if (!(len2 > 0.0)) {\n    return ax * ax + ay * ay;\n  }", "  if (len2 < 0.0) {\n    return ax * ax + ay * ay;\n  }", DT),
+    ("rat-degenerate-chord-flat", "src", DV, "  if (!(len2 > 0.0)) {\n    return ax * ax + ay * ay;\n  }", "  if (!(len2 > 0.0)) {\n    return 0.0;\n  }", DT),
+    ("rat-dist-no-x", "src", DV, "  double qx = ax - u * dx;\n  double qy = ay - u * dy;\n  return qx * qx + qy * qy;", "  double qx = 0.0;\n  double qy = ay - u * dy;\n  return qx * qx + qy * qy;", DT),
+    ("rat-mid-weight", "src", DV, "  m.w = 0.5 * (a.w + b.w);", "  m.w = 0.5 * (a.w + a.w);", DT),
+    ("rat-mid-x", "src", DV, "  m.x = 0.5 * (a.x + b.x);", "  m.x = 0.5 * (a.x + a.x);", DT),
+    ("rat-mid-y", "src", DV, "  m.y = 0.5 * (a.y + b.y);", "  m.y = 0.5 * (b.y + b.y);", DT),
+    ("rat-quadratic-left", "src", DV, "    left[0] = h[0]; left[1] = a; left[2] = m;", "    left[0] = h[0]; left[1] = b; left[2] = m;", DT),
+    ("rat-quadratic-right", "src", DV, "    right[0] = m; right[1] = b; right[2] = h[2];", "    right[0] = m; right[1] = a; right[2] = h[2];", DT),
+    ("rat-quadratic-mid-point", "src", DV, "    double mx = m.x / m.w;\n    double my = m.y / m.w;\n    GSHGEOM_Result r = rational_lines(dp, 3,", "    double mx = m.x;\n    double my = m.y / m.w;\n    GSHGEOM_Result r = rational_lines(dp, 3,", DT),
+    ("rat-quadratic-order", "src", DV, "    return r != GSHGEOM_OK\n        ? r\n        : rational_lines(dp, 3, right, mx, my, ex, ey, depth - 1);",
+     "    return r != GSHGEOM_OK\n        ? r\n        : rational_lines(dp, 3, right, sx, sy, ex, ey, depth - 1);", DT),
+    ("rat-cubic-left", "src", DV, "left[0] = h[0]; left[1] = a; left[2] = d; left[3] = m;", "left[0] = h[0]; left[1] = a; left[2] = e; left[3] = m;", DT),
+    ("rat-cubic-right", "src", DV, "right[0] = m; right[1] = e; right[2] = c; right[3] = h[3];", "right[0] = m; right[1] = d; right[2] = c; right[3] = h[3];", DT),
+    ("rat-cubic-mid", "src", DV, "  Hp m = hp_mid(d, e);", "  Hp m = hp_mid(a, c);", DT),
+    ("rat-cubic-d", "src", DV, "  Hp d = hp_mid(a, b);\n  Hp e = hp_mid(b, c);", "  Hp d = hp_mid(a, c);\n  Hp e = hp_mid(b, c);", DT),
+    ("rat-cubic-order", "src", DV, "      : rational_lines(dp, 4, right, mx, my, ex, ey, depth - 1);\n}", "      : rational_lines(dp, 4, right, sx, sy, ex, ey, depth - 1);\n}", DT),
+    ("rat-cubic-error-lost", "src", DV, "  GSHGEOM_Result r = rational_lines(dp, 4, left, sx, sy, mx, my, depth - 1);\n  return r != GSHGEOM_OK\n      ? r\n      : rational_lines(dp, 4, right",
+     "  rational_lines(dp, 4, left, sx, sy, mx, my, depth - 1);\n  GSHGEOM_Result r = GSHGEOM_OK;\n  return r != GSHGEOM_OK\n      ? r\n      : rational_lines(dp, 4, right", DT),
+    ("rat-quadratic-error-lost", "src", DV, "    GSHGEOM_Result r = rational_lines(dp, 3, left, sx, sy, mx, my, depth - 1);\n    return r != GSHGEOM_OK\n        ? r\n        : rational_lines(dp, 3, right",
+     "    rational_lines(dp, 3, left, sx, sy, mx, my, depth - 1);\n    GSHGEOM_Result r = GSHGEOM_OK;\n    return r != GSHGEOM_OK\n        ? r\n        : rational_lines(dp, 3, right", DT),
+    ("rat-end-y", "src", DV, "r = round_scaled(ey, &d.y);", "r = round_scaled(ex, &d.y);", DT),
+    ("rat-end-x", "src", DV, "    GSHGEOM_Result r = round_scaled(ex, &d.x);", "    GSHGEOM_Result r = round_scaled(ey, &d.x);", DT),
+    ("rat-weights-ignored-x", "src", DV, "      h[i].x = c->w[i] * sx[i];", "      h[i].x = sx[i];", DT),
+    ("rat-weights-ignored-y", "src", DV, "      h[i].y = c->w[i] * sy[i];", "      h[i].y = sy[i];", DT),
+    ("rat-weight-one", "src", DV, "      h[i].w = c->w[i];", "      h[i].w = 1.0;", DT),
+    ("rat-kind-swapped", "src", DV, "int n = el->verb == GSHGEOM_VERB_RATIONAL_QUADRATIC ? 3 : 4;", "int n = el->verb == GSHGEOM_VERB_RATIONAL_QUADRATIC ? 4 : 3;", DT),
+    ("rat-last-control-end", "src", DV, "sx[0], sy[0], sx[n - 1], sy[n - 1],", "sx[0], sy[0], sx[n - 2], sy[n - 2],", DT),
+    ("rat-start-end", "src", DV, "sx[0], sy[0], sx[n - 1], sy[n - 1],", "sx[1], sy[1], sx[n - 1], sy[n - 1],", DT),
+    ("rat-depth-start", "src", DV, "        RATIONAL_MAX_DEPTH);\n  }", "        0);\n  }", DT),
+    ("rat-map-error-lost", "src", DV, "      r = map_scaled(map, c->p[i], &sx[i], &sy[i]);\n", "      map_scaled(map, c->p[i], &sx[i], &sy[i]);\n", DT),
+    ("rat-skips-last-point", "src", DV, "for (int i = 0; i < n && r == GSHGEOM_OK; i++) {\n      r = map_scaled", "for (int i = 0; i < n - 1 && r == GSHGEOM_OK; i++) {\n      r = map_scaled", DT),
+
+    # --- the flattener --------------------------------------------------------
+    ("fl-mid-truncates", "src", FL, "  if (sum % 2 != 0 && sum < 0) {\n    q -= 1;\n  }", "", FT),
+    ("fl-mid-floors-positive", "src", FL, "  if (sum % 2 != 0 && sum < 0) {", "  if (sum % 2 != 0 && sum > 0) {", FT),
+    ("fl-mid-rounds-up", "src", FL, "  if (sum % 2 != 0 && sum < 0) {\n    q -= 1;", "  if (sum % 2 != 0) {\n    q += 1;", FT),
+    ("fl-mid-of-x", "src", FL, "  m.x = mid(a.x, b.x);\n  m.y = mid(a.y, b.y);", "  m.x = mid(a.x, b.x);\n  m.y = mid(a.x, b.y);", FT),
+    ("fl-mid-of-y", "src", FL, "  m.y = mid(a.y, b.y);", "  m.y = mid(a.y, a.y);", FT),
+    ("fl-quad-threshold-strict", "src", FL, "  if (depth <= 0 || dx + dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {", "  if (depth <= 0 || dx + dy < 4 * GSHGEOM_FLATTEN_TOLERANCE) {", FT),
+    ("fl-quad-threshold-loose", "src", FL, "  if (depth <= 0 || dx + dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {", "  if (depth <= 0 || dx + dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE + 2) {", FT),
+    ("fl-quad-x-only", "src", FL, "  if (depth <= 0 || dx + dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {", "  (void)dy;\n  if (depth <= 0 || dx <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {", FT),
+    ("fl-quad-y-only", "src", FL, "  if (depth <= 0 || dx + dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {", "  (void)dx;\n  if (depth <= 0 || dy <= 4 * GSHGEOM_FLATTEN_TOLERANCE) {", FT),
+    ("fl-quad-dx-coefficient", "src", FL, "  int64_t dx = abs64(2 * (int64_t)p1.x - p0.x - p2.x);", "  int64_t dx = abs64((int64_t)p1.x - p0.x - p2.x);", FT),
+    ("fl-quad-dx-no-abs", "src", FL, "  int64_t dx = abs64(2 * (int64_t)p1.x - p0.x - p2.x);", "  int64_t dx = 2 * (int64_t)p1.x - p0.x - p2.x;", FT),
+    ("fl-quad-dx-ends", "src", FL, "  int64_t dx = abs64(2 * (int64_t)p1.x - p0.x - p2.x);", "  int64_t dx = abs64(2 * (int64_t)p1.x - p0.x - p0.x);", FT),
+    ("fl-quad-dy-ends", "src", FL, "  int64_t dy = abs64(2 * (int64_t)p1.y - p0.y - p2.y);", "  int64_t dy = abs64(2 * (int64_t)p1.y - p2.y - p2.y);", FT),
+    ("fl-quad-dy-coefficient", "src", FL, "  int64_t dy = abs64(2 * (int64_t)p1.y - p0.y - p2.y);", "  int64_t dy = abs64(3 * (int64_t)p1.y - p0.y - p2.y);", FT),
+    ("fl-quad-order", "src", FL, "  GSHGEOM_Result r = quad(fp, p0, a, m, depth - 1);\n  return r != GSHGEOM_OK ? r : quad(fp, m, b, p2, depth - 1);",
+     "  GSHGEOM_Result r = quad(fp, m, b, p2, depth - 1);\n  return r != GSHGEOM_OK ? r : quad(fp, p0, a, m, depth - 1);", FT),
+    ("fl-quad-error-lost", "src", FL, "  GSHGEOM_Result r = quad(fp, p0, a, m, depth - 1);\n  return r != GSHGEOM_OK ? r : quad(fp, m, b, p2, depth - 1);",
+     "  quad(fp, p0, a, m, depth - 1);\n  return quad(fp, m, b, p2, depth - 1);", FT),
+    ("fl-quad-halves", "src", FL, "  Pt a = mid_pt(p0, p1);\n  Pt b = mid_pt(p1, p2);\n  Pt m = mid_pt(a, b);\n  GSHGEOM_Result r = quad(", "  Pt a = mid_pt(p0, p1);\n  Pt b = mid_pt(p0, p2);\n  Pt m = mid_pt(a, b);\n  GSHGEOM_Result r = quad(", FT),
+    ("fl-quad-emits-start", "src", FL, "    return add_point(fp, p2);\n  }\n  Pt a = mid_pt(p0, p1);", "    return add_point(fp, p0);\n  }\n  Pt a = mid_pt(p0, p1);", FT),
+    ("fl-cubic-d1-coefficient", "src", FL, "  int64_t d1 = abs64(3 * (int64_t)p1.x - 2 * (int64_t)p0.x - p3.x) +", "  int64_t d1 = abs64(3 * (int64_t)p1.x - (int64_t)p0.x - p3.x) +", FT),
+    ("fl-cubic-d1-end", "src", FL, "  int64_t d1 = abs64(3 * (int64_t)p1.x - 2 * (int64_t)p0.x - p3.x) +", "  int64_t d1 = abs64(3 * (int64_t)p1.x - 2 * (int64_t)p0.x - 2 * (int64_t)p3.x) +", FT),
+    ("fl-cubic-d1-y", "src", FL, "      abs64(3 * (int64_t)p1.y - 2 * (int64_t)p0.y - p3.y);", "      abs64(3 * (int64_t)p1.y - (int64_t)p0.y - 2 * (int64_t)p3.y);", FT),
+    ("fl-cubic-d1-no-y", "src", FL, "      abs64(3 * (int64_t)p1.y - 2 * (int64_t)p0.y - p3.y);", "      0;", FT),
+    ("fl-cubic-d2-x", "src", FL, "  int64_t d2 = abs64(3 * (int64_t)p2.x - p0.x - 2 * (int64_t)p3.x) +", "  int64_t d2 = abs64(3 * (int64_t)p2.x - 2 * (int64_t)p0.x - p3.x) +", FT),
+    ("fl-cubic-d2-y", "src", FL, "      abs64(3 * (int64_t)p2.y - p0.y - 2 * (int64_t)p3.y);", "      abs64(3 * (int64_t)p2.y - 2 * (int64_t)p0.y - p3.y);", FT),
+    ("fl-cubic-d2-no-y", "src", FL, "      abs64(3 * (int64_t)p2.y - p0.y - 2 * (int64_t)p3.y);", "      0;", FT),
+    ("fl-cubic-d2-unused", "src", FL, "  if (depth <= 0 ||\n      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE &&\n          d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", "  (void)d2;\n  if (depth <= 0 ||\n      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", FT),
+    ("fl-cubic-d1-unused", "src", FL, "  if (depth <= 0 ||\n      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE &&\n          d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", "  (void)d1;\n  if (depth <= 0 ||\n      (d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", FT),
+    ("fl-cubic-or", "src", FL, "      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE &&\n          d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", "      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE ||\n          d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", FT),
+    ("fl-cubic-strict", "src", FL, "          d2 <= 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", "          d2 < 4 * GSHGEOM_FLATTEN_TOLERANCE)) {", FT),
+    ("fl-cubic-strict-1", "src", FL, "      (d1 <= 4 * GSHGEOM_FLATTEN_TOLERANCE &&", "      (d1 < 4 * GSHGEOM_FLATTEN_TOLERANCE &&", FT),
+    ("fl-cubic-halves-d", "src", FL, "  Pt d = mid_pt(a, b);\n  Pt e = mid_pt(b, c);\n  Pt m = mid_pt(d, e);", "  Pt d = mid_pt(a, c);\n  Pt e = mid_pt(b, c);\n  Pt m = mid_pt(d, e);", FT),
+    ("fl-cubic-halves-e", "src", FL, "  Pt e = mid_pt(b, c);\n  Pt m = mid_pt(d, e);", "  Pt e = mid_pt(a, c);\n  Pt m = mid_pt(d, e);", FT),
+    ("fl-cubic-halves-m", "src", FL, "  Pt m = mid_pt(d, e);\n  GSHGEOM_Result r = cubic(", "  Pt m = mid_pt(a, e);\n  GSHGEOM_Result r = cubic(", FT),
+    ("fl-cubic-halves-c", "src", FL, "  Pt c = mid_pt(p2, p3);", "  Pt c = mid_pt(p1, p3);", FT),
+    ("fl-cubic-left", "src", FL, "  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);", "  GSHGEOM_Result r = cubic(fp, p0, a, e, m, depth - 1);", FT),
+    ("fl-cubic-right", "src", FL, "  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);", "  return r != GSHGEOM_OK ? r : cubic(fp, m, d, c, p3, depth - 1);", FT),
+    ("fl-cubic-order", "src", FL, "  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);\n  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);",
+     "  GSHGEOM_Result r = cubic(fp, m, e, c, p3, depth - 1);\n  return r != GSHGEOM_OK ? r : cubic(fp, p0, a, d, m, depth - 1);", FT),
+    ("fl-cubic-error-lost", "src", FL, "  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);\n  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);",
+     "  cubic(fp, p0, a, d, m, depth - 1);\n  return cubic(fp, m, e, c, p3, depth - 1);", FT),
+    ("fl-cubic-emits-start", "src", FL, "    return add_point(fp, p3);\n  }\n  Pt a = mid_pt(p0, p1);", "    return add_point(fp, p0);\n  }\n  Pt a = mid_pt(p0, p1);", FT),
+    ("fl-tolerance", "hdr", FH, "#define GSHGEOM_FLATTEN_TOLERANCE 4", "#define GSHGEOM_FLATTEN_TOLERANCE 8", FT),
+    ("fl-tolerance-tight", "hdr", FH, "#define GSHGEOM_FLATTEN_TOLERANCE 4", "#define GSHGEOM_FLATTEN_TOLERANCE 2", FT),
+    ("fl-depth-shallow", "hdr", FH, "#define GSHGEOM_FLATTEN_MAX_DEPTH 16", "#define GSHGEOM_FLATTEN_MAX_DEPTH 3", FT),
+    ("fl-limit-off-by-one", "src", FL, "if (fp->pt_n >= fp->max_points) {", "if (fp->pt_n > fp->max_points) {", FT),
+    ("fl-limit-one-short", "src", FL, "if (fp->pt_n >= fp->max_points) {", "if (fp->pt_n + 1 >= fp->max_points) {", FT),
+    ("fl-zero-limit-is-zero", "src", FL, "  fp->max_points = (limits && limits->max_points)\n      ? limits->max_points\n      : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;",
+     "  fp->max_points = limits ? limits->max_points\n      : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;", FT),
+    ("fl-limit-ignored", "src", FL, "  fp->max_points = (limits && limits->max_points)\n      ? limits->max_points\n      : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;",
+     "  (void)limits;\n  fp->max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;", FT),
+    ("fl-point-count-lost", "src", FL, "  fp->sub[fp->sub_n - 1].count++;\n", "", FT),
+    ("fl-subpath-first", "src", FL, "  fp->sub[fp->sub_n].first = fp->pt_n;", "  fp->sub[fp->sub_n].first = 0;", FT),
+    ("fl-subpath-not-reset", "src", FL, "  fp->sub[fp->sub_n].count = 0;\n", "", FT + ["testDevice"][:0]),
+    ("fl-subpath-open", "src", FL, "  fp->sub[fp->sub_n].closed = 0;\n", "  fp->sub[fp->sub_n].closed = 1;\n", FT),
+    ("fl-close-lost", "src", FL, "      fp->sub[fp->sub_n - 1].closed = 1;", "      fp->sub[fp->sub_n - 1].closed = 0;", FT),
+    ("fl-close-marks-first", "src", FL, "      fp->sub[fp->sub_n - 1].closed = 1;", "      fp->sub[0].closed = 1;", FT),
+    ("fl-move-forgets-current", "src", FL, "      r = begin_subpath(fp, el.p[0]);\n      current = el.p[0];", "      r = begin_subpath(fp, el.p[0]);", FT),
+    ("fl-line-forgets-current", "src", FL, "      r = add_point(fp, el.p[0]);\n      current = el.p[0];", "      r = add_point(fp, el.p[0]);", FT),
+    ("fl-quadratic-forgets-current", "src", FL, "      current = el.p[1];\n      break;\n    case GSHGEOM_DEVICE_CUBIC:", "      break;\n    case GSHGEOM_DEVICE_CUBIC:", FT),
+    ("fl-cubic-forgets-current", "src", FL, "      current = el.p[2];\n      break;\n    case GSHGEOM_DEVICE_CLOSE:", "      break;\n    case GSHGEOM_DEVICE_CLOSE:", FT),
+    ("fl-quadratic-args", "src", FL, "r = quad(fp, current, el.p[0], el.p[1], GSHGEOM_FLATTEN_MAX_DEPTH);", "r = quad(fp, current, el.p[1], el.p[0], GSHGEOM_FLATTEN_MAX_DEPTH);", FT),
+    ("fl-cubic-args", "src", FL, "r = cubic(fp, current, el.p[0], el.p[1], el.p[2], GSHGEOM_FLATTEN_MAX_DEPTH);", "r = cubic(fp, current, el.p[1], el.p[0], el.p[2], GSHGEOM_FLATTEN_MAX_DEPTH);", FT),
+    ("fl-line-adds-start", "src", FL, "      r = add_point(fp, el.p[0]);\n      current = el.p[0];", "      r = add_point(fp, current);\n      current = el.p[0];", FT),
+        ("fl-skips-first", "src", FL, "for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Device_Element el;", "for (size_t i = 1; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Device_Element el;", FT),
+    ("fl-begin-subpath-error", "src", FL, "  r = add_point(fp, p);\n  if (r != GSHGEOM_OK) {\n    fp->sub_n--;\n  }\n  return r;", "  r = add_point(fp, p);\n  return GSHGEOM_OK;", FT),
+    ("fl-subpath-grow-error", "src", FL, "  fp->sub = grown;\n  fp->sub[fp->sub_n].first", "  if (r != GSHGEOM_OK) { fp->sub = grown; }\n  fp->sub[fp->sub_n].first", FT),
+    ("fl-add-point-grow", "src", FL, "  fp->pt = grown;\n  fp->pt[fp->pt_n++] = p;", "  fp->pt = grown;\n  fp->pt[fp->pt_n] = p;\n  fp->pt_n += 1;\n  fp->pt[0].x ^= (fp->pt_n > 40) ? 1 : 0;", FT),
+    ("fl-leaks-points", "src", FL, "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp->sub);\n  gcu_allocator_free(&alloc, fp);", "  gcu_allocator_free(&alloc, fp->sub);\n  gcu_allocator_free(&alloc, fp);", FT),
+    ("fl-leaks-subpaths", "src", FL, "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp->sub);\n  gcu_allocator_free(&alloc, fp);", "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp);", FT),
+    ("fl-leaks-path", "src", FL, "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp->sub);\n  gcu_allocator_free(&alloc, fp);", "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp->sub);", FT),
+    ("fl-failure-leaks", "src", FL, "  if (r != GSHGEOM_OK) {\n    flat_destroy_parts(fp);\n    return r;\n  }\n  *out = fp;", "  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  *out = fp;", FT),
+    ("fl-create-oom-code", "src", FL, "  if (!fp) {\n    return GSHGEOM_ERR_OOM;\n  }", "  if (!fp) {\n    return GSHGEOM_ERR_INVALID;\n  }", FT),
+    ("fl-null-out", "src", FL, "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "  if (!path) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", FT),
+        ("fl-one-call-leaks-device", "src", FL, "  r = gshgeom_device_path_flatten(dp, alloc, limits, out);\n  gshgeom_device_path_destroy(dp);", "  r = gshgeom_device_path_flatten(dp, alloc, limits, out);", FT),
+    ("fl-one-call-error-lost", "src", FL, "  GSHGEOM_Result r = gshgeom_device_path_from_model(path, map, alloc, limits, &dp);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }",
+     "  GSHGEOM_Result r = gshgeom_device_path_from_model(path, map, alloc, limits, &dp);\n  if (r != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INTERNAL;\n  }", FT),
+
+    # --- the flattened path's readback, hash and dump ---------------------------
+    ("fh-point-count", "src", FL, "return path ? path->pt_n : 0;", "return path ? path->pt_n + 1 : 0;", FT),
+    ("fh-subpath-count", "src", FL, "return path ? path->sub_n : 0;", "return path ? path->pt_n : 0;", FT),
+    ("fh-points-null", "src", FL, "return (path && path->pt_n) ? path->pt : NULL;", "(void)path;\n  return NULL;", FT),
+    ("fh-subpath-first", "src", FL, "  out->first = path->sub[index].first;", "  out->first = path->sub[index].count;", FT),
+    ("fh-subpath-count-field", "src", FL, "  out->count = path->sub[index].count;", "  out->count = path->sub[index].first;", FT),
+    ("fh-subpath-closed", "src", FL, "  out->closed = path->sub[index].closed;", "  out->closed = 0;", FT),
+    ("fh-subpath-index", "src", FL, "if (!path || !out || index >= path->sub_n) {", "if (!path || !out) {", FT),
+    ("fh-subpath-index-off-by-one", "src", FL, "if (!path || !out || index >= path->sub_n) {", "if (!path || !out || index > path->sub_n) {", FT),
+    ("fh-version", "src", FL, "#define FLAT_FORMAT_VERSION 1u", "#define FLAT_FORMAT_VERSION 2u", FT),
+    ("fh-kind", "src", FL, "#define FLAT_KIND 0x54414c46u", "#define FLAT_KIND 0x54414c47u", FT),
+    ("fh-no-kind", "src", FL, "  gshgeom_hash_u32(&h, FLAT_KIND);\n", "", FT),
+    ("fh-count-u32", "src", FL, "gshgeom_hash_u64(&h, (uint64_t)path->sub_n);", "gshgeom_hash_u32(&h, (uint32_t)path->sub_n);", FT),
+    ("fh-no-closed", "src", FL, "    gshgeom_hash_u8(&h, s->closed);\n", "", FT),
+    ("fh-closed-wide", "src", FL, "    gshgeom_hash_u8(&h, s->closed);", "    gshgeom_hash_u32(&h, s->closed);", FT),
+    ("fh-no-point-count", "src", FL, "    gshgeom_hash_u64(&h, (uint64_t)s->count);\n", "", FT),
+    ("fh-point-count-u32", "src", FL, "    gshgeom_hash_u64(&h, (uint64_t)s->count);", "    gshgeom_hash_u32(&h, (uint32_t)s->count);", FT),
+    ("fh-y-for-x", "src", FL, "      gshgeom_hash_i32(&h, path->pt[s->first + k].x);", "      gshgeom_hash_i32(&h, path->pt[s->first + k].y);", FT),
+    ("fh-no-y", "src", FL, "      gshgeom_hash_i32(&h, path->pt[s->first + k].y);\n", "", FT),
+    ("fh-first-point-only", "src", FL, "    for (size_t k = 0; k < s->count; k++) {\n      gshgeom_hash_i32", "    for (size_t k = 0; k < (s->count ? 1u : 0u); k++) {\n      gshgeom_hash_i32", FT),
+    ("fh-null-path", "src", FL, "  if (!path) {\n    return gshgeom_hash_value(&h);\n  }\n  gshgeom_hash_u32(&h, FLAT_FORMAT_VERSION);", "  if (!path) {\n    return 0;\n  }\n  gshgeom_hash_u32(&h, FLAT_FORMAT_VERSION);", FT),
+    ("fh-dump-header", "src", FL, '"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n"', '"gshgeom.flat_path %u subpaths=%llu points=%llu hash=%016llx\\n"', FT),
+    ("fh-dump-hash-width", "src", FL, "points=%llu hash=%016llx", "points=%llu hash=%llx", FT),
+    ("fh-dump-closed", "src", FL, '"S closed=%d points=%llu\\n", s->closed ? 1 : 0,', '"S closed=%d points=%llu\\n", s->closed ? 0 : 1,', FT),
+    ("fh-dump-point-letter", "src", FL, '"P %08x %08x\\n"', '"p %08x %08x\\n"', FT),
+    ("fh-dump-width", "src", FL, '"P %08x %08x\\n"', '"P %x %x\\n"', FT),
+    ("fh-dump-swapped", "src", FL, "(unsigned)(uint32_t)path->pt[s->first + k].x,\n              (unsigned)(uint32_t)path->pt[s->first + k].y) < 0) {", "(unsigned)(uint32_t)path->pt[s->first + k].y,\n              (unsigned)(uint32_t)path->pt[s->first + k].x) < 0) {", FT),
+    ("fh-dump-ignores-flush", "src", FL, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", FT),
+    ("fh-dump-ignores-header-error", "src", FL, "(unsigned long long)gshgeom_flat_path_hash(path)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_flat_path_hash(path)) < 0) {\n    return GSHGEOM_OK;", FT),
+            ("fh-dump-null", "src", FL, "GSHGEOM_Result gshgeom_flat_path_dump(\n    const GSHGEOM_Flat_Path * path, FILE * out) {\n  if (!path || !out) {", "GSHGEOM_Result gshgeom_flat_path_dump(\n    const GSHGEOM_Flat_Path * path, FILE * out) {\n  if (!path) {", FT),
+
+    # --- the core -------------------------------------------------------------
+    ("max-points-default-zero", "src", K, "  limits->max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n", "", PT),
+    ("max-points-default-const", "hdr", KH, "#define GSHGEOM_LIMITS_DEFAULT_MAX_POINTS ((size_t)1 << 22)", "#define GSHGEOM_LIMITS_DEFAULT_MAX_POINTS ((size_t)1 << 21)", PT + FT),
+]
+
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
@@ -658,6 +1027,10 @@ def apply(text, old, new, label):
     return text.replace(old, new)
 
 
+# The sources that include src/core/grow.h.
+INTERNAL_HEADER_USERS = ["src/device/device.c", "src/flatten/flatten.c"]
+
+
 def do_plant(plant, control_objs):
     pid, kind, fname, old, new, tests = plant
     d = WORK / pid
@@ -679,6 +1052,19 @@ def do_plant(plant, control_objs):
         base = str(ROOT / fname)
         objs = [str(obj) if o.endswith(fname.replace("/", "_") + ".o") else o for o in control_objs]
         assert str(obj) in objs, pid
+    elif kind == "srch":
+        # An internal header: change it in a copy of src/ and rebuild what
+        # includes it.
+        shutil.copytree(ROOT / "src", d / "planted" / "src", dirs_exist_ok=True)
+        planted = d / "planted" / fname
+        planted.write_text(apply((ROOT / fname).read_text(), old, new, pid))
+        objs = list(control_objs)
+        for dep in INTERNAL_HEADER_USERS:
+            obj = d / (dep.replace("/", "_") + ".o")
+            r = run(CC + CFLAGS + ["-c", str(d / "planted" / dep), "-o", str(obj)])
+            if r.returncode != 0:
+                raise RuntimeError("plant %s does not compile:\n%s" % (pid, r.stderr))
+            objs = [str(obj) if o.endswith(dep.replace("/", "_") + ".o") else o for o in objs]
     else:
         text = apply((ROOT / fname).read_text(), old, new, pid)
         hdr = d / "include" / Path(fname).relative_to("include")
@@ -721,7 +1107,9 @@ def main():
         print("FAIL  duplicate plant ids")
         return 1
     plants = [p for p in PLANTS if not ONLY or re.search(ONLY, p[0])]
-    if not plants:
+    if PROBE_ONLY:
+        plants = []
+    if not plants and not PROBE_ONLY:
         print("FAIL  PLANT_ONLY matches no plant")
         return 1
 
@@ -745,18 +1133,21 @@ def main():
         else:
             print("ok    %-34s caught by %s" % (p[0], ", ".join("%s (%s)" % (t, (f[0][14:70] if f else "crash")) for t, f in r)))
 
-    if ONLY:
+    if ONLY and not PROBE_ONLY:
         print("%d plants run (PLANT_ONLY=%s), %d not caught" % (len(plants), ONLY, failures))
         return 1 if failures else 0
 
     # The probe's own plants.
     (WORK / "bit").mkdir(parents=True, exist_ok=True)
-    rc, msg = probe_hash(control, WORK / "bit", extra=["-DSHAPE_GEOM_PLANT_BIT"])
-    if rc == 0:
-        print("FAIL  probe-planted-bit: the probe printed the committed hash with a bit flipped")
-        failures += 1
-    else:
-        print("ok    probe-planted-bit: %s" % msg.splitlines()[-1])
+    for name, flag in (("probe-planted-bit", "-DSHAPE_GEOM_PLANT_BIT"),
+                       ("probe-planted-int-bit", "-DSHAPE_GEOM_PLANT_BIT_INT")):
+        (WORK / name).mkdir(parents=True, exist_ok=True)
+        rc, msg = probe_hash(control, WORK / name, extra=[flag])
+        if rc == 0:
+            print("FAIL  %s: the probe printed the committed hash with a bit flipped" % name)
+            failures += 1
+        else:
+            print("ok    %s: %s" % (name, msg.splitlines()[-1]))
     for pid, flags in FLAG_PLANTS:
         d = WORK / pid
         d.mkdir(parents=True, exist_ok=True)
@@ -768,7 +1159,7 @@ def main():
         else:
             print("ok    %-34s the probe's hash differs: %s" % (pid, msg.splitlines()[-1]))
 
-    print("%d plants, %d not caught" % (len(PLANTS) + 1 + len(FLAG_PLANTS), failures))
+    print("%d plants, %d not caught" % (len(PLANTS) + 2 + len(FLAG_PLANTS), failures))
     return 1 if failures else 0
 
 

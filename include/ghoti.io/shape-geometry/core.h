@@ -71,6 +71,9 @@ GSHGEOM_API const char * gshgeom_result_string(GSHGEOM_Result result);
 /** Default ::GSHGEOM_Limits.max_elements: 4 Mi path elements. */
 #define GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS ((size_t)1 << 22)
 
+/** Default ::GSHGEOM_Limits.max_points: 4 Mi points in a flattened path. */
+#define GSHGEOM_LIMITS_DEFAULT_MAX_POINTS ((size_t)1 << 22)
+
 /**
  * @brief Caps for the quantities a caller can make unbounded.
  *
@@ -79,8 +82,9 @@ GSHGEOM_API const char * gshgeom_result_string(GSHGEOM_Result result);
  * a silent truncation, and the object is left as it was.
  */
 typedef struct GSHGEOM_Limits {
-  size_t max_elements;   ///< Most elements (verbs) one path may hold.
-  uint8_t _reserved[16]; ///< Reserved; zero.
+  size_t max_elements;  ///< Most elements (verbs) one model or device path may hold.
+  size_t max_points;    ///< Most points one flattened path may hold.
+  uint8_t _reserved[8]; ///< Reserved; zero.
 } GSHGEOM_Limits;
 
 /**
