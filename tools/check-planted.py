@@ -35,6 +35,22 @@ changed constant disagrees with its pinned value), or a compile flag
            the box of a path, allocation failure and release
   probe    a bit flipped in the cross-target probe, and a fused multiply-add
 
+Story 6 adds (ids start with x-, o-, m-, mh-, md- and route-):
+
+  x-       the exact sum of products: the cut of a double into mantissa and
+           exponent, the product of mantissas, the shifted two's complement
+           accumulator and its carries and borrows, the sign, the determinant
+           expansion
+  o-       the predicates: the filter's bounds and guards, the expanded
+           determinants term by term, the refusals, the normals, the area
+  m-       the maps: the constants and enumerations of map.h, the angle
+           reduction and the exact quarters, the sense of every rotation, the
+           classifier branch by branch, the composer's operands, order of
+           operations, tag union and collapse, application, curves
+  route-   the route predicate: each class the tag lets through or not, each
+           value test, the grid it returns
+  mh-, md- the map's hash fields and dump text
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 
@@ -61,6 +77,22 @@ changes no result, cannot be seen by any test:
     ends when the interval is one unit in the last place wide
   - a root exactly at t = 1 (``fa == 0`` at the end of ``roots01``): the end
     point is a candidate already
+  - ``s[6]`` in ``accumulate`` (the word the last mantissa word spills into): a
+    product of at most three 53-bit mantissas is 159 bits and fills five words,
+    so the sixth is zero and so is its spill
+  - the coordinate limit of the predicates' filter (``FILTER_COORD_LIMIT`` and
+    ``small_enough``): the filter is valid far beyond it, and where a product
+    overflows the result is an infinity of the right sign or a NaN that fails
+    every comparison and goes to the exact path; the limit is a margin
+  - the shortcut ``rest == 0.0`` in ``angle_cs``: ``gmath_cos(0)`` is 1 and
+    ``gmath_sin(0)`` is 0 exactly, so the shortcut changes nothing; it is kept
+    so that "a quarter turn is exact" does not rest on ``math``'s special values
+  - the explicit NULL checks on the two maps in ``gshgeom_map_compose``: the
+    validity check that follows refuses a NULL map as well, with the same
+    result
+  - the check of the first write in ``gshgeom_map_dump`` as a check: every
+    later write is checked too, and a stream that failed once fails again, so
+    the header's check only changes which line reports the error
   - the 200-step cap of ``bisect`` as a cap: it is reached only for roots
     closer than 2^-200 to an end, where 2^-200 is not a double of interest
 """
@@ -95,6 +127,10 @@ OBJ_DIR = Path(env("PLANT_OBJ_DIR"))
 LD_PATH = env("PLANT_LD_PATH")
 WORK = Path(env("PLANT_WORK"))
 JOBS = int(env("PLANT_JOBS", "4"))
+# PLANT_ONLY=<regex> runs only the plants whose id matches (and not the probe's
+# own plants): for re-running the few that a change to a test touched.  The
+# control always runs.  Unset, every plant runs, which is what `make test` wants.
+ONLY = os.environ.get("PLANT_ONLY")
 
 
 def test_object(test):
@@ -310,6 +346,244 @@ PLANTS = [
 ]
 
 
+# --- story 6: the exact sum, the predicates, the maps -----------------------
+X = "src/exact/exact.c"
+O = "src/orient/orient.c"
+M = "src/map/map.c"
+MH = "include/ghoti.io/shape-geometry/map.h"
+XT = ["testOrient", "testMap"]
+OT = ["testOrient"]
+MT = ["testMap"]
+
+
+def kind_sets(allowed_old, extra):
+    """The route predicate's allowed set with one more class let through."""
+    return ("route-allows-" + extra.lower(), "src", M, allowed_old,
+            allowed_old.replace("GSHGEOM_MAP_FLIPS_Y;", "GSHGEOM_MAP_FLIPS_Y | GSHGEOM_MAP_" + extra + ";"), MT)
+
+
+ALLOWED = "GSHGEOM_MAP_TRANSLATES | GSHGEOM_MAP_SCALES | GSHGEOM_MAP_FLIPS_Y;"
+
+PLANTS += [
+    # --- exact sum: decomposition, product, accumulator, sign ---------------
+    ("x-subnormal-exponent", "src", X, "*e = -1074;", "*e = -1075;", XT),
+    ("x-no-implicit-bit", "src", X, "*m = frac | (UINT64_C(1) << 52);", "*m = frac;", XT),
+    ("x-exponent-bias", "src", X, "*e = (int)ex - 1075;", "*e = (int)ex - 1074;", XT),
+    ("x-factor-sign-ignored", "src", X, "p->neg ^= neg;", "(void)neg;", XT),
+    ("x-term-sign-ignored", "src", X, "p->neg = t->neg ? 1 : 0;", "p->neg = 0;", XT),
+    ("x-exponent-not-summed", "src", X, "p->e += e;", "p->e = e;", XT),
+    ("x-first-high-word", "src", X, "v[1] = (uint32_t)(m >> 32);", "v[1] = 0;", XT),
+    ("x-product-low-word-only", "src", X, "for (unsigned j = 0; j < 2; j++) {\n      uint64_t mj", "for (unsigned j = 0; j < 1; j++) {\n      uint64_t mj", XT),
+    ("x-product-carry-dropped", "src", X, "out[len + j] = (uint32_t)carry;", "out[len + j] = 0;", XT),
+    ("x-product-length", "src", X, "    len += 2;\n", "    len += 1;\n", XT),
+    ("x-shift-no-spill", "src", X, "s[i] = (p->v[i] << r) | (p->v[i - 1] >> (32u - r));", "s[i] = (p->v[i] << r);", XT),
+    ("x-shift-zero-lost", "src", X, "      s[i] = p->v[i];\n    }\n    s[6] = 0;", "      s[i] = 0;\n    }\n    s[6] = 0;", XT),
+    ("x-add-carry-in-window", "src", X, "acc[q + i] = (uint32_t)(cur & 0xffffffffu);\n      carry = cur >> 32;", "acc[q + i] = (uint32_t)(cur & 0xffffffffu);\n      carry = 0;", XT),
+    ("x-add-carry-above-window", "src", X, "carry && i < ACC_WORDS; i++) {\n      uint64_t cur = (uint64_t)acc[i] + carry;", "0 && i < ACC_WORDS; i++) {\n      uint64_t cur = (uint64_t)acc[i] + carry;", XT),
+    ("x-sub-borrow-in-window", "src", X, "acc[q + i] = (uint32_t)(cur & 0xffffffffu);\n      borrow = (cur >> 63) & 1u;", "acc[q + i] = (uint32_t)(cur & 0xffffffffu);\n      borrow = 0;", XT),
+    ("x-sub-borrow-above-window", "src", X, "acc[i] = (uint32_t)(cur & 0xffffffffu);\n      borrow = (cur >> 63) & 1u;", "acc[i] = (uint32_t)(cur & 0xffffffffu);\n      borrow = 0;", XT),
+    ("x-minimum-exponent-is-maximum", "src", X, "(!have || ps[i].e < emin)", "(!have || ps[i].e > emin)", XT),
+    ("x-negative-is-positive", "src", X, "    return -1;\n  }\n  for (unsigned i = 0; i < ACC_WORDS; i++) {", "    return 1;\n  }\n  for (unsigned i = 0; i < ACC_WORDS; i++) {", XT),
+    ("x-word-zero-not-read", "src", X, "  for (unsigned i = 0; i < ACC_WORDS; i++) {\n    if (acc[i]) {", "  for (unsigned i = 1; i < ACC_WORDS; i++) {\n    if (acc[i]) {", XT),
+    ("x-term-limit", "src", X, "count > GSHGEOM_EXACT_MAX_TERMS ||", "count >= GSHGEOM_EXACT_MAX_TERMS ||", XT),
+    ("x-det3-sign-2", "src", X, "gshgeom_exact_put(t, n, !neg, 3, r1[0], r2[2], r3[1]);", "gshgeom_exact_put(t, n, neg, 3, r1[0], r2[2], r3[1]);", XT),
+    ("x-det3-sign-4", "src", X, "gshgeom_exact_put(t, n, neg, 3, r1[1], r2[2], r3[0]);", "gshgeom_exact_put(t, n, !neg, 3, r1[1], r2[2], r3[0]);", XT),
+    ("x-det3-sign-6", "src", X, "gshgeom_exact_put(t, n, !neg, 3, r1[2], r2[1], r3[0]);", "gshgeom_exact_put(t, n, neg, 3, r1[2], r2[1], r3[0]);", XT),
+    ("x-det3-index", "src", X, "gshgeom_exact_put(t, n, neg, 3, r1[2], r2[0], r3[1]);", "gshgeom_exact_put(t, n, neg, 3, r1[2], r2[0], r3[0]);", XT),
+    ("x-put-factors", "src", X, "t[*n].n = factors;", "(void)factors;\n  t[*n].n = 3;", XT),
+
+    # --- predicates -----------------------------------------------------------
+    ("o-ccw-bound-zero", "src", O, "#define CCW_ERR_BOUND ((3.0 + 16.0 * EPS) * EPS)", "#define CCW_ERR_BOUND 0.0", OT),
+    ("o-ccw-bound-small", "src", O, "#define CCW_ERR_BOUND ((3.0 + 16.0 * EPS) * EPS)", "#define CCW_ERR_BOUND (0.25 * EPS)", OT),
+    ("o-3d-bound-zero", "src", O, "#define O3D_ERR_BOUND ((7.0 + 56.0 * EPS) * EPS)", "#define O3D_ERR_BOUND 0.0", OT),
+    ("o-3d-bound-small", "src", O, "#define O3D_ERR_BOUND ((7.0 + 56.0 * EPS) * EPS)", "#define O3D_ERR_BOUND (0.25 * EPS)", OT),
+    ("o-filter-minimum", "src", O, "#define FILTER_MIN 0x1p-900", "#define FILTER_MIN 0.0", OT),
+    ("o-filter-always-accepts-2d", "src", O, "(det >= errbound || -det >= errbound)", "(det >= errbound * 0.0 || -det >= errbound * 0.0)", OT),
+    ("o-filter-always-accepts-3d", "src", O, "(det > errbound || -det > errbound)", "(det > errbound * 0.0 || -det > errbound * 0.0)", OT),
+    ("o-filter-sign-2d", "src", O, "*sign = det > 0.0 ? 1 : -1;", "*sign = det > 0.0 ? -1 : 1;", OT),
+    ("o-filter-sign-3d", "src", O, "*sign = det > 0.0 ? -1 : 1;", "*sign = det > 0.0 ? 1 : -1;", OT),
+    ("o-detsum-difference", "src", O, "double detsum = absolute(detleft) + absolute(detright);", "double detsum = absolute(detleft) - absolute(detright);", OT),
+    ("o-permanent-third-term", "src", O, "(absolute(adxbdy) + absolute(bdxady)) * absolute(cdz)", "0.0", OT),
+    ("o-permanent-first-term", "src", O, "(absolute(bdxcdy) + absolute(cdxbdy)) * absolute(adz)", "0.0", OT),
+    ("o-3d-determinant", "src", O, "cdz * (adxbdy - bdxady)", "cdz * (adxbdy + bdxady)", OT),
+    ("o-2d-term-1", "src", O, "put(t, &n, 1, a.x, c.y);", "put(t, &n, 0, a.x, c.y);", OT),
+    ("o-2d-term-5", "src", O, "put(t, &n, 0, b.x, c.y);", "put(t, &n, 1, b.x, c.y);", OT),
+    ("o-2d-term-6", "src", O, "put(t, &n, 1, b.y, c.x);", "put(t, &n, 1, b.y, c.y);", OT),
+    ("o-3d-sign-bcd", "src", O, "put_det3(t, &n, 0, b, c, d);", "put_det3(t, &n, 1, b, c, d);", OT),
+    ("o-3d-sign-acd", "src", O, "put_det3(t, &n, 1, a, c, d);", "put_det3(t, &n, 0, a, c, d);", OT),
+    ("o-3d-sign-abd", "src", O, "put_det3(t, &n, 0, a, b, d);", "put_det3(t, &n, 1, a, b, d);", OT),
+    ("o-3d-sign-abc", "src", O, "put_det3(t, &n, 1, a, b, c);", "put_det3(t, &n, 0, a, b, c);", OT),
+    ("o-3d-rows", "src", O, "const double c[3] = {r3.x, r3.y, r3.z};", "const double c[3] = {r3.x, r3.y, r3.y};", OT),
+    ("o-2d-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", OT),
+    ("o-2d-exact-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2", OT),
+    ("o-3d-no-finite-check", "src", O, "if (!sign || !finite3(a) || !finite3(b) || !finite3(c) || !finite3(d)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", OT),
+    ("o-3d-exact-no-finite-check", "src", O, "if (!sign || !finite3(a) || !finite3(b) || !finite3(c) || !finite3(d)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact3", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact3", OT),
+    ("o-finite3-no-z", "src", O, "return is_finite(p.x) && is_finite(p.y) && is_finite(p.z);", "return is_finite(p.x) && is_finite(p.y);", OT),
+    ("o-finite-2d-reads-nan", "src", O, "return (v - v) == 0.0;", "return v == v;", OT),
+    ("o-normal-left", "src", O, "GSHGEOM_Point n = {tangent.y, 0.0 - tangent.x, 0.0};", "GSHGEOM_Point n = {0.0 - tangent.y, tangent.x, 0.0};", OT),
+    ("o-normal-right", "src", O, "GSHGEOM_Point n = {0.0 - tangent.y, tangent.x, 0.0};", "GSHGEOM_Point n = {tangent.y, 0.0 - tangent.x, 0.0};", OT),
+    ("o-normal-negative-zero", "src", O, "GSHGEOM_Point n = {tangent.y, 0.0 - tangent.x, 0.0};", "GSHGEOM_Point n = {tangent.y, -tangent.x, 0.0};", OT),
+    ("o-normal-keeps-z", "src", O, "GSHGEOM_Point n = {0.0 - tangent.y, tangent.x, 0.0};", "GSHGEOM_Point n = {0.0 - tangent.y, tangent.x, tangent.z};", OT),
+    ("o-area-sign", "src", O, "sum += ux * vy - uy * vx;", "sum += uy * vx - ux * vy;", OT),
+    ("o-area-half", "src", O, "double area = sum * 0.5;", "double area = sum;", OT),
+    ("o-area-fan-start", "src", O, "for (size_t i = 1; i + 1 < count; i++) {", "for (size_t i = 2; i + 1 < count; i++) {", OT),
+    ("o-area-fan-end", "src", O, "for (size_t i = 1; i + 1 < count; i++) {", "for (size_t i = 1; i + 2 < count; i++) {", OT),
+    ("o-area-from-origin", "src", O, "double ux = points[i].x - points[0].x;", "double ux = points[i].x;", OT),
+    ("o-area-no-limit", "src", O, "if (!is_finite(area)) {\n    return GSHGEOM_ERR_LIMIT;", "if (0) {\n    return GSHGEOM_ERR_LIMIT;", OT),
+    ("o-area-no-finite-check", "src", O, "    if (!finite2(points[i])) {\n      return GSHGEOM_ERR_INVALID;", "    if (0) {\n      return GSHGEOM_ERR_INVALID;", OT),
+    ("o-area-no-null-check", "src", O, "if (!out || (count && !points)) {", "if (!out) {", OT),
+
+    # --- maps: constants and enumerations -------------------------------------
+    ("m-limit-bound", "hdr", MH, "#define GSHGEOM_MAP_LIMIT 0x1p100", "#define GSHGEOM_MAP_LIMIT 0x1p101", MT),
+    ("m-quarters-bound-high", "hdr", MH, "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p40", "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p41", MT),
+    ("m-quarters-bound-low", "hdr", MH, "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p40", "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p39", MT),
+    ("m-unit-gradians", "hdr", MH, "GSHGEOM_ANGLE_GRADIANS = 2,", "GSHGEOM_ANGLE_GRADIANS = 3,", MT),
+    ("m-unit-degrees", "hdr", MH, "GSHGEOM_ANGLE_DEGREES = 1,", "GSHGEOM_ANGLE_DEGREES = 2,", MT),
+    ("m-axis-z", "hdr", MH, "GSHGEOM_AXIS_Z = 2,", "GSHGEOM_AXIS_Z = 1,", MT),
+    ("m-kind-translates", "hdr", MH, "GSHGEOM_MAP_TRANSLATES = 1u << 0,", "GSHGEOM_MAP_TRANSLATES = 1u << 9,", MT),
+    ("m-kind-flips-y", "hdr", MH, "GSHGEOM_MAP_FLIPS_Y = 1u << 3,", "GSHGEOM_MAP_FLIPS_Y = 1u << 4,", MT),
+    ("m-kind-quarter", "hdr", MH, "GSHGEOM_MAP_QUARTER_TURNS = 1u << 5,", "GSHGEOM_MAP_QUARTER_TURNS = 1u << 6,", MT),
+    ("m-kind-all", "hdr", MH, "GSHGEOM_MAP_KIND_ALL = (1u << 10) - 1u", "GSHGEOM_MAP_KIND_ALL = (1u << 9) - 1u", MT),
+    ("m-rad-per-degree", "src", M, "#define RAD_PER_DEGREE 0x1.1df46a2529d39p-6", "#define RAD_PER_DEGREE 0x1.1df46a2529d00p-6", MT),
+    ("m-rad-per-gradian", "src", M, "#define RAD_PER_GRADIAN 0x1.015bf9217271ap-6", "#define RAD_PER_GRADIAN 0x1.015bf92172700p-6", MT),
+    ("m-rad-per-turn", "src", M, "#define RAD_PER_TURN 0x1.921fb54442d18p+2", "#define RAD_PER_TURN 0x1.921fb54442d00p+2", MT),
+    ("m-format-version", "src", M, "#define MAP_FORMAT_VERSION 1u", "#define MAP_FORMAT_VERSION 2u", MT),
+
+    # --- maps: angles ---------------------------------------------------------
+    ("m-degree-quarter", "src", M, "quarter = 90.0;", "quarter = 89.0;", MT),
+    ("m-gradian-quarter", "src", M, "quarter = 100.0;", "quarter = 99.0;", MT),
+    ("m-turn-quarter", "src", M, "u = angle * 4.0;", "u = angle * 2.0;", MT),
+    ("m-turn-quarter-size", "src", M, "quarter = 0.25;", "quarter = 0.5;", MT),
+    ("m-nearest-quarter-floor", "src", M, "double nr = gmath_round(u);", "double nr = gmath_floor(u);", MT),
+    ("m-no-reduction", "src", M, "double rest = angle - nr * quarter;", "double rest = angle;", MT),
+    ("m-quarter-mod", "src", M, "double kq = nr - 4.0 * gmath_floor(nr * 0.25);", "double kq = nr - 4.0 * gmath_trunc(nr * 0.25);", MT),
+    ("m-quarter-mod-period", "src", M, "double kq = nr - 4.0 * gmath_floor(nr * 0.25);", "double kq = nr - 2.0 * gmath_floor(nr * 0.5);", MT),
+    ("m-quarter-limit", "src", M, "if (nr > GSHGEOM_MAP_MAX_QUARTERS || nr < -GSHGEOM_MAP_MAX_QUARTERS) {", "if (nr > GSHGEOM_MAP_MAX_QUARTERS) {", MT),
+    ("m-quarter-1", "src", M, "*c = 0.0 - ss;\n    *s = cc;", "*c = ss;\n    *s = cc;", MT),
+    ("m-quarter-2", "src", M, "*c = 0.0 - cc;\n    *s = 0.0 - ss;", "*c = 0.0 - cc;\n    *s = ss;", MT),
+    ("m-quarter-3", "src", M, "*c = ss;\n    *s = 0.0 - cc;", "*c = ss;\n    *s = cc;", MT),
+    ("m-rest-zero-exact", "src", M, "    cc = 1.0;\n    ss = 0.0;\n  } else {\n    double theta", "    cc = 1.0;\n    ss = 1.0;\n  } else {\n    double theta", MT),
+    ("m-angle-not-finite", "src", M, "|| !is_finite(angle)) {", ") {", MT),
+    ("m-unit-range", "src", M, "(unsigned)unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT", "(unsigned)unit > (unsigned)GSHGEOM_ANGLE_UNIT_COUNT", MT),
+    ("m-radians-sine-cosine", "src", M, "*c = gmath_cos(angle);\n      *s = gmath_sin(angle);", "*c = gmath_sin(angle);\n      *s = gmath_cos(angle);", MT),
+    ("m-rotation-sense", "src", M, "double m[3][3] = {{c, 0.0 - s, 0}, {s, c, 0}, {0, 0, 1}};", "double m[3][3] = {{c, s, 0}, {0.0 - s, c, 0}, {0, 0, 1}};", MT),
+    ("m-axis-range", "src", M, "(unsigned)axis >= (unsigned)GSHGEOM_AXIS_COUNT", "(unsigned)axis > (unsigned)GSHGEOM_AXIS_COUNT", MT),
+    ("m-axis-x-sense", "src", M, "m[1][2] = 0.0 - s;\n    m[2][1] = s;", "m[1][2] = s;\n    m[2][1] = 0.0 - s;", MT),
+    ("m-axis-y-sense", "src", M, "m[2][0] = 0.0 - s;\n    m[0][2] = s;", "m[2][0] = s;\n    m[0][2] = 0.0 - s;", MT),
+    ("m-axis-z-sense", "src", M, "m[0][1] = 0.0 - s;\n    m[1][0] = s;", "m[0][1] = s;\n    m[1][0] = 0.0 - s;", MT),
+    ("m-axis-branches", "src", M, "  } else if (axis == GSHGEOM_AXIS_X) {", "  } else if (axis == GSHGEOM_AXIS_Y) {", MT),
+
+    # --- maps: construction and the classifier -------------------------------
+    ("m-zero-sign", "src", M, "return v == 0.0 ? 0.0 : v;", "return v;", MT),
+    ("m-dim-range", "src", M, "return dim == 2 || dim == 3;", "return dim >= 2 && dim <= 4;", MT),
+    ("m-number-limit", "src", M, "if (v[i] > GSHGEOM_MAP_LIMIT || v[i] < -GSHGEOM_MAP_LIMIT) {", "if (v[i] >= GSHGEOM_MAP_LIMIT || v[i] <= -GSHGEOM_MAP_LIMIT) {", MT),
+    ("m-number-lower-limit", "src", M, "if (v[i] > GSHGEOM_MAP_LIMIT || v[i] < -GSHGEOM_MAP_LIMIT) {", "if (v[i] > GSHGEOM_MAP_LIMIT) {", MT),
+    ("m-fill-unused-diagonal", "src", M, "(i == j ? 1.0 : 0.0);\n    }\n    r.t[i]", "(i == j ? 0.0 : 0.0);\n    }\n    r.t[i]", MT),
+    ("m-fill-unused-translation", "src", M, "r.t[i] = i < dim ? nz(t[i]) : 0.0;", "r.t[i] = i < dim ? nz(t[i]) : t[i];", MT),
+    ("m-from-matrix-transposed", "src", M, "mm[i][j] = m[i * dim + j];", "mm[i][j] = m[j * dim + i];", MT),
+    ("m-from-matrix-translation", "src", M, "tt[i] = t[i];", "tt[i] = t[0];", MT),
+    ("m-translates-bit", "src", M, "if (t[i] != 0.0) {\n      kind |= GSHGEOM_MAP_TRANSLATES;", "if (t[i] == 0.0) {\n      kind |= GSHGEOM_MAP_TRANSLATES;", MT),
+    ("m-singular-sign", "src", M, "  if (sign == 0) {\n    return kind | GSHGEOM_MAP_SINGULAR;", "  if (sign == 1) {\n    return kind | GSHGEOM_MAP_SINGULAR;", MT),
+    ("m-det2-second-term", "src", M, "gshgeom_exact_put(t, &n, 1, 2, m[0][1], m[1][0], 0.0);", "gshgeom_exact_put(t, &n, 0, 2, m[0][1], m[1][0], 0.0);", MT),
+    ("m-mono-row-count", "src", M, "    if (nonzero != 1) {\n      mono = 0;", "    if (nonzero > 2) {\n      mono = 0;", MT),
+    ("m-mono-column", "src", M, "      if (col[i] != i) {\n        identity_perm = 0;", "      if (col[i] == i) {\n        identity_perm = 0;", MT),
+    ("m-negative-count", "src", M, "      if (v < 0.0) {\n        negatives++;", "      if (v > 0.0) {\n        negatives++;", MT),
+    ("m-y-row", "src", M, "        if (i == 1) {\n          y_negative = 1;", "        if (i == 0) {\n          y_negative = 1;", MT),
+    ("m-flip-or-mirror", "src", M, "kind |= y_negative ? GSHGEOM_MAP_FLIPS_Y : GSHGEOM_MAP_MIRRORS;", "kind |= y_negative ? GSHGEOM_MAP_MIRRORS : GSHGEOM_MAP_FLIPS_Y;", MT),
+    ("m-half-turn", "src", M, "kind |= GSHGEOM_MAP_QUARTER_TURNS; /* a half turn */", "kind |= GSHGEOM_MAP_MIRRORS; /* a half turn */", MT),
+    ("m-point-reflection", "src", M, "} else if (negatives == 3) {", "} else if (negatives == 4) {", MT),
+    ("m-axis-swap-mirror", "src", M, "      if (sign < 0) {\n        kind |= GSHGEOM_MAP_MIRRORS;", "      if (sign > 0) {\n        kind |= GSHGEOM_MAP_MIRRORS;", MT),
+    ("m-axis-swap-quarter", "src", M, "    } else {\n      kind |= GSHGEOM_MAP_QUARTER_TURNS;\n      if (sign < 0) {", "    } else {\n      kind |= GSHGEOM_MAP_SCALES;\n      if (sign < 0) {", MT),
+    ("m-magnitude-sign", "src", M, "mag[i] = absolute(v);", "mag[i] = v;", MT),
+    ("m-uniform-test", "src", M, "if (mag[i] != mag[0]) {", "if (mag[i] == mag[0]) {", MT),
+    ("m-unit-scale", "src", M, "} else if (mag[0] != 1.0) {", "} else if (mag[0] != 2.0) {", MT),
+    ("m-nonuniform-bit", "src", M, "kind |= GSHGEOM_MAP_SCALES_NONUNIFORM;", "kind |= GSHGEOM_MAP_SCALES;", MT),
+    ("m-rotation-test", "src", M, "if (a == d && b == -c) {", "if (a == d && b == c) {", MT),
+    ("m-mirrored-rotation-test", "src", M, "} else if (a == -d && b == c) {", "} else if (a == -d && b == -c) {", MT),
+    ("m-skew-bit", "src", M, "      kind |= GSHGEOM_MAP_SKEWS;\n    }", "      kind |= GSHGEOM_MAP_ROTATES;\n    }", MT),
+    ("m-general-3d", "src", M, "return kind | GSHGEOM_MAP_GENERAL;", "return kind;", MT),
+
+    # --- maps: check, composition, application ------------------------------
+    ("m-check-kind-bits", "src", M, "(map->kind & ~(uint32_t)GSHGEOM_MAP_KIND_ALL)", "0", MT),
+    ("m-check-translation", "src", M, "  for (int i = 0; i < dim; i++) {\n    v[n++] = map->t[i];\n  }", "  for (int i = 0; i < 0; i++) {\n    v[n++] = map->t[i];\n  }", MT),
+    ("m-check-matrix-rows", "src", M, "  for (int i = 0; i < dim; i++) {\n    for (int j = 0; j < dim; j++) {\n      v[n++] = map->m[i][j];", "  for (int i = 0; i < dim; i++) {\n    for (int j = 0; j < 1; j++) {\n      v[n++] = map->m[i][j];", MT),
+    ("m-compose-dimension", "src", M, "if (outer->dim != inner->dim) {", "if (0) {", MT),
+    ("m-compose-operands", "src", M, "double acc = outer->m[i][0] * inner->m[0][j];", "double acc = inner->m[i][0] * outer->m[0][j];", MT),
+    ("m-compose-association", "src", M, "acc = acc + outer->m[i][2] * inner->m[2][j];", "acc = outer->m[i][0] * inner->m[0][j] + (outer->m[i][1] * inner->m[1][j] + outer->m[i][2] * inner->m[2][j]);", MT),
+    ("m-compose-no-third-term", "src", M, "      if (dim == 3) {\n        acc = acc + outer->m[i][2] * inner->m[2][j];", "      if (dim == 4) {\n        acc = acc + outer->m[i][2] * inner->m[2][j];", MT),
+    ("m-compose-translation-order", "src", M, "tv = tv + outer->m[i][1] * inner->t[1];", "tv = outer->m[i][1] * inner->t[1];", MT),
+    ("m-compose-translation-add", "src", M, "res.t[i] = nz(tv + outer->t[i]);", "res.t[i] = nz(tv);", MT),
+    ("m-compose-translation-sign", "src", M, "res.t[i] = nz(tv + outer->t[i]);", "res.t[i] = tv + outer->t[i];", MT),
+    ("m-compose-entry-sign", "src", M, "res.m[i][j] = nz(acc);", "res.m[i][j] = acc;", MT),
+    ("m-compose-outer-kind-only", "src", M, "res.kind = outer->kind | inner->kind;", "res.kind = outer->kind;", MT),
+    ("m-compose-inner-kind-only", "src", M, "res.kind = outer->kind | inner->kind;", "res.kind = inner->kind;", MT),
+    ("m-compose-kind-intersection", "src", M, "res.kind = outer->kind | inner->kind;", "res.kind = outer->kind & inner->kind;", MT),
+    ("m-compose-collapse", "src", M, "if (det_sign(dim, res.m) == 0) {\n    res.kind |= GSHGEOM_MAP_SINGULAR;", "if (0) {\n    res.kind |= GSHGEOM_MAP_SINGULAR;", MT),
+    ("m-compose-result-limit", "src", M, "  res.kind = outer->kind | inner->kind;\n  r = gshgeom_map_check(&res);", "  res.kind = outer->kind | inner->kind;\n  r = GSHGEOM_OK;", MT),
+    ("m-chain-leaf-first", "src", M, "r = compose_one(&acc, &chain[i], &acc);", "r = compose_one(&chain[i], &acc, &acc);", MT),
+    ("m-chain-right-to-left", "src", M, "    for (size_t i = 1; i < count; i++) {\n      r = compose_one(&acc, &chain[i], &acc);", "    acc = chain[count - 1];\n    for (size_t i = count - 1; i-- > 0;) {\n      r = compose_one(&chain[i], &acc, &acc);", MT),
+    ("m-chain-target-first", "src", M, "r = compose_one(target, &acc, &acc);", "r = compose_one(&acc, target, &acc);", MT),
+    ("m-chain-target-ignored", "src", M, "    if (target) {\n      r = compose_one(target, &acc, &acc);", "    if (0) {\n      r = compose_one(target, &acc, &acc);", MT),
+    ("m-chain-empty", "src", M, "(!count && !target)", "(!count && target)", MT),
+    ("m-design-scale-sign", "src", M, "r = gshgeom_map_scale(2, scale, scale, 1.0, &chain[1]);", "r = gshgeom_map_scale(2, scale, -scale, 1.0, &chain[1]);", MT),
+    ("m-design-scale-positive", "src", M, "|| !(scale > 0.0)) {", "|| !(scale >= 0.0)) {", MT),
+    ("m-design-order", "src", M, "r = gshgeom_map_translate(2, tx, ty, 0.0, &chain[0]);", "r = gshgeom_map_translate(2, ty, tx, 0.0, &chain[0]);", MT),
+    ("m-apply-translation", "src", M, "    if (translate) {\n      v = v + map->t[i];", "    if (!translate) {\n      v = v + map->t[i];", MT),
+    ("m-apply-association", "src", M, "    v = v + map->m[i][1] * in[1];\n    if (map->dim == 3) {\n      v = v + map->m[i][2] * in[2];\n    }", "    if (map->dim == 3) {\n      v = v + (map->m[i][1] * in[1] + map->m[i][2] * in[2]);\n    } else {\n      v = v + map->m[i][1] * in[1];\n    }", MT),
+    ("m-apply-no-limit", "src", M, "    if (!is_finite(v)) {\n      return GSHGEOM_ERR_LIMIT;", "    if (0) {\n      return GSHGEOM_ERR_LIMIT;", MT),
+    ("m-apply-reads-z-in-2d", "src", M, "(map->dim == 3 && !is_finite(p.z))", "!is_finite(p.z)", MT),
+    ("m-apply-no-output-check", "src", M, "if (!out || !is_finite(p.x)", "if (!is_finite(p.x)", MT),
+    ("m-curve-point-count", "src", M, "int n = gshgeom_curve_point_count(curve->kind);", "int n = gshgeom_curve_point_count(curve->kind) - 1;", MT),
+    ("m-curve-weights", "src", M, "  GSHGEOM_Curve res = *curve;\n", "  GSHGEOM_Curve res = *curve;\n  res.w[1] = 1.0;\n", MT),
+    ("m-curve-dimension", "src", M, "if (curve->dim != map->dim) {", "if (0) {", MT),
+    ("m-curve-result-check", "src", M, "r = gshgeom_curve_check(&res);", "r = GSHGEOM_OK;", MT),
+
+    # --- maps: the route predicate -------------------------------------------
+    kind_sets("      " + ALLOWED, "QUARTER_TURNS"),
+    kind_sets("      " + ALLOWED, "SCALES_NONUNIFORM"),
+    kind_sets("      " + ALLOWED, "MIRRORS"),
+    kind_sets("      " + ALLOWED, "ROTATES"),
+    kind_sets("      " + ALLOWED, "SKEWS"),
+    kind_sets("      " + ALLOWED, "SINGULAR"),
+    kind_sets("      " + ALLOWED, "GENERAL"),
+    ("route-excludes-flip", "src", M, "GSHGEOM_MAP_TRANSLATES | GSHGEOM_MAP_SCALES | GSHGEOM_MAP_FLIPS_Y;", "GSHGEOM_MAP_TRANSLATES | GSHGEOM_MAP_SCALES;", MT),
+    ("route-excludes-scale", "src", M, "GSHGEOM_MAP_TRANSLATES | GSHGEOM_MAP_SCALES | GSHGEOM_MAP_FLIPS_Y;", "GSHGEOM_MAP_TRANSLATES | GSHGEOM_MAP_FLIPS_Y;", MT),
+    ("route-excludes-translation", "src", M, "GSHGEOM_MAP_TRANSLATES | GSHGEOM_MAP_SCALES | GSHGEOM_MAP_FLIPS_Y;", "GSHGEOM_MAP_SCALES | GSHGEOM_MAP_FLIPS_Y;", MT),
+    ("route-dimension", "src", M, "  if (map->dim != 2) {\n    return GSHGEOM_OK;", "  if (map->dim != 3) {\n    return GSHGEOM_OK;", MT),
+    ("route-ignores-tag", "src", M, "  if (map->kind & ~allowed) {\n    return GSHGEOM_OK;", "  if (map->kind & ~allowed & 0u) {\n    return GSHGEOM_OK;", MT),
+    ("route-positive-scale", "src", M, "!(a > 0.0)) {", "!(a >= 0.0)) {", MT),
+    ("route-negative-scale", "src", M, "!(a > 0.0)) {", "a == 0.0) {", MT),
+    ("route-skew-upper", "src", M, "if (map->m[0][1] != 0.0 || map->m[1][0] != 0.0 ||", "if (map->m[1][0] != 0.0 ||", MT),
+    ("route-skew-lower", "src", M, "if (map->m[0][1] != 0.0 || map->m[1][0] != 0.0 ||", "if (map->m[0][1] != 0.0 ||", MT),
+    ("route-no-flip", "src", M, "  if (d == a) {\n    flip = 0;", "  if (d == a) {\n    flip = 1;", MT),
+    ("route-flip-flag", "src", M, "  } else if (d == -a) {\n    flip = 1;", "  } else if (d == -a) {\n    flip = 0;", MT),
+    ("route-flip-magnitude", "src", M, "  } else if (d == -a) {", "  } else if (d * d == a * a) {", MT),
+    ("route-aligned-value", "src", M, "  *aligned = 1;\n  if (grid) {", "  *aligned = 2;\n  if (grid) {", MT),
+    ("route-not-aligned-value", "src", M, "  *aligned = 0;\n  if (map->dim != 2) {", "  if (map->dim != 2) {", MT),
+    ("route-grid-scale", "src", M, "grid->scale = a;", "grid->scale = d;", MT),
+    ("route-grid-tx", "src", M, "grid->tx = map->t[0];", "grid->tx = map->t[1];", MT),
+    ("route-grid-ty", "src", M, "grid->ty = map->t[1];", "grid->ty = map->t[0];", MT),
+    ("route-null-aligned", "src", M, "  if (!aligned) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = gshgeom_map_check(map);", "  GSHGEOM_Result r = gshgeom_map_check(map);", MT),
+
+    # --- maps: hash and dump ---------------------------------------------------
+    ("mh-no-dimension", "src", M, "  gshgeom_hash_u32(&h, (uint32_t)map->dim);\n", "", MT),
+    ("mh-no-kind", "src", M, "  gshgeom_hash_u32(&h, map->kind);\n", "", MT),
+    ("mh-kind-u64", "src", M, "gshgeom_hash_u32(&h, map->kind);", "gshgeom_hash_u64(&h, map->kind);", MT),
+    ("mh-column-major", "src", M, "gshgeom_hash_f64(&h, map->m[i][j]);", "gshgeom_hash_f64(&h, map->m[j][i]);", MT),
+    ("mh-two-columns", "src", M, "    for (int j = 0; j < map->dim; j++) {\n      gshgeom_hash_f64(&h", "    for (int j = 0; j < 2; j++) {\n      gshgeom_hash_f64(&h", MT),
+    ("mh-translation", "src", M, "gshgeom_hash_f64(&h, map->t[i]);", "gshgeom_hash_f64(&h, map->t[0]);", MT),
+    ("mh-invalid-map", "src", M, "  if (gshgeom_map_check(map) != GSHGEOM_OK) {\n    return gshgeom_hash_value(&h);", "  if (0) {\n    return gshgeom_hash_value(&h);", MT),
+    ("md-kind-width", "src", M, "kind=%08llx", "kind=%llx", MT),
+    ("md-hash-width", "src", M, "hash=%016llx", "hash=%llx", MT),
+    ("md-row-letter", "src", M, "if (fputc('m', out) == EOF) {", "if (fputc('M', out) == EOF) {", MT),
+    ("md-translation-letter", "src", M, "if (fputc('t', out) == EOF) {", "if (fputc('T', out) == EOF) {", MT),
+    ("md-entry-width", "src", M, 'fprintf(out, " %016llx", (unsigned long long)gshgeom_f64_bits(map->m[i][j]))', 'fprintf(out, " %llx", (unsigned long long)gshgeom_f64_bits(map->m[i][j]))', MT),
+    ("md-translation-width", "src", M, 'fprintf(out, " %016llx", (unsigned long long)gshgeom_f64_bits(map->t[i]))', 'fprintf(out, " %llx", (unsigned long long)gshgeom_f64_bits(map->t[i]))', MT),
+    ("md-ignores-flush", "src", M, "return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;", "return GSHGEOM_OK;", MT),
+    ("md-invalid-map", "src", M, "if (!out || gshgeom_map_check(map) != GSHGEOM_OK) {", "if (!out) {", MT),
+]
+
+
 # Plants caught by the probe's hash alone.
 FLAG_PLANTS = [
     ("fused-multiply-add", "-mfma -ffp-contract=fast"),
@@ -394,6 +668,9 @@ def do_plant(plant, control_objs):
         text = apply((ROOT / fname).read_text(), old, new, pid)
         planted = d / "planted" / fname
         planted.parent.mkdir(parents=True, exist_ok=True)
+        # A source may include a neighbour by a relative path ("../exact/exact.h"),
+        # so the planted file sits in a copy of the whole tree.
+        shutil.copytree(ROOT / "src", d / "planted" / "src", dirs_exist_ok=True)
         planted.write_text(text)
         obj = d / "planted.o"
         r = run(CC + CFLAGS + ["-c", str(planted), "-o", str(obj)])
@@ -443,9 +720,13 @@ def main():
     if len(set(ids)) != len(ids):
         print("FAIL  duplicate plant ids")
         return 1
+    plants = [p for p in PLANTS if not ONLY or re.search(ONLY, p[0])]
+    if not plants:
+        print("FAIL  PLANT_ONLY matches no plant")
+        return 1
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=JOBS) as pool:
-        futures = {pool.submit(do_plant, p, control): p for p in PLANTS}
+        futures = {pool.submit(do_plant, p, control): p for p in plants}
         results = {}
         for fut in concurrent.futures.as_completed(futures):
             p = futures[fut]
@@ -453,7 +734,7 @@ def main():
                 results[p[0]] = fut.result()[1]
             except Exception as e:  # a plant that cannot be built is a defect of the harness
                 results[p[0]] = e
-    for p in PLANTS:
+    for p in plants:
         r = results[p[0]]
         if isinstance(r, Exception):
             print("FAIL  %-34s %s" % (p[0], r))
@@ -463,6 +744,10 @@ def main():
             failures += 1
         else:
             print("ok    %-34s caught by %s" % (p[0], ", ".join("%s (%s)" % (t, (f[0][14:70] if f else "crash")) for t, f in r)))
+
+    if ONLY:
+        print("%d plants run (PLANT_ONLY=%s), %d not caught" % (len(plants), ONLY, failures))
+        return 1 if failures else 0
 
     # The probe's own plants.
     (WORK / "bit").mkdir(parents=True, exist_ok=True)

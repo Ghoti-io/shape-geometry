@@ -8,7 +8,7 @@
 # Ghoti.io Shape Geometry is free software: you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation.
-"""Print the known answers of the hash spelling (CAP-13, AD-21).
+"""Print the known answers of the hash spelling and the predicates (CAP-2, CAP-4, CAP-13, AD-21).
 
 This is a second statement of the spelling in include/ghoti.io/shape-geometry/
 hash.h and path.h, written with Python's `struct` and none of the library's
@@ -18,9 +18,19 @@ spelling, with the fixtures below (the same numbers as test_hash.cpp builds
 its paths from).
 
     python3 tools/gen-hash-vectors.py > tests/known_answers.h
+
+Story 6 adds the map fixtures (their hash and dump, and the kind tag each is
+expected to be classified as, stated here by hand from the rules in map.h) and
+the orientation vectors: points chosen to be exactly or nearly degenerate, with
+the sign decided by Python's `fractions` (exact rational arithmetic), and the
+number of them on which the naive double expression is wrong, so that a test
+can show the vectors are discriminating.
 """
+import math
+import random
 import struct
 import sys
+from fractions import Fraction
 
 BASIS = 0xCBF29CE484222325
 PRIME = 0x100000001B3
@@ -124,6 +134,184 @@ def dump_text(dim):
     return "\n".join(lines) + "\n"
 
 
+# --- maps --------------------------------------------------------------------
+TR, SC, NU, FY, MI, QT, RO, SK, SG, GE = (1 << i for i in range(10))
+
+# (name, dim, row-major matrix, translation, expected kind tag)
+MAP_FIXTURES = [
+    ("identity2", 2, [1, 0, 0, 1], [0, 0], 0),
+    ("translate2", 2, [1, 0, 0, 1], [1.5, -2.25], TR),
+    ("scale2", 2, [2, 0, 0, 2], [0, 0], SC),
+    ("design2", 2, [2.5, 0, 0, -2.5], [10, 20], TR | SC | FY),
+    ("quarter2", 2, [0, -1, 1, 0], [0, 0], QT),
+    ("half2", 2, [-1, 0, 0, -1], [0, 0], QT),
+    ("nonuniform2", 2, [2, 0, 0, 3], [0, 0], NU),
+    ("mirrorx2", 2, [-1, 0, 0, 1], [0, 0], MI),
+    ("rotate2", 2, [0.8, -0.6, 0.6, 0.8], [0.5, 0], RO | TR),
+    ("mirrorrot2", 2, [0.6, 0.8, 0.8, -0.6], [0, 0], RO | MI),
+    ("skew2", 2, [1, 0.5, 0, 1], [0, 0], SK),
+    ("singular2", 2, [1, 2, 2, 4], [0, 0], SG),
+    ("swap2", 2, [0, 1, 1, 0], [0, 0], QT | MI),
+    ("cycle3", 3, [0, 1, 0, 0, 0, 1, 1, 0, 0], [0, 0, 0], QT),
+    ("flip3", 3, [1, 0, 0, 0, -1, 0, 0, 0, 1], [1, 2, 3], FY | TR),
+    ("general3", 3, [1, 2, 3, 0, 1, 4, 5, 6, 0], [0, 0, 0], GE),
+    ("identity3", 3, [1, 0, 0, 0, 1, 0, 0, 0, 1], [0, 0, 0], 0),
+]
+
+
+def map_bytes(dim, m, t, kind):
+    out = u32(1) + u32(dim) + u32(kind)
+    for v in m:
+        out += f64(float(v))
+    for v in t:
+        out += f64(float(v))
+    return out
+
+
+def map_dump(dim, m, t, kind):
+    h = fnv(map_bytes(dim, m, t, kind))
+    lines = ["gshgeom.map 1 dim=%d kind=%08x hash=%016x" % (dim, kind, h)]
+    for i in range(dim):
+        lines.append("m" + "".join(" %016x" % bits(float(m[i * dim + j])) for j in range(dim)))
+    lines.append("t" + "".join(" %016x" % bits(float(t[i])) for i in range(dim)))
+    return "\n".join(lines) + "\n"
+
+
+def hexf(v):
+    return float(v).hex()
+
+
+# --- orientation -------------------------------------------------------------
+def sgn(x):
+    return (x > 0) - (x < 0)
+
+
+def exact2(a, b, c):
+    A, B, C = [[Fraction(v) for v in p] for p in (a, b, c)]
+    return sgn((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]))
+
+
+def naive2(a, b, c):
+    return sgn((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+
+
+def exact3(a, b, c, d):
+    A, B, C, D = [[Fraction(v) for v in p] for p in (a, b, c, d)]
+    u = [B[i] - A[i] for i in range(3)]
+    v = [C[i] - A[i] for i in range(3)]
+    w = [D[i] - A[i] for i in range(3)]
+    return sgn(u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0])
+               + u[2] * (v[0] * w[1] - v[1] * w[0]))
+
+
+def naive3(a, b, c, d):
+    ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+    wx, wy, wz = d[0] - a[0], d[1] - a[1], d[2] - a[2]
+    return sgn(ux * (vy * wz - vz * wy) - uy * (vx * wz - vz * wx) + uz * (vx * wy - vy * wx))
+
+
+def scaled(p, e):
+    return tuple(math.ldexp(v, e) for v in p)
+
+
+def orient2d_cases():
+    rng = random.Random(20261018)
+    cases = []
+    u = 2.0 ** -53
+    for i in range(16):
+        for j in range(16):
+            cases.append(((0.5 + i * u, 0.5 + j * u), (12.0, 12.0), (24.0, 24.0)))
+
+    def grid():
+        return tuple(rng.randrange(-(1 << 24), 1 << 24) / float(1 << 20) for _ in range(2))
+
+    base = []
+    for _ in range(300):
+        a, b = grid(), grid()
+        s = Fraction(rng.randrange(-16, 25), 8)
+        c = [float(Fraction(a[k]) + s * (Fraction(b[k]) - Fraction(a[k]))) for k in range(2)]
+        for _ in range(rng.randrange(0, 3)):
+            k = rng.randrange(2)
+            step = rng.choice((-1, 1))
+            for _ in range(rng.randrange(1, 3)):
+                c[k] = math.nextafter(c[k], math.inf * step)
+        base.append((a, b, tuple(c)))
+    cases += base
+    for e in (-1040, -700, 600, 970):
+        for case in base[:40]:
+            cases.append(tuple(scaled(p, e) for p in case))
+    h = 2.0 ** -1074
+    cases += [
+        ((0.0, 0.0), (h, 0.0), (0.0, h)),
+        ((0.0, 0.0), (h, 0.0), (0.0, -h)),
+        ((0.0, 0.0), (h, h), (2 * h, 2 * h)),
+        ((0.0, 0.0), (1.0, 0.0), (0.0, 0.0)),
+        ((1e300, 1e300), (2e300, 2e300), (3e300, 3e300)),
+        ((1e300, 1e300), (2e300, 2e300), (3e300, math.nextafter(3e300, math.inf))),
+        ((-0.0, 0.0), (0.0, -0.0), (0.0, 0.0)),
+        ((1.7976931348623157e308, 0.0), (0.0, 1.7976931348623157e308), (-1.7976931348623157e308, 0.0)),
+    ]
+    return cases
+
+
+def orient3d_cases():
+    rng = random.Random(20261019)
+    cases = []
+    u = 2.0 ** -53
+    for i in range(6):
+        for j in range(6):
+            for k in range(6):
+                cases.append(((0.5 + i * u, 0.5 + j * u, 0.5 + k * u),
+                              (24.0, 0.0, 0.0), (0.0, 24.0, 0.0), (0.0, 0.0, 24.0)))
+
+    def grid():
+        return tuple(rng.randrange(-(1 << 24), 1 << 24) / float(1 << 20) for _ in range(3))
+
+    base = []
+    for _ in range(300):
+        a, b, c = grid(), grid(), grid()
+        s = Fraction(rng.randrange(-16, 25), 8)
+        t = Fraction(rng.randrange(-16, 25), 8)
+        d = [float(Fraction(a[k]) + s * (Fraction(b[k]) - Fraction(a[k]))
+                   + t * (Fraction(c[k]) - Fraction(a[k]))) for k in range(3)]
+        for _ in range(rng.randrange(0, 3)):
+            k = rng.randrange(3)
+            step = rng.choice((-1, 1))
+            d[k] = math.nextafter(d[k], math.inf * step)
+        base.append((a, b, c, tuple(d)))
+    cases += base
+    for e in (-1040, -700, 600, 960):
+        for case in base[:40]:
+            cases.append(tuple(scaled(p, e) for p in case))
+    # Three points nearly collinear in the plane (the Kettner family) and the
+    # fourth far above it, with the other two points almost at the plane's
+    # height: the determinant is one z-difference times a cancelling 2D
+    # determinant, so one term of the filter's permanent dominates, and the
+    # bound is wrong if that term is missing.  One family for each term.
+    u = 2.0 ** -53
+    for i in range(9):
+        for j in range(9):
+            p = (0.5 + i * u, 0.5 + j * u)
+            q = (12.0, 12.0)
+            r = (24.0, 24.0)
+            far = (0.3, 7.7, 5.0)
+            tiny = 2.0 ** -60
+            # |adz| small, |bdz| small, |cdz| large: the third term.
+            cases.append(((p[0], p[1], tiny), (q[0], q[1], tiny / 2), far, (r[0], r[1], 0.0)))
+            # |adz| large: the first term (a above, b c d nearly collinear).
+            cases.append((far, (p[0], p[1], tiny), (q[0], q[1], tiny / 2), (r[0], r[1], 0.0)))
+            # |bdz| large: the second term (b above, a c d nearly collinear).
+            cases.append(((p[0], p[1], tiny), far, (q[0], q[1], tiny / 2), (r[0], r[1], 0.0)))
+    h = 2.0 ** -1074
+    cases += [
+        ((0.0, 0.0, 0.0), (h, 0.0, 0.0), (0.0, h, 0.0), (0.0, 0.0, h)),
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)),
+        ((1e100, 0.0, 0.0), (0.0, 1e100, 0.0), (0.0, 0.0, 1e100), (1e100, 1e100, 1e100)),
+    ]
+    return cases
+
+
 def main():
     o = sys.stdout
     o.write("// Generated by tools/gen-hash-vectors.py.  Do not edit.\n")
@@ -160,6 +348,37 @@ def main():
         for line in dump_text(dim).splitlines():
             o.write('    "%s\\n"\n' % line)
         o.write("    ;\n")
+
+    o.write("struct MapFixture {\n  const char * name;\n  int dim;\n  double m[9];\n  double t[3];\n  unsigned kind;\n  std::uint64_t hash;\n  const char * dump;\n};\n")
+    o.write("static const MapFixture kMapFixtures[] = {\n")
+    for name, dim, m, t, kind in MAP_FIXTURES:
+        mm = [hexf(v) for v in m] + ["0.0"] * (9 - len(m))
+        tt = [hexf(v) for v in t] + ["0.0"] * (3 - len(t))
+        o.write('    {"%s", %d, {%s}, {%s}, %du, UINT64_C(0x%016x),\n' % (
+            name, dim, ", ".join(mm), ", ".join(tt), kind, fnv(map_bytes(dim, m, t, kind))))
+        for line in map_dump(dim, m, t, kind).splitlines():
+            o.write('     "%s\\n"\n' % line)
+        o.write("    },\n")
+    o.write("};\n\n")
+
+    c2 = orient2d_cases()
+    c3 = orient3d_cases()
+    o.write("struct Orient2dCase {\n  double a[2], b[2], c[2];\n  int sign;\n};\n")
+    o.write("struct Orient3dCase {\n  double a[3], b[3], c[3], d[3];\n  int sign;\n};\n")
+    wrong2 = sum(1 for a, b, c in c2 if naive2(a, b, c) != exact2(a, b, c))
+    wrong3 = sum(1 for a, b, c, d in c3 if naive3(a, b, c, d) != exact3(a, b, c, d))
+    o.write("static const unsigned kNaiveWrong2d = %d;\n" % wrong2)
+    o.write("static const unsigned kNaiveWrong3d = %d;\n" % wrong3)
+    o.write("static const Orient2dCase kOrient2dCases[] = {\n")
+    for a, b, c in c2:
+        o.write("    {{%s}, {%s}, {%s}, %d},\n" % tuple(
+            [", ".join(hexf(v) for v in p) for p in (a, b, c)] + [exact2(a, b, c)]))
+    o.write("};\n")
+    o.write("static const Orient3dCase kOrient3dCases[] = {\n")
+    for a, b, c, d in c3:
+        o.write("    {{%s}, {%s}, {%s}, {%s}, %d},\n" % tuple(
+            [", ".join(hexf(v) for v in p) for p in (a, b, c, d)] + [exact3(a, b, c, d)]))
+    o.write("};\n")
     o.write("\n#endif\n")
 
 

@@ -87,6 +87,22 @@ static void feed_point(GSHGEOM_Point p, int dim) {
   }
 }
 
+static void feed_int(int v) {
+  count++;
+  gshgeom_hash_u32(&total, (uint32_t)v);
+}
+
+static void feed_map(const GSHGEOM_Map * m) {
+  count++;
+  gshgeom_hash_u64(&total, gshgeom_map_hash(m));
+  for (int i = 0; i < m->dim; i++) {
+    for (int j = 0; j < m->dim; j++) {
+      feed(m->m[i][j]);
+    }
+    feed(m->t[i]);
+  }
+}
+
 static int fail(const char * what) {
   fprintf(stderr, "corpus-hash: %s\n", what);
   return 1;
@@ -214,6 +230,163 @@ int main(void) {
       feed_point(b.min, dim);
       feed_point(b.max, dim);
       gshgeom_path_destroy(path);
+    }
+  }
+
+
+  /* Maps (story 6): the constructors of every angle unit, the composer and the
+   * chain, application, the route predicate, and the exact predicates.  The
+   * matrices are built from the generator's grid so that they are exact in
+   * double and every product rounds the same way on every target; what the
+   * probe can see is a fused multiply-add in the composer or in the filter's
+   * floating-point part, a different association, and gmath's sine and
+   * cosine (the angles are in every unit). */
+  for (int dim = 2; dim <= 3; dim++) {
+    for (int i = 0; i < 60; i++) {
+      GSHGEOM_Map a, b, c, d, e;
+      double ma[9], mb[9], mc[9], md[9], ta[3], tb[3], tc[3], td[3];
+      for (int k = 0; k < 9; k++) {
+        ma[k] = coord() / 8.0;
+        mb[k] = coord() / 8.0;
+        mc[k] = coord() / 8.0;
+        md[k] = coord() / 8.0;
+      }
+      for (int k = 0; k < 3; k++) {
+        ta[k] = coord();
+        tb[k] = coord();
+        tc[k] = coord();
+        td[k] = coord();
+      }
+      if (gshgeom_map_from_matrix(dim, ma, ta, &a) != GSHGEOM_OK ||
+          gshgeom_map_from_matrix(dim, mb, tb, &b) != GSHGEOM_OK ||
+          gshgeom_map_from_matrix(dim, mc, tc, &c) != GSHGEOM_OK ||
+          gshgeom_map_from_matrix(dim, md, td, &d) != GSHGEOM_OK) {
+        return fail("a map was refused");
+      }
+      GSHGEOM_Map chain[3];
+      chain[0] = a;
+      chain[1] = b;
+      chain[2] = c;
+      if (gshgeom_map_compose(&a, &b, &e) != GSHGEOM_OK) {
+        return fail("compose failed");
+      }
+      feed_map(&e);
+      if (gshgeom_map_compose_chain(chain, 3, &d, &e) != GSHGEOM_OK) {
+        return fail("compose_chain failed");
+      }
+      feed_map(&e);
+      GSHGEOM_Point p = random_point(dim);
+      GSHGEOM_Point q;
+      if (gshgeom_map_apply_point(&e, p, &q) != GSHGEOM_OK) {
+        return fail("apply failed");
+      }
+      feed_point(q, dim);
+      if (gshgeom_map_apply_vector(&e, p, &q) != GSHGEOM_OK) {
+        return fail("apply_vector failed");
+      }
+      feed_point(q, dim);
+    }
+  }
+  {
+    static const GSHGEOM_Angle_Unit units[4] = {GSHGEOM_ANGLE_RADIANS,
+        GSHGEOM_ANGLE_DEGREES, GSHGEOM_ANGLE_GRADIANS, GSHGEOM_ANGLE_TURNS};
+    static const double quarters[12] = {0.0, 90.0, 180.0, 270.0, -90.0, 360.0,
+        450.0, 100.0, 0.25, -0.75, 30.0, 1.0};
+    for (int u = 0; u < 4; u++) {
+      for (int i = 0; i < 12; i++) {
+        GSHGEOM_Map m;
+        if (gshgeom_map_rotate(units[u], quarters[i], &m) != GSHGEOM_OK) {
+          return fail("a quarter-turn rotation was refused");
+        }
+        feed_map(&m);
+      }
+      for (int i = 0; i < 80; i++) {
+        double angle = coord() * 12.0;
+        GSHGEOM_Map m;
+        if (gshgeom_map_rotate(units[u], angle, &m) != GSHGEOM_OK) {
+          return fail("a rotation was refused");
+        }
+        feed_map(&m);
+        GSHGEOM_Map m3;
+        if (gshgeom_map_rotate_axis((GSHGEOM_Axis)(i % 3), units[u], angle, &m3) != GSHGEOM_OK) {
+          return fail("an axis rotation was refused");
+        }
+        feed_map(&m3);
+      }
+    }
+    for (int i = 0; i < 40; i++) {
+      double s = weight();
+      double tx = coord();
+      double ty = coord();
+      GSHGEOM_Map dm, rot, comp;
+      if (gshgeom_map_design_to_model(s, tx, ty, &dm) != GSHGEOM_OK ||
+          gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, (i % 3) ? 0.0 : 90.0, &rot) != GSHGEOM_OK ||
+          gshgeom_map_compose(&dm, &rot, &comp) != GSHGEOM_OK) {
+        return fail("a design map failed");
+      }
+      int aligned = 0;
+      GSHGEOM_Grid g;
+      if (gshgeom_map_grid_aligned(&dm, &aligned, &g) != GSHGEOM_OK || !aligned) {
+        return fail("the design map is not grid aligned");
+      }
+      feed_int(aligned);
+      feed(g.scale);
+      feed_int(g.flip_y);
+      if (gshgeom_map_grid_aligned(&comp, &aligned, NULL) != GSHGEOM_OK) {
+        return fail("the route predicate failed");
+      }
+      feed_int(aligned);
+    }
+    /* Exact predicates: exactly and nearly degenerate triples and quadruples. */
+    for (int i = 0; i < 400; i++) {
+      GSHGEOM_Point a = random_point(3);
+      GSHGEOM_Point b = random_point(3);
+      GSHGEOM_Point c = random_point(3);
+      int k = (int)(next() % 17) - 8;
+      int j = (int)(next() % 9) - 4;
+      int perturb = (int)(next() % 5) - 2;
+      GSHGEOM_Point on;
+      on.x = a.x + ((double)k / 8.0) * (b.x - a.x);
+      on.y = a.y + ((double)k / 8.0) * (b.y - a.y);
+      on.z = a.z + ((double)k / 8.0) * (b.z - a.z) + ((double)j / 8.0) * (c.z - a.z);
+      GSHGEOM_Point on3 = on;
+      on3.x += ((double)j / 8.0) * (c.x - a.x);
+      on3.y += ((double)j / 8.0) * (c.y - a.y);
+      on.z = a.z + ((double)k / 8.0) * (b.z - a.z);
+      GSHGEOM_Point near2 = on;
+      near2.z = 0.0;
+      near2.x += (double)perturb * 0x1p-40;
+      GSHGEOM_Point near3 = on3;
+      near3.z += (double)perturb * 0x1p-40;
+      int s2 = 9, s3 = 9, s2x = 9, s3x = 9;
+      if (gshgeom_orient2d(a, b, near2, &s2) != GSHGEOM_OK ||
+          gshgeom_orient2d_exact(a, b, near2, &s2x) != GSHGEOM_OK ||
+          gshgeom_orient3d(a, b, c, near3, &s3) != GSHGEOM_OK ||
+          gshgeom_orient3d_exact(a, b, c, near3, &s3x) != GSHGEOM_OK) {
+        return fail("a predicate was refused");
+      }
+      if (s2 != s2x || s3 != s3x) {
+        return fail("the filtered predicate disagrees with the exact one");
+      }
+      feed_int(s2);
+      feed_int(s3);
+    }
+    /* The smallest triangle, and one at the top of the range. */
+    {
+      GSHGEOM_Point o = {0.0, 0.0, 0.0};
+      GSHGEOM_Point h1 = {0x1p-1074, 0.0, 0.0};
+      GSHGEOM_Point h2 = {0.0, 0x1p-1074, 0.0};
+      GSHGEOM_Point h3 = {0.0, 0.0, 0x1p-1074};
+      GSHGEOM_Point big1 = {0x1p1000, 0.0, 0.0};
+      GSHGEOM_Point big2 = {0.0, 0x1p1000, 0.0};
+      GSHGEOM_Point big3 = {0.0, 0.0, 0x1p1000};
+      int s;
+      if (gshgeom_orient2d(o, h1, h2, &s) != GSHGEOM_OK) return fail("orient2d failed");
+      feed_int(s);
+      if (gshgeom_orient3d(o, h1, h2, h3, &s) != GSHGEOM_OK) return fail("orient3d failed");
+      feed_int(s);
+      if (gshgeom_orient3d(o, big1, big2, big3, &s) != GSHGEOM_OK) return fail("orient3d failed");
+      feed_int(s);
     }
   }
 
