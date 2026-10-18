@@ -151,6 +151,7 @@
 #define gshgeom_flat_path_points GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_points)
 #define gshgeom_flat_path_subpath GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_subpath)
 #define gshgeom_flat_path_hash GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_hash)
+#define gshgeom_flatten_revision GHOTIIO_SHAPE_GEOMETRY(gshgeom_flatten_revision)
 #define gshgeom_flat_path_dump GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_dump)
 #define gshgeom_measured_create GHOTIIO_SHAPE_GEOMETRY(gshgeom_measured_create)
 #define gshgeom_measured_destroy GHOTIIO_SHAPE_GEOMETRY(gshgeom_measured_destroy)
