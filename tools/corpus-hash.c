@@ -588,6 +588,90 @@ int main(void) {
     }
   }
 
+  /* Story 8: measured paths.  Random paths of every kind, 2D and 3D, measured at
+   * the default tolerance and at two others, and queried at 13 distances each:
+   * the table's hash, the length, and every number of every frame.  The adaptive
+   * rule's decisions are comparisons of sums of products, so a fused
+   * multiply-add or an excess of precision changes which panels are accepted and
+   * the whole table with them. */
+  {
+    static const double tolerances[3] = {0.0, 0x1p-20, 0x1p-34};
+    for (int i = 0; i < 90; i++) {
+      int dim = (i % 3 == 2) ? 3 : 2;
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, dim, &path) != GSHGEOM_OK) {
+        return fail("path create failed");
+      }
+      GSHGEOM_Point start = random_point(dim);
+      GSHGEOM_Result r = gshgeom_path_move_to(path, start);
+      int steps = 1 + (int)(next() % 5);
+      for (int k = 0; k < steps && r == GSHGEOM_OK; k++) {
+        double w3[3], w4[4];
+        for (int j = 0; j < 3; j++) {
+          w3[j] = weight();
+        }
+        for (int j = 0; j < 4; j++) {
+          w4[j] = weight();
+        }
+        GSHGEOM_Point q1 = random_point(dim);
+        GSHGEOM_Point q2 = random_point(dim);
+        GSHGEOM_Point q3 = random_point(dim);
+        switch (next() % 7) {
+        case 0:
+          r = gshgeom_path_line_to(path, q1);
+          break;
+        case 1:
+          r = gshgeom_path_quadratic_to(path, q1, q2);
+          break;
+        case 2:
+          r = gshgeom_path_cubic_to(path, q1, q2, q3);
+          break;
+        case 3:
+          r = gshgeom_path_rational_quadratic_to(path, q1, q2, w3);
+          break;
+        case 4:
+          r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4);
+          break;
+        case 5:
+          r = gshgeom_path_close(path);
+          break;
+        default:
+          r = gshgeom_path_move_to(path, q1);
+          break;
+        }
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a path step was refused");
+      }
+      GSHGEOM_Measured * m = NULL;
+      r = gshgeom_measured_create(NULL, NULL, path, tolerances[i % 3], &m);
+      if (r != GSHGEOM_OK) {
+        return fail("a path was not measured");
+      }
+      count++;
+      gshgeom_hash_u64(&total, gshgeom_measured_hash(m));
+      double length = gshgeom_measured_length(m);
+      feed(length);
+      feed_int((int)gshgeom_measured_row_count(m));
+      for (int k = 0; k <= 12; k++) {
+        GSHGEOM_Measured_Frame f;
+        r = gshgeom_measured_at_clamped(m, length * (double)k / 12.0, &f);
+        feed_int((int)r);
+        if (r != GSHGEOM_OK) {
+          continue;
+        }
+        feed_point(f.point, dim);
+        feed_point(f.tangent, dim);
+        feed_point(f.normal, dim);
+        feed(f.t);
+        feed_int((int)f.element);
+        feed_int(f.has_tangent);
+      }
+      gshgeom_measured_destroy(m);
+      gshgeom_path_destroy(path);
+    }
+  }
+
   printf("shape-geometry.hash %016" PRIx64 "\n", gshgeom_hash_value(&total));
   printf("shape-geometry.count %lu\n", count);
   return 0;

@@ -12,11 +12,15 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
 - The 26.6 device path: the one rounding rule `floor(x * 64 + 0.5)`, a model
   path under a map converted to it, and the integer flattener (1/16 pixel,
   ported from `font`'s scan converter) producing a flattened path.
+- Along-path parametrization: a measured path built once from a model path (any
+  curve kind, 2D or 3D, any number of subpaths) gives its arc length and, at any
+  distance along it, the point, the unit tangent and the left normal. The arc
+  length of a curve is adaptive eight-point Gauss-Legendre to a stated
+  tolerance; the table and every answer are bit-identical on every target.
 - `_dump` and `_hash` for each (FNV-1a 64 over little-endian fields, the same
   value on every target).
 
-The along-path parametrization (arc length, point, tangent, normal) is still to
-come. `documentation/design.md` has the model.
+`documentation/design.md` has the model.
 
 ## Building
 

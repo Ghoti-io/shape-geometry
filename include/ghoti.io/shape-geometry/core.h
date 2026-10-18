@@ -83,7 +83,7 @@ GSHGEOM_API const char * gshgeom_result_string(GSHGEOM_Result result);
  */
 typedef struct GSHGEOM_Limits {
   size_t max_elements;  ///< Most elements (verbs) one model or device path may hold.
-  size_t max_points;    ///< Most points one flattened path may hold.
+  size_t max_points;    ///< Most points one flattened path may hold, and most rows (quadrature panels) one measured path may hold.
   uint8_t _reserved[8]; ///< Reserved; zero.
 } GSHGEOM_Limits;
 

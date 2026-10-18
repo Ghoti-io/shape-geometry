@@ -119,6 +119,47 @@ closed flag, the closing line implicit.
 produced for them; `tools/vectors-from-font/` records how (it is the only place
 `font` is named; nothing here includes or links it).
 
+## Along-path parametrization
+
+`along.h`. A *measured path* is built once from a model path and queried by
+distance. The distance along a path is the sum of the arc lengths of its
+segments in element order; a move adds nothing (the point jumps, the distance
+does not), a close is the straight segment back to the start, and a segment of
+length exactly zero has no extent and is never selected. A distance that is
+exactly the boundary between two segments (or two subpaths) belongs to the later
+one, so a query is a right-hand limit, except the length itself, which is the end
+of the last segment. A distance outside `[0, length]` is refused by `_at` and
+clamped by `_at_clamped` (NaN and infinity are refused by both).
+
+The length of a line is a hypotenuse. The length of a curve is the integral of
+its speed `|B'(t)|` (for a rational curve `B' = (N'D - ND') / D^2`, computed from
+the homogeneous numerator and denominator by de Casteljau's recurrences) by
+adaptive eight-point Gauss-Legendre: a panel is accepted when it differs from the
+sum of its two halves by at most `tol * S * width`, `S` the length of the control
+polygon, and the two halves are then the rows of the table. A row holds the
+segment, the parameter interval, the cumulative distance at its start and its
+length, so a query is a binary search and a safeguarded Newton solve inside one
+panel. The tolerance is `0x1p-40` by default and may be set from `0x1p-46` to
+`0x1p-4`; below the minimum the estimate would measure the rounding of the sum.
+The estimate is the difference between two evaluations of a smooth function, so
+it is evidence rather than proof; the tests measure the real error against an
+independent MPFR reference (`tools/gen-along-vectors.py`, in the pinned oracle
+image), and against closed forms: a circular arc is a rational quadratic, whose
+length is `r * theta`.
+
+At a point where the velocity vanishes (a cusp, or a control point repeated at an
+end) the tangent is the direction of the first nonzero derivative of
+`E = N'D - ND'`, which has the direction of `B'`, on the later side: the
+right-hand limit, and at `t = 1` the left-hand limit. The normal is
+`gshgeom_normal_left(tangent)` in 2D (the rule of `orient.h`, so on a positively
+wound circle it points out) and absent in 3D, where left has no meaning. The rows
+are bounded by `max_points` of the limits.
+
+Everything is `+ - * /`, `gmath_hypot` and a fixed order of operations, so the
+table, every query, the hash and the dump are the same bits on every target; the
+cross-target probe measures 90 random paths of every kind at three tolerances and
+hashes every number of every answer.
+
 ## Tests and gates
 
 `make test` runs the unit tests and the gates; `make check-planted` builds

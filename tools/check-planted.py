@@ -74,6 +74,23 @@ Story 7 adds (ids start with r-, dp-, b-, h-, fm-, rat-, fl- and fh-):
 A plant of kind ``srch`` changes an internal header under src/ and rebuilds
 what includes it (device.c and flatten.c).
 
+Story 8 adds (ids start with al-, alh- and ald-):
+
+  al-      along-path parametrization: the Gauss-Legendre constants (one unit in
+           the last place each, which only the pinned tables and the probe can
+           see), the homogeneous form, de Casteljau and the differences, the
+           derivative of E = N'D - ND' by Leibniz's rule, the speed, the rule's
+           scaling, the polygon length that scales the tolerance, the table's
+           rows and the exact row limit, the acceptance test of a panel and the
+           order and error propagation of its halves, the tolerance argument and
+           its bounds, the single-curve length, building (subpaths, the first
+           point, release on failure), the accessors, the query (range, clamping,
+           the boundary rule, the end of a row, the frame), the inverse of the
+           arc length (Newton, the bracket, the stop) and the tangent (the
+           threshold, the orders of derivative, the sign at the end)
+  alh-     the measured path's hash fields, their order and width
+  ald-     its dump text
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 
@@ -157,6 +174,26 @@ changes no result, cannot be seen by any test:
     of 16 and a plain run cannot see a store past the need (``make test-asan``
     is the instrument for it, and the sweep in ``DevicePathAllocation`` grows
     the arrays through it)
+  - story 8: the order test ``k > m`` in ``deriv`` (``k > m + 1``): a derivative
+    beyond the degree is asked for only at a point where every lower derivative
+    of E vanishes too, which a curve with extent does not have; ``z`` of E in 2D
+    (``mag`` ignores it); the polynomial branch of ``speed`` (the denominator of a
+    polynomial curve is a de Casteljau blend of ones, which is exactly one for
+    these parameters); the result of ``measure`` in the single-curve length and
+    of ``gshgeom_path_element`` and ``add_segment`` in ``create`` (a failure of
+    the first is reached only by more than 4 Mi rows, the next two stop the loop
+    on their own condition); the initial ``end`` of a subpath (overwritten by the
+    segment that follows or kept by none); a line solved by Newton instead of the
+    closed form (the first guess is exact, so the answer is the same bits); the
+    result of ``gshgeom_curve_eval`` in a query and the zeroing of the frame
+    (its inputs are validated); the direction of Newton's step and its first
+    guess (the stop test and the bracket fix the answer, only the iteration count
+    differs); the threshold of "vanishes" at zero and the terms of ``e_scale``
+    (the cancellations in the tests are exact or far from the threshold); the
+    binomial weights of ``binom`` and their use in ``e_derivative`` (the rational
+    fallback reaches E'' only at a triple coincident point, where every term of
+    it points along P3 - P0, so the weights scale the direction and never turn
+    it)
   - the 200-step cap of ``bisect`` as a cap: it is reached only for roots
     closer than 2^-200 to an end, where 2^-200 is not a double of interest
 """
@@ -956,6 +993,238 @@ PLANTS += [
     # --- the core -------------------------------------------------------------
     ("max-points-default-zero", "src", K, "  limits->max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n", "", PT),
     ("max-points-default-const", "hdr", KH, "#define GSHGEOM_LIMITS_DEFAULT_MAX_POINTS ((size_t)1 << 22)", "#define GSHGEOM_LIMITS_DEFAULT_MAX_POINTS ((size_t)1 << 21)", PT + FT),
+]
+
+
+# --- story 8: along-path parametrization --------------------------------------
+A = "src/along/along.c"
+AH = "include/ghoti.io/shape-geometry/along.h"
+AT = ["testAlong"]
+
+PLANTS += [
+    # --- the Gauss-Legendre constants (one unit in the last place each; the
+    # pinned tables and the probe see what the lengths cannot) -----------------
+    ('al-gl-node-0', "src", A, '0x1.77ac94f3c7345p-3', '0x1.77ac95f3c7345p-3', AT),
+    ("al-gl-node-1", "src", A, "0x1.0d129583284b4p-1", "0x1.0d129583284b5p-1", AT),
+    ('al-gl-node-2', "src", A, '0x1.97e4ab249f41ep-1', '0x1.97e4ac249f41ep-1', AT),
+    ('al-gl-node-3', "src", A, '0x1.ebab1cb0acc67p-1', '0x1.ebab1db0acc67p-1', AT),
+    ("al-gl-weight-0", "src", A, "0x1.736360b199343p-2", "0x1.736360b199344p-2", AT),
+    ("al-gl-weight-1", "src", A, "0x1.413c50a255615p-2", "0x1.413c50a255616p-2", AT),
+    ("al-gl-weight-2", "src", A, "0x1.c76fb531d2b96p-3", "0x1.c76fb531d2b97p-3", AT),
+    ("al-gl-weight-3", "src", A, "0x1.9ea1d04ca0374p-4", "0x1.9ea1d04ca0375p-4", AT),
+    ("al-gl-weight-big", "src", A, "0x1.9ea1d04ca0374p-4", "0x1.9ea1d04ca0374p-3", AT),
+    ('al-gl-pairs', "src", A, 'for (int i = 0; i < GL_HALF; i++) {\n    double off', 'for (int i = 0; i < GL_HALF - 1; i++) {\n    double off', AT),
+
+    # --- the curve in homogeneous form, de Casteljau, differences --------------
+    ("al-load-numerator-weights", "src", A, "h->c[a][i] = h->rational ? curve->w[i] * v : v;", "h->c[a][i] = v;", AT),
+    ("al-load-denominator", "src", A, "h->d[i] = h->rational ? curve->w[i] : 1.0;", "h->d[i] = 1.0;", AT),
+    ("al-load-dimension", "src", A, "h->dim = curve->dim;", "h->dim = 2;", AT),
+    ("al-load-degree", "src", A, "h->n = gshgeom_curve_point_count(curve->kind) - 1;", "h->n = gshgeom_curve_point_count(curve->kind) > 3 ? 3 : 2;", AT),
+    ("al-load-rational-flag", "src", A, "h->rational = gshgeom_curve_is_rational(curve->kind);", "h->rational = 0;", AT),
+    ('al-mag-no-z', "src", A, 'return dim == 3 ? gmath_hypot(h, v[2]) : h;', 'return (void)dim, h;', AT),
+    ("al-bez-s", "src", A, "  double s = 1.0 - t;\n  for (int level = m;", "  double s = t;\n  for (int level = m;", AT),
+    ("al-bez-levels", "src", A, "for (int level = m; level > 0; level--) {", "for (int level = m; level > 1; level--) {", AT),
+    ("al-bez-lerp", "src", A, "h[i] = s * h[i] + t * h[i + 1];", "h[i] = s * h[i + 1] + t * h[i];", AT),
+    ("al-deriv-difference", "src", A, "h[i] = h[i + 1] - h[i];", "h[i] = h[i + 1] + h[i];", AT),
+    ("al-deriv-factor", "src", A, "factor *= (double)(m - j);", "factor *= (double)(m - j - 1 + 1 - (j == 0));", AT),
+    ("al-deriv-degree", "src", A, "return factor * bez(h, m - k, t);", "return factor * bez(h, m - k + (k > 1), t);", AT),
+    ("al-e-polynomial-order", "src", A, "e[a] = deriv(h->c[a], h->n, k + 1, t);", "e[a] = deriv(h->c[a], h->n, k, t);", AT),
+    ("al-e-rational-sign", "src", A, "deriv(h->c[a], h->n, j + 1, t) * deriv(h->d, h->n, k - j, t) -", "deriv(h->c[a], h->n, j + 1, t) * deriv(h->d, h->n, k - j, t) +", AT),
+    ("al-e-rational-second", "src", A, "deriv(h->c[a], h->n, j, t) * deriv(h->d, h->n, k - j + 1, t);", "deriv(h->c[a], h->n, j, t) * deriv(h->d, h->n, k - j, t);", AT),
+        ("al-speed-denominator", "src", A, "return m / (d * d);", "return m / d;", AT),
+        ("al-gl-half-width", "src", A, "double half = (b - a) * 0.5;\n  double sum = 0.0;", "double half = (b - a);\n  double sum = 0.0;", AT),
+    ("al-gl-centre", "src", A, "double c = (a + b) * 0.5;\n  double half", "double c = a;\n  double half", AT),
+    ("al-gl-one-side", "src", A, "sum += gl_weight[i] * (speed(h, c - off) + speed(h, c + off));", "sum += gl_weight[i] * (speed(h, c + off) + speed(h, c + off));", AT),
+    ("al-gl-no-scale", "src", A, "return half * sum;", "return sum;", AT),
+    ("al-poly-dropped-edge", "src", A, "  int n = gshgeom_curve_point_count(curve->kind) - 1;\n  double total = 0.0;", "  int n = gshgeom_curve_point_count(curve->kind) - 2;\n  double total = 0.0;", AT),
+    ("al-poly-last-edge", "src", A, "total += mag(curve->dim, d);", "total = mag(curve->dim, d);", AT),
+    ("al-poly-no-z", "src", A, "curve->p[i + 1].y - curve->p[i].y, curve->p[i + 1].z - curve->p[i].z};", "curve->p[i + 1].y - curve->p[i].y, 0.0};", AT),
+
+    # --- the table ---------------------------------------------------------------
+    ("al-emit-limit-plus-one", "src", A, "if (tab->n >= tab->max) {", "if (tab->n > tab->max) {", AT),
+    ("al-emit-limit-minus-one", "src", A, "if (tab->n >= tab->max) {", "if (tab->n + 1 >= tab->max) {", AT),
+    ("al-emit-always-stores", "src", A, "  if (tab->store) {\n    void * grown = tab->row;", "  if (1) {\n    void * grown = tab->row;", AT),
+    ('al-emit-grow-error', "src", A, '    if (r != GSHGEOM_OK) {\n      return r;\n    }\n    tab->row = grown;', '    (void)r;\n    tab->row = grown;', AT),
+    ("al-emit-segment", "src", A, "row->seg = tab->cur;", "row->seg = 0;", AT),
+    ("al-emit-parameters-swapped", "src", A, "row->t0 = t0;\n    row->t1 = t1;", "row->t0 = t1;\n    row->t1 = t0;", AT),
+    ("al-emit-start", "src", A, "row->s0 = tab->sum;", "row->s0 = 0.0;", AT),
+    ("al-emit-length", "src", A, "row->len = len;", "row->len = len * 0.5;", AT),
+    ("al-emit-count", "src", A, "  tab->n++;\n  tab->sum += len;", "  tab->sum += len;", AT),
+    ("al-emit-sum", "src", A, "  tab->n++;\n  tab->sum += len;", "  tab->n++;\n  tab->sum = len;", AT),
+    ("al-refine-depth", "src", A, "if (depth >= GSHGEOM_MEASURE_MAX_DEPTH || diff <= scaled * (b - a)) {", "if (depth >= 3 || diff <= scaled * (b - a)) {", AT),
+    ("al-refine-depth-const", "hdr", AH, "#define GSHGEOM_MEASURE_MAX_DEPTH 52", "#define GSHGEOM_MEASURE_MAX_DEPTH 4", AT),
+    ("al-refine-width", "src", A, "diff <= scaled * (b - a)) {", "diff <= scaled) {", AT),
+    ("al-refine-tighter", "src", A, "diff <= scaled * (b - a)) {", "diff <= scaled * (b - a) * 0.5) {", AT),
+    ("al-refine-looser", "src", A, "diff <= scaled * (b - a)) {", "diff <= scaled * (b - a) * 2.0) {", AT),
+    ("al-refine-diff-left-only", "src", A, "double diff = dabs(whole - (left + right));", "double diff = dabs(whole - left);", AT),
+    ("al-refine-diff-sign", "src", A, "double diff = dabs(whole - (left + right));", "double diff = whole - (left + right);", AT),
+    ("al-refine-midpoint", "src", A, "double m = (a + b) * 0.5;\n  double left = gl(h, a, m);", "double m = a + (b - a) * 0.25;\n  double left = gl(h, a, m);", AT),
+    ("al-refine-right-half", "src", A, "double right = gl(h, m, b);\n  double diff", "double right = gl(h, m, b) * 1.0000000000001;\n  double diff", AT),
+    ("al-refine-order", "src", A, "  GSHGEOM_Result r = refine(h, tab, a, m, left, scaled, depth + 1);\n  return r != GSHGEOM_OK ? r : refine(h, tab, m, b, right, scaled, depth + 1);",
+     "  GSHGEOM_Result r = refine(h, tab, m, b, right, scaled, depth + 1);\n  return r != GSHGEOM_OK ? r : refine(h, tab, a, m, left, scaled, depth + 1);", AT),
+    ('al-refine-left-error', "src", A, 'return r != GSHGEOM_OK ? r : refine(h, tab, m, b, right, scaled, depth + 1);', '(void)r;\n  return refine(h, tab, m, b, right, scaled, depth + 1);', AT),
+    ('al-refine-emit-error', "src", A, 'return r != GSHGEOM_OK ? r : emit(tab, m, b, right);', '(void)r;\n    return emit(tab, m, b, right);', AT),
+    ("al-refine-whole-passed", "src", A, "GSHGEOM_Result r = refine(h, tab, a, m, left, scaled, depth + 1);", "GSHGEOM_Result r = refine(h, tab, a, m, left + right, scaled, depth + 1);", AT),
+    ("al-measure-line-closed-form", "src", A, "if (curve->kind == GSHGEOM_CURVE_LINE) {\n    return emit", "if (0) {\n    return emit", AT),
+    ("al-measure-line-parameters", "src", A, "return emit(tab, 0.0, 1.0, poly);", "return emit(tab, 0.0, 0.5, poly);", AT),
+    ("al-measure-whole", "src", A, "double whole = gl(&h, 0.0, 1.0);", "double whole = gl(&h, 0.0, 0.5);", AT),
+    ("al-measure-scale", "src", A, "tolerance * poly, 0);", "tolerance, 0);", AT),
+    ("al-measure-start-depth", "src", A, "tolerance * poly, 0);", "tolerance * poly, GSHGEOM_MEASURE_MAX_DEPTH - 2);", AT),
+
+    # --- the tolerance argument --------------------------------------------------------
+    ("al-tol-nan", "src", A, "if (!is_finite(tolerance) || tolerance < 0.0) {", "if (tolerance < 0.0) {", AT),
+    ("al-tol-negative", "src", A, "if (!is_finite(tolerance) || tolerance < 0.0) {", "if (!is_finite(tolerance) || tolerance < -1.0) {", AT),
+    ("al-tol-negative-limit", "src", A, "if (!is_finite(tolerance) || tolerance < 0.0) {\n    return GSHGEOM_ERR_INVALID;", "if (!is_finite(tolerance) || tolerance < 0.0) {\n    return GSHGEOM_ERR_LIMIT;", AT),
+    ("al-tol-zero", "src", A, "if (tolerance == 0.0) {\n    *out = GSHGEOM_MEASURE_TOLERANCE_DEFAULT;", "if (tolerance == 1.0) {\n    *out = GSHGEOM_MEASURE_TOLERANCE_DEFAULT;", AT),
+    ("al-tol-min-exclusive", "src", A, "if (tolerance < GSHGEOM_MEASURE_TOLERANCE_MIN ||", "if (tolerance <= GSHGEOM_MEASURE_TOLERANCE_MIN ||", AT),
+    ("al-tol-max-exclusive", "src", A, "tolerance > GSHGEOM_MEASURE_TOLERANCE_MAX) {", "tolerance >= GSHGEOM_MEASURE_TOLERANCE_MAX) {", AT),
+    ("al-tol-min-unchecked", "src", A, "if (tolerance < GSHGEOM_MEASURE_TOLERANCE_MIN ||\n      tolerance > GSHGEOM_MEASURE_TOLERANCE_MAX) {", "if (tolerance > GSHGEOM_MEASURE_TOLERANCE_MAX) {", AT),
+    ("al-tol-max-unchecked", "src", A, "if (tolerance < GSHGEOM_MEASURE_TOLERANCE_MIN ||\n      tolerance > GSHGEOM_MEASURE_TOLERANCE_MAX) {", "if (tolerance < GSHGEOM_MEASURE_TOLERANCE_MIN) {", AT),
+    ("al-tol-limit-code", "src", A, "tolerance > GSHGEOM_MEASURE_TOLERANCE_MAX) {\n    return GSHGEOM_ERR_LIMIT;", "tolerance > GSHGEOM_MEASURE_TOLERANCE_MAX) {\n    return GSHGEOM_ERR_INVALID;", AT),
+    ("al-tol-min-const", "hdr", AH, "#define GSHGEOM_MEASURE_TOLERANCE_MIN 0x1p-46", "#define GSHGEOM_MEASURE_TOLERANCE_MIN 0x1p-45", AT),
+    ("al-tol-max-const", "hdr", AH, "#define GSHGEOM_MEASURE_TOLERANCE_MAX 0x1p-4", "#define GSHGEOM_MEASURE_TOLERANCE_MAX 0x1p-5", AT),
+    ("al-tol-default-const", "hdr", AH, "#define GSHGEOM_MEASURE_TOLERANCE_DEFAULT 0x1p-40", "#define GSHGEOM_MEASURE_TOLERANCE_DEFAULT 0x1p-30", AT),
+
+    # --- the single-curve length ---------------------------------------------------
+    ("al-cl-null-out", "src", A, "  if (!curve || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = gshgeom_curve_check(curve);", "  if (!curve) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = gshgeom_curve_check(curve);", AT),
+    ("al-cl-unchecked-curve", "src", A, "  GSHGEOM_Result r = gshgeom_curve_check(curve);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  double tol = 0.0;", "  GSHGEOM_Result r = GSHGEOM_OK;\n  double tol = 0.0;", AT),
+    ("al-cl-unchecked-tolerance", "src", A, "  r = check_tolerance(tolerance, &tol);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  double poly = polygon_length(curve);", "  tol = tolerance == 0.0 ? GSHGEOM_MEASURE_TOLERANCE_DEFAULT : tolerance;\n  double poly = polygon_length(curve);", AT),
+    ("al-cl-max-rows", "src", A, "tab.max = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n  r = measure", "tab.max = 3;\n  r = measure", AT),
+    ("al-cl-result", "src", A, "*out = tab.sum;\n  return GSHGEOM_OK;\n}\n\n/* ---", "*out = tab.sum * 1.000001;\n  return GSHGEOM_OK;\n}\n\n/* ---", AT),
+    
+    # --- building a measured path ----------------------------------------------------
+    ("al-create-null-out", "src", A, "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double tol = 0.0;", "  if (!path) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double tol = 0.0;", AT),
+    ("al-create-null-path", "src", A, "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double tol = 0.0;", "  if (!out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double tol = 0.0;", AT),
+    ("al-create-tolerance-unchecked", "src", A, "  GSHGEOM_Result r = check_tolerance(tolerance, &tol);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  if (!alloc) {", "  GSHGEOM_Result r = GSHGEOM_OK;\n  tol = tolerance == 0.0 ? GSHGEOM_MEASURE_TOLERANCE_DEFAULT : tolerance;\n  if (!alloc) {", AT),
+    ("al-create-oom-code", "src", A, "  if (!m) {\n    return GSHGEOM_ERR_OOM;\n  }\n  m->alloc = *alloc;", "  if (!m) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  m->alloc = *alloc;", AT),
+    ("al-create-dimension", "src", A, "m->dim = gshgeom_path_dimension(path);", "m->dim = 2;", AT),
+    ("al-create-zero-limit", "src", A, "m->tab.max = (limits && limits->max_points) ? limits->max_points\n                                               : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;", "m->tab.max = limits ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;", AT),
+    ('al-create-limit-ignored', "src", A, 'm->tab.max = (limits && limits->max_points) ? limits->max_points\n                                               : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;', '(void)limits;\n  m->tab.max = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;', AT),
+    ("al-create-origin-first", "src", A, "      if (!m->has_origin) {\n        m->origin = el.curve.p[0];\n        m->has_origin = 1;\n      }", "      m->origin = el.curve.p[0];\n      m->has_origin = 1;", AT),
+    ("al-create-move-no-subpath", "src", A, "      need_sub = 1;\n      continue;", "      continue;", AT),
+    ("al-create-close-no-subpath", "src", A, "      m->sub[m->sub_n - 1].closed = 1;\n      need_sub = 1;", "      m->sub[m->sub_n - 1].closed = 1;", AT),
+    ("al-create-close-flag", "src", A, "      m->sub[m->sub_n - 1].closed = 1;\n      need_sub = 1;", "      m->sub[m->sub_n - 1].closed = 0;\n      need_sub = 1;", AT),
+    ("al-create-subpath-end", "src", A, "    m->sub[m->sub_n - 1].end = m->tab.sum;\n    if (el.verb", "    if (el.verb", AT),
+    ("al-create-subpath-open-error", "src", A, "      r = open_subpath(m);\n      need_sub = 0;\n      if (r != GSHGEOM_OK) {\n        break;\n      }", "      r = open_subpath(m);\n      need_sub = 0;", AT),
+            ("al-create-leaks-on-failure", "src", A, "  if (r != GSHGEOM_OK) {\n    gshgeom_measured_destroy(m);\n    return r;\n  }\n  *out = m;", "  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  *out = m;", AT),
+    ("al-subpath-begin", "src", A, "m->sub[m->sub_n].begin = m->tab.sum;", "m->sub[m->sub_n].begin = 0.0;", AT),
+        ("al-subpath-initial-closed", "src", A, "m->sub[m->sub_n].closed = 0;\n  m->sub_n++;", "m->sub[m->sub_n].closed = 1;\n  m->sub_n++;", AT),
+    ('al-subpath-grow-error', "src", A, '  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  m->sub = grown;', '  (void)r;\n  m->sub = grown;', AT),
+    ("al-segment-extent", "src", A, "  if (poly == 0.0) {\n    return GSHGEOM_OK; /* no extent: nothing selects it */\n  }", "  if (poly < 0.0) {\n    return GSHGEOM_OK;\n  }", AT),
+    ('al-segment-grow-error', "src", A, '  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  m->seg = grown;', '  (void)r;\n  m->seg = grown;', AT),
+    ('al-segment-element', "src", A, 'm->seg[m->seg_n].element = element;', '(void)element;\n  m->seg[m->seg_n].element = m->seg_n;', AT),
+    ("al-segment-curve", "src", A, "m->seg[m->seg_n].curve = *curve;", "m->seg[m->seg_n].curve = m->seg_n ? m->seg[0].curve : *curve;", AT),
+    ("al-segment-current", "src", A, "m->tab.cur = m->seg_n;\n  m->seg_n++;", "m->tab.cur = 0;\n  m->seg_n++;", AT),
+    ("al-destroy-leaks-segments", "src", A, "  gcu_allocator_free(&alloc, m->seg);\n", "", AT),
+    ("al-destroy-leaks-rows", "src", A, "  gcu_allocator_free(&alloc, m->tab.row);\n", "", AT),
+    ("al-destroy-leaks-subpaths", "src", A, "  gcu_allocator_free(&alloc, m->sub);\n", "", AT),
+    ("al-destroy-leaks-object", "src", A, "  gcu_allocator_free(&alloc, m->sub);\n  gcu_allocator_free(&alloc, m);", "  gcu_allocator_free(&alloc, m->sub);", AT),
+
+    # --- accessors ----------------------------------------------------------------------
+    ("al-dimension", "src", A, "return m ? m->dim : 0;", "return m ? 2 : 0;", AT),
+    ("al-length", "src", A, "return m ? m->tab.sum : 0.0;", "return m ? m->tab.sum + 1.0 : 0.0;", AT),
+    ("al-segment-count", "src", A, "return m ? m->seg_n : 0;", "return m ? m->tab.n : 0;", AT),
+    ("al-row-count", "src", A, "return m ? m->tab.n : 0;", "return m ? m->seg_n : 0;", AT),
+    ("al-subpath-count", "src", A, "return m ? m->sub_n : 0;", "return m ? m->seg_n : 0;", AT),
+    ("al-subpath-index", "src", A, "if (!m || !out || index >= m->sub_n) {", "if (!m || !out || index > m->sub_n) {", AT),
+    ("al-subpath-null-out", "src", A, "if (!m || !out || index >= m->sub_n) {", "if (!m || index >= m->sub_n) {", AT),
+    ("al-subpath-value", "src", A, "*out = m->sub[index];", "*out = m->sub[0];", AT),
+
+    # --- queries -----------------------------------------------------------------------------
+    ("al-query-nan", "src", A, "if (!m || !out || !is_finite(s) || !m->has_origin) {", "if (!m || !out || !m->has_origin) {", AT),
+    ("al-query-empty", "src", A, "if (!m || !out || !is_finite(s) || !m->has_origin) {", "if (!m || !out || !is_finite(s)) {", AT),
+    ("al-query-null-out", "src", A, "if (!m || !out || !is_finite(s) || !m->has_origin) {", "if (!m || !is_finite(s) || !m->has_origin) {", AT),
+    ("al-query-end-excluded", "src", A, "if (s < 0.0 || s > length) {", "if (s < 0.0 || s >= length) {", AT),
+    ("al-query-start-excluded", "src", A, "if (s < 0.0 || s > length) {", "if (s <= 0.0 || s > length) {", AT),
+    ("al-query-high-unchecked", "src", A, "if (s < 0.0 || s > length) {", "if (s < 0.0) {", AT),
+    ("al-query-low-unchecked", "src", A, "if (s < 0.0 || s > length) {", "if (s > length) {", AT),
+    ("al-query-clamp-inverted", "src", A, "    if (!clamp) {\n      return GSHGEOM_ERR_INVALID;", "    if (clamp) {\n      return GSHGEOM_ERR_INVALID;", AT),
+    ('al-query-clamp-never', "src", A, '    if (!clamp) {\n      return GSHGEOM_ERR_INVALID;', '    (void)clamp;\n    if (1) {\n      return GSHGEOM_ERR_INVALID;', AT),
+    ("al-query-clamp-swapped", "src", A, "s = s < 0.0 ? 0.0 : length;", "s = s < 0.0 ? length : 0.0;", AT),
+    ("al-query-no-rows-point", "src", A, "    f.point = m->origin;\n    *out = f;", "    *out = f;", AT),
+    ("al-query-no-rows-test", "src", A, "  if (m->tab.n == 0) {\n    f.point", "  if (m->tab.n == 1) {\n    f.point", AT),
+    ("al-query-boundary-earlier", "src", A, "if (m->tab.row[mid].s0 <= s) {", "if (m->tab.row[mid].s0 < s) {", AT),
+    ("al-query-search-wrong-way", "src", A, "if (m->tab.row[mid].s0 <= s) {\n      lo = mid + 1;\n    } else {\n      hi = mid;", "if (m->tab.row[mid].s0 <= s) {\n      hi = mid;\n    } else {\n      lo = mid + 1;", AT),
+    ("al-query-target", "src", A, "double target = s - row->s0;", "double target = row->s0 - s;", AT),
+    ("al-query-start-parameter", "src", A, "  if (target <= 0.0) {\n    u = row->t0;", "  if (target <= 0.0) {\n    u = row->t1;", AT),
+    ("al-query-end-test", "src", A, "} else if (s >= row->s0 + row->len) {", "} else if (s > row->s0 + row->len) {", AT),
+    ("al-query-end-uses-length", "src", A, "} else if (s >= row->s0 + row->len) {", "} else if (target >= row->len) {", AT),
+    ("al-query-end-parameter", "src", A, "    u = row->t1;\n  } else if (seg->curve.kind == GSHGEOM_CURVE_LINE) {", "    u = row->t0;\n  } else if (seg->curve.kind == GSHGEOM_CURVE_LINE) {", AT),
+        ("al-query-line-parameter", "src", A, "    u = target / row->len;", "    u = row->t0 + target / row->len * 0.999;", AT),
+    ('al-query-tangent-skipped', "src", A, '  if (tangent(&h, u, tan)) {\n    f.has_tangent = 1;', '  if (tangent(&h, u, tan) && 0) {\n    f.has_tangent = 1;', AT),
+    ("al-query-tangent-flag", "src", A, "    f.has_tangent = 1;", "    f.has_tangent = 0;", AT),
+    ("al-query-tangent-z", "src", A, "f.tangent.z = h.dim == 3 ? tan[2] : 0.0;", "f.tangent.z = 0.0;", AT),
+    ("al-query-normal-3d", "src", A, "    if (h.dim == 2) {\n      f.normal = gshgeom_normal_left(f.tangent);", "    if (h.dim == 3) {\n      f.normal = gshgeom_normal_left(f.tangent);", AT),
+    ("al-query-normal-right", "src", A, "f.normal = gshgeom_normal_left(f.tangent);", "f.normal = gshgeom_normal_right(f.tangent);", AT),
+    ("al-query-normal-flag", "src", A, "      f.has_normal = 1;", "      f.has_normal = 0;", AT),
+    ("al-query-element", "src", A, "  f.element = seg->element;", "  f.element = row->seg;", AT),
+    ("al-query-parameter", "src", A, "  f.t = u;\n  *out = f;", "  f.t = row->t0;\n  *out = f;", AT),
+        
+    # --- the inverse of the arc length -----------------------------------------------------------
+        ("al-solve-bracket", "src", A, "    if (f > 0.0) {\n      hi = u;\n    } else {\n      lo = u;\n    }", "    if (f > 0.0) {\n      lo = u;\n    } else {\n      hi = u;\n    }", AT),
+    ("al-solve-stop", "src", A, "double stop = row->len * 0x1p-52;", "double stop = row->len * 0x1p-10;", AT),
+    ("al-solve-target", "src", A, "double f = gl(h, row->t0, u) - target;", "double f = gl(h, row->t0, u) - target * 1.0001;", AT),
+    ("al-solve-from-start", "src", A, "double f = gl(h, row->t0, u) - target;", "double f = gl(h, 0.0, u) - target;", AT),
+    ("al-solve-one-step", "src", A, "for (int iteration = 0; iteration < 64; iteration++) {", "for (int iteration = 0; iteration < 1; iteration++) {", AT),
+    ("al-solve-never-bisects", "src", A, "    if (!(next > lo && next < hi)) {\n      next = lo + (hi - lo) * 0.5;\n    }\n    if (next == u) {", "    if (next < lo || next > hi) {\n      next = lo;\n    }\n    if (next == u) {", AT),
+    ("al-solve-no-bracket-update", "src", A, "    if (f > 0.0) {\n      hi = u;", "    if (f > 1.0e300) {\n      hi = u;", AT),
+    
+    # --- the tangent ----------------------------------------------------------------------------------
+    ("al-tangent-threshold-large", "src", A, "double thr = e_scale(h) * 0x1p-48;", "double thr = e_scale(h) * 0x1p-1;", AT),
+        ("al-tangent-orders", "src", A, "for (int k = 0; k <= 4; k++) {", "for (int k = 0; k <= 1; k++) {", AT),
+    ("al-tangent-no-fallback", "src", A, "for (int k = 0; k <= 4; k++) {", "for (int k = 0; k <= 0; k++) {", AT),
+    ("al-tangent-first-nonzero", "src", A, "    if (m > thr) {\n      /* The right-hand", "    if (m > thr * 0.0 + 1e300) {\n      /* The right-hand", AT),
+    ("al-tangent-end-sign", "src", A, "double sign = (u >= 1.0 && (k & 1)) ? -1.0 : 1.0;", "double sign = 1.0;", AT),
+    ("al-tangent-end-test", "src", A, "double sign = (u >= 1.0 && (k & 1)) ? -1.0 : 1.0;", "double sign = (u > 1.0 && (k & 1)) ? -1.0 : 1.0;", AT),
+    ("al-tangent-end-parity", "src", A, "double sign = (u >= 1.0 && (k & 1)) ? -1.0 : 1.0;", "double sign = (u >= 1.0 && (k & 2)) ? -1.0 : 1.0;", AT),
+    ("al-tangent-end-always-flipped", "src", A, "double sign = (u >= 1.0 && (k & 1)) ? -1.0 : 1.0;", "double sign = (u >= 1.0 || (k & 1)) ? -1.0 : 1.0;", AT),
+    ("al-tangent-normalised", "src", A, "out[a] = (sign * e[a]) / m;", "out[a] = (sign * e[a]) / (m * 1.0000001);", AT),
+    ("al-tangent-undefined-flag", "src", A, "      return 1;\n    }\n  }\n  return 0;\n}", "      return 1;\n    }\n  }\n  return 1;\n}", AT),
+            
+    # --- hash ------------------------------------------------------------------------------------------
+    ("alh-version", "src", A, "#define MEASURED_FORMAT_VERSION 1u", "#define MEASURED_FORMAT_VERSION 2u", AT),
+    ("alh-kind", "src", A, "#define MEASURED_KIND 0x5341454du", "#define MEASURED_KIND 0x5341454eu", AT),
+    ("alh-no-kind", "src", A, "  gshgeom_hash_u32(&h, MEASURED_KIND);\n", "", AT),
+    ("alh-no-dimension", "src", A, "  gshgeom_hash_u32(&h, (uint32_t)m->dim);\n", "", AT),
+    ("alh-segments-u32", "src", A, "gshgeom_hash_u64(&h, (uint64_t)m->seg_n);", "gshgeom_hash_u32(&h, (uint32_t)m->seg_n);", AT),
+    ("alh-rows-u32", "src", A, "gshgeom_hash_u64(&h, (uint64_t)m->tab.n);", "gshgeom_hash_u32(&h, (uint32_t)m->tab.n);", AT),
+    ("alh-subpaths-u32", "src", A, "gshgeom_hash_u64(&h, (uint64_t)m->sub_n);", "gshgeom_hash_u32(&h, (uint32_t)m->sub_n);", AT),
+    ("alh-no-origin", "src", A, "  hash_point(&h, &m->origin, m->dim);\n", "", AT),
+    ("alh-no-length", "src", A, "  gshgeom_hash_f64(&h, m->tab.sum);\n  for (size_t i = 0; i < m->seg_n", "  for (size_t i = 0; i < m->seg_n", AT),
+    ("alh-no-z", "src", A, "  if (dim == 3) {\n    gshgeom_hash_f64(h, p->z);", "  if (dim == 4) {\n    gshgeom_hash_f64(h, p->z);", AT),
+    ("alh-no-element", "src", A, "    gshgeom_hash_u64(&h, (uint64_t)s->element);\n", "", AT),
+    ("alh-no-curve-kind", "src", A, "    gshgeom_hash_u8(&h, (uint8_t)s->curve.kind);\n", "", AT),
+    ("alh-kind-wide", "src", A, "gshgeom_hash_u8(&h, (uint8_t)s->curve.kind);", "gshgeom_hash_u32(&h, (uint32_t)s->curve.kind);", AT),
+    ("alh-first-point-only", "src", A, "    for (int k = 0; k < n; k++) {\n      hash_point(&h, &s->curve.p[k], m->dim);", "    for (int k = 0; k < 1; k++) {\n      hash_point(&h, &s->curve.p[k], m->dim);", AT),
+    ("alh-no-weights", "src", A, "    if (gshgeom_curve_is_rational(s->curve.kind)) {\n      for (int k = 0; k < n; k++) {\n        gshgeom_hash_f64(&h, s->curve.w[k]);", "    if (gshgeom_curve_is_rational(s->curve.kind)) {\n      for (int k = 0; k < 0; k++) {\n        gshgeom_hash_f64(&h, s->curve.w[k]);", AT),
+    ("alh-no-row-segment", "src", A, "    gshgeom_hash_u64(&h, (uint64_t)r->seg);\n", "", AT),
+    ("alh-no-row-t0", "src", A, "    gshgeom_hash_f64(&h, r->t0);\n", "", AT),
+    ("alh-no-row-t1", "src", A, "    gshgeom_hash_f64(&h, r->t1);\n", "", AT),
+    ("alh-no-row-start", "src", A, "    gshgeom_hash_f64(&h, r->s0);\n", "", AT),
+    ("alh-no-row-length", "src", A, "    gshgeom_hash_f64(&h, r->len);\n", "", AT),
+    ("alh-no-subpath-begin", "src", A, "    gshgeom_hash_f64(&h, m->sub[i].begin);\n", "", AT),
+    ("alh-no-subpath-end", "src", A, "    gshgeom_hash_f64(&h, m->sub[i].end);\n", "", AT),
+    ("alh-no-subpath-closed", "src", A, "    gshgeom_hash_u8(&h, m->sub[i].closed ? 1 : 0);\n", "", AT),
+    ("alh-closed-inverted", "src", A, "gshgeom_hash_u8(&h, m->sub[i].closed ? 1 : 0);", "gshgeom_hash_u8(&h, m->sub[i].closed ? 0 : 1);", AT),
+    ("alh-null", "src", A, "  if (!m) {\n    return gshgeom_hash_value(&h);\n  }\n  gshgeom_hash_u32(&h, MEASURED_FORMAT_VERSION);", "  if (!m) {\n    return 0;\n  }\n  gshgeom_hash_u32(&h, MEASURED_FORMAT_VERSION);", AT),
+
+    # --- dump -------------------------------------------------------------------------------------------
+    ("ald-header", "src", A, '"gshgeom.measured %u dim=%d', '"gshgeom_measured %u dim=%d', AT),
+    ("ald-length-width", "src", A, '"length=%016llx hash=%016llx\\n"', '"length=%llx hash=%016llx\\n"', AT),
+    ("ald-hash-width", "src", A, '"length=%016llx hash=%016llx\\n"', '"length=%016llx hash=%llx\\n"', AT),
+    ("ald-number-width", "src", A, 'return fprintf(out, " %016llx", (unsigned long long)gshgeom_f64_bits(v));', 'return fprintf(out, " %llx", (unsigned long long)gshgeom_f64_bits(v));', AT),
+    ("ald-no-z", "src", A, "if (n >= 0 && dim == 3) n = put_f64(out, p->z);", "if (n >= 0 && dim == 4) n = put_f64(out, p->z);", AT),
+    ("ald-origin-letter", "src", A, "fputc('O', out)", "fputc('o', out)", AT),
+    ("ald-segment-letter", "src", A, '"G %llu %d"', '"g %llu %d"', AT),
+    ("ald-segment-kind", "src", A, "(int)s->curve.kind) < 0) {", "(int)s->curve.kind + 1) < 0) {", AT),
+    ("ald-no-weights", "src", A, "    if (gshgeom_curve_is_rational(s->curve.kind)) {\n      for (int k = 0; k < n; k++) {\n        if (put_f64(out, s->curve.w[k]) < 0) {", "    if (gshgeom_curve_is_rational(s->curve.kind)) {\n      for (int k = 0; k < 0; k++) {\n        if (put_f64(out, s->curve.w[k]) < 0) {", AT),
+    ("ald-row-letter", "src", A, '"R %llu"', '"r %llu"', AT),
+    ("ald-row-swapped", "src", A, "put_f64(out, r->t0) < 0 || put_f64(out, r->t1) < 0 ||", "put_f64(out, r->t1) < 0 || put_f64(out, r->t0) < 0 ||", AT),
+    ("ald-subpath-letter", "src", A, "fputc('S', out)", "fputc('s', out)", AT),
+    ("ald-subpath-closed", "src", A, 'fprintf(out, " %d\\n", m->sub[i].closed ? 1 : 0)', 'fprintf(out, " %d\\n", m->sub[i].closed ? 0 : 1)', AT),
+    ("ald-ignores-flush", "src", A, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", AT),
+    ("ald-ignores-header-error", "src", A, "(unsigned long long)gshgeom_measured_hash(m)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_measured_hash(m)) < 0) {\n    return GSHGEOM_OK;", AT),
+    ("ald-null-stream", "src", A, "GSHGEOM_Result gshgeom_measured_dump(const GSHGEOM_Measured * m, FILE * out) {\n  if (!m || !out) {", "GSHGEOM_Result gshgeom_measured_dump(const GSHGEOM_Measured * m, FILE * out) {\n  if (!m) {", AT),
 ]
 
 

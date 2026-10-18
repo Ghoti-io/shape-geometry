@@ -28,6 +28,7 @@
 #define GHOTI_IO_GSHGEOM_GSHGEOM_H
 
 #include <ghoti.io/shape-geometry/allocator.h>
+#include <ghoti.io/shape-geometry/along.h>
 #include <ghoti.io/shape-geometry/core.h>
 #include <ghoti.io/shape-geometry/curve.h>
 #include <ghoti.io/shape-geometry/device.h>
