@@ -18,6 +18,8 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   distance along it, the point, the unit tangent and the left normal. The arc
   length of a curve is adaptive eight-point Gauss-Legendre to a stated
   tolerance; the table and every answer are bit-identical on every target.
+- The fill rules (`fill.h`: nonzero 0, even-odd 1, pinned), which `shape-cpu`
+  fills under and `font`'s `GFNT_FillRule` is the type of.
 - `_dump` and `_hash` for each (FNV-1a 64 over little-endian fields, the same
   value on every target).
 

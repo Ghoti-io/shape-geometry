@@ -276,6 +276,9 @@ HH = "include/ghoti.io/shape-geometry/hash.h"
 CH = "include/ghoti.io/shape-geometry/curve.h"
 PH = "include/ghoti.io/shape-geometry/path.h"
 KH = "include/ghoti.io/shape-geometry/core.h"
+FILS = "src/fill/fill.c"
+FILH = "include/ghoti.io/shape-geometry/fill.h"
+FILT = ["testFill"]
 
 HT = ["testHash"]
 PT = ["testPath"]
@@ -1283,6 +1286,16 @@ PLANTS += [
     ("ald-ignores-flush", "src", A, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", AT),
     ("ald-ignores-header-error", "src", A, "(unsigned long long)gshgeom_measured_hash(m)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_measured_hash(m)) < 0) {\n    return GSHGEOM_OK;", AT),
     ("ald-null-stream", "src", A, "GSHGEOM_Result gshgeom_measured_dump(const GSHGEOM_Measured * m, FILE * out) {\n  if (!m || !out) {", "GSHGEOM_Result gshgeom_measured_dump(const GSHGEOM_Measured * m, FILE * out) {\n  if (!m) {", AT),
+
+    # --- story 9: the fill rule (AD-4) --------------------------------------
+    ("fill-value-even-odd", "hdr", FILH, "GSHGEOM_FILL_EVEN_ODD = 1,", "GSHGEOM_FILL_EVEN_ODD = 2,", FILT),
+    ("fill-value-nonzero", "hdr", FILH, "GSHGEOM_FILL_NONZERO = 0,", "GSHGEOM_FILL_NONZERO = 3,", FILT),
+    ("fill-name-nonzero", "src", FILS, '"non-zero"', '"nonzero"', FILT),
+    ("fill-name-even-odd", "src", FILS, '"even-odd"', '"even_odd"', FILT),
+    ("fill-name-unknown", "src", FILS, '"unknown fill rule"', '"unknown"', FILT),
+    ("fill-names-swapped", "src", FILS, "case GSHGEOM_FILL_NONZERO:\n    return \"non-zero\";\n  case GSHGEOM_FILL_EVEN_ODD:\n    return \"even-odd\";",
+     "case GSHGEOM_FILL_NONZERO:\n    return \"even-odd\";\n  case GSHGEOM_FILL_EVEN_ODD:\n    return \"non-zero\";", FILT),
+    ("fill-count-names-itself", "src", FILS, "case GSHGEOM_FILL_RULE_COUNT:\n    break;", "case GSHGEOM_FILL_RULE_COUNT:\n    return \"even-odd\";", FILT),
 ]
 
 

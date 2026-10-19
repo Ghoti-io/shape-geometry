@@ -3,7 +3,7 @@
 **Status:** parts 1 to 4 of the shape-geometry plan: curves, model paths,
 bounds and the hash spelling; maps, the orientation rules, the exact
 predicates and the route predicate; the 26.6 device path and the integer
-flattener (revision 2); along-path parametrization.
+flattener (revision 2); along-path parametrization; the fill rules.
 
 Paths, transforms and flattening for the shape family, bit-identical on every host.
 
@@ -211,6 +211,17 @@ Everything is `+ - * /`, `gmath_hypot` and a fixed order of operations, so the
 table, every query, the hash and the dump are the same bits on every target; the
 cross-target probe measures 90 random paths of every kind at three tolerances and
 hashes every number of every answer.
+
+## The fill rules
+
+`fill.h` holds the two fill rules of the family and nothing else, so that a
+library with no use for the rest of this one (`font`, whose headers carry no
+floating-point type) can include it alone: `GSHGEOM_FILL_NONZERO` (0, the
+default, and what every font format means) and `GSHGEOM_FILL_EVEN_ODD` (1),
+`GSHGEOM_FILL_RULE_COUNT` closing the enumeration, and `gshgeom_fill_rule_string`.
+The values are pinned (spine AD-4); a further rule is appended after them. The
+rule is applied by `shape-cpu`; `font`'s `GFNT_FillRule` is this type under its
+old name.
 
 ## Tests and gates
 

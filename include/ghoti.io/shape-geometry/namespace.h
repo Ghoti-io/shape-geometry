@@ -45,6 +45,7 @@
 #define GSHGEOM_Result GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Result)
 #define GSHGEOM_Limits GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Limits)
 #define GSHGEOM_Hash GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Hash)
+#define GSHGEOM_Fill_Rule GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Fill_Rule)
 #define GSHGEOM_Curve_Kind GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Curve_Kind)
 #define GSHGEOM_Point GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Point)
 #define GSHGEOM_Curve GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Curve)
@@ -67,6 +68,7 @@
 /* Public functions. */
 #define gshgeom_allocator_default GHOTIIO_SHAPE_GEOMETRY(gshgeom_allocator_default)
 #define gshgeom_result_string GHOTIIO_SHAPE_GEOMETRY(gshgeom_result_string)
+#define gshgeom_fill_rule_string GHOTIIO_SHAPE_GEOMETRY(gshgeom_fill_rule_string)
 #define gshgeom_limits_default GHOTIIO_SHAPE_GEOMETRY(gshgeom_limits_default)
 #define gshgeom_hash_init GHOTIIO_SHAPE_GEOMETRY(gshgeom_hash_init)
 #define gshgeom_hash_u8 GHOTIIO_SHAPE_GEOMETRY(gshgeom_hash_u8)
