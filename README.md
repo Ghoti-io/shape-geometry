@@ -10,9 +10,11 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
 - Maps with kind tags, the one composer, the orientation rules, the exact
   `orient2d` and `orient3d`, and the grid-aligned route predicate.
 - The 26.6 device path: the one rounding rule `floor(x * 64 + 0.5)`, a model
-  path under a map converted to it, and the integer flattener (1/16 pixel,
-  revision 2, proved within the tolerance for every `int32` curve; ported from
-  `font`'s scan converter) producing a flattened path.
+  path under a map converted to it, and the integer flattener (1/16 pixel by
+  default and any tolerance of 2 units and up on request, revision 2, proved
+  within the tolerance for every `int32` curve; ported from `font`'s scan
+  converter, which now calls it) producing a flattened path, or the vertices of
+  one curve.
 - Along-path parametrization: a measured path built once from a model path (any
   curve kind, 2D or 3D, any number of subpaths) gives its arc length and, at any
   distance along it, the point, the unit tangent and the left normal. The arc

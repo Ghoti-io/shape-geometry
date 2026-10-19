@@ -142,19 +142,21 @@ changes no result, cannot be seen by any test:
     ``depth <= 0`` test, testing ``depth < 0``, or passing ``depth + 1`` to the
     right half changes no output, and the compiler may not be asked to show
     otherwise.  What is planted is a cap that is too low: 3, 4 levels early (both
-    degrees), 8.  A cap of 16 or of 4 levels early (16) is not caught either: at
-    this library's tolerance 4 the threshold (3,072 widened) leaves room that no
-    int32 curve uses until depth 17 (all 256 cubics on the corners of the int32
-    square were run through the model with a cap of 16 and none is forced), so
-    the 20 is needed for the proof at tolerance 2, not for any input here;
-    ``GSHGEOM_FLATTEN_MAX_DEPTH`` above 20 is the same equivalence
-  - the shift spelling of the widening (``<< FLAT_EXTRA`` for ``* FLAT_SCALE``) and
-    a threshold of ``3 * t`` widened units for ``4 * (t - 1)``: at this library's one
-    tolerance (4) they are the same number (3,072), so no test can tell them apart;
-    the second differs only for another tolerance, which the library has no way to
-    take (``font``, which does, pins the difference), and a tolerance under 2 is
-    refused at compile time by a ``_Static_assert`` (a plant that does not compile
-    cannot be run here)
+    degrees), 8, and 16, which the tolerance of 2 (threshold 1,024 widened)
+    reaches on a curve spanning the int32 range, as the 20 is for; the cap
+    clamp of ``flattener_begin`` at its upper end (a ``levels`` past 20 is
+    brought to 20) is the same equivalence, as is ``GSHGEOM_FLATTEN_MAX_DEPTH``
+    above 20
+  - the shift spelling of the widening (``<< FLAT_EXTRA`` for ``* FLAT_SCALE``):
+    the same number
+  - a threshold of ``3 * t`` widened units for ``4 * (t - 1)`` is planted: it is
+    the same number at the default tolerance (3,072) and differs at every other,
+    which the tolerance tests pin (when the tolerance was fixed, this was an
+    equivalent mutant)
+  - the ``_Static_assert`` that the minimum tolerance is at least 2 and that the
+    default is not below the minimum: a plant that does not compile cannot be run
+    here (a ``GSHGEOM_FLATTEN_MIN_TOLERANCE`` of 1 is refused by it, which is the
+    gate working); the minimum above 2 and the runtime refusal are planted
   - the guard that the first flattened element is a move: the builder
     guarantees it
   - the guard `path->el_n > path->max_elements` in `append` (the element count
@@ -721,7 +723,7 @@ GR = "src/core/grow.h"
 DH = "include/ghoti.io/shape-geometry/device.h"
 FH = "include/ghoti.io/shape-geometry/flatten.h"
 DT = ["testDevice"]
-FT = ["testFlatten"]
+FT = ["testFlatten", "testTolerance"]
 DFT = ["testDevice", "testFlatten"]
 
 PLANTS += [
@@ -927,14 +929,14 @@ PLANTS += [
     ("fl-narrow-ceils", "src", FL, "  p.x = (int32_t)floor_div(w.x + FLAT_SCALE / 2, FLAT_SCALE);", "  p.x = (int32_t)floor_div(w.x + FLAT_SCALE - 1, FLAT_SCALE);", FT),
     ("fl-narrow-x-of-y", "src", FL, "  p.y = (int32_t)floor_div(w.y + FLAT_SCALE / 2, FLAT_SCALE);", "  p.y = (int32_t)floor_div(w.x + FLAT_SCALE / 2, FLAT_SCALE);", FT),
     # The flatness threshold: its factor, its "- 1", the comparison.
-    ("fl-threshold-t", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)4 * FLAT_SCALE * GSHGEOM_FLATTEN_TOLERANCE)", FT),
-    ("fl-threshold-t-minus-2", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 2))", FT),
-    ("fl-threshold-factor-8", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)8 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", FT),
-    ("fl-threshold-factor-2", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)2 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", FT),
-    ("fl-threshold-not-widened", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)4 * (GSHGEOM_FLATTEN_TOLERANCE - 1))", FT),
-    ("fl-threshold-plus-one", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1) + 1)", FT),
-    ("fl-threshold-minus-one", "src", FL, "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))", "  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1) - 1)", FT),
-    ("fl-quad-threshold-strict", "src", FL, "  if (sum <= FLAT_THRESHOLD || depth <= 0) {\n    return add_point(fp, narrow(p2));", "  if (sum < FLAT_THRESHOLD || depth <= 0) {\n    return add_point(fp, narrow(p2));", FT),
+    ("fl-threshold-t", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)4 * FLAT_SCALE * (int64_t)tolerance;", FT),
+    ("fl-threshold-t-minus-2", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 2);", FT),
+    ("fl-threshold-factor-8", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)8 * FLAT_SCALE * ((int64_t)tolerance - 1);", FT),
+    ("fl-threshold-factor-2", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)2 * FLAT_SCALE * ((int64_t)tolerance - 1);", FT),
+    ("fl-threshold-not-widened", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)4 * ((int64_t)tolerance - 1);", FT),
+    ("fl-threshold-plus-one", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1) + 1;", FT),
+    ("fl-threshold-minus-one", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1) - 1;", FT),
+    ("fl-quad-threshold-strict", "src", FL, "  if (sum <= fl->threshold) {\n    return emit_vertex(fl, p2, index, level);", "  if (sum < fl->threshold) {\n    return emit_vertex(fl, p2, index, level);", FT),
     ("fl-quad-x-only", "src", FL, "  int64_t sum = abs64(2 * p1.x - p0.x - p2.x) + abs64(2 * p1.y - p0.y - p2.y);", "  int64_t sum = abs64(2 * p1.x - p0.x - p2.x);", FT),
     ("fl-quad-y-only", "src", FL, "  int64_t sum = abs64(2 * p1.x - p0.x - p2.x) + abs64(2 * p1.y - p0.y - p2.y);", "  int64_t sum = abs64(2 * p1.y - p0.y - p2.y);", FT),
     ("fl-quad-sum-32bit", "src", FL, "  int64_t sum = abs64(2 * p1.x - p0.x - p2.x)", "  int32_t sum = abs64(2 * p1.x - p0.x - p2.x)", FT),
@@ -943,13 +945,13 @@ PLANTS += [
     ("fl-quad-dx-ends", "src", FL, "abs64(2 * p1.x - p0.x - p2.x)", "abs64(2 * p1.x - p0.x - p0.x)", FT),
     ("fl-quad-dy-ends", "src", FL, "abs64(2 * p1.y - p0.y - p2.y);", "abs64(2 * p1.y - p2.y - p2.y);", FT),
     ("fl-quad-dy-coefficient", "src", FL, "abs64(2 * p1.y - p0.y - p2.y);", "abs64(3 * p1.y - p0.y - p2.y);", FT),
-    ("fl-quad-order", "src", FL, "  GSHGEOM_Result r = quad(fp, p0, a, m, depth - 1);\n  return r != GSHGEOM_OK ? r : quad(fp, m, b, p2, depth - 1);",
-     "  GSHGEOM_Result r = quad(fp, m, b, p2, depth - 1);\n  return r != GSHGEOM_OK ? r : quad(fp, p0, a, m, depth - 1);", FT),
-    ("fl-quad-error-lost", "src", FL, "  GSHGEOM_Result r = quad(fp, p0, a, m, depth - 1);\n  return r != GSHGEOM_OK ? r : quad(fp, m, b, p2, depth - 1);",
-     "  quad(fp, p0, a, m, depth - 1);\n  return quad(fp, m, b, p2, depth - 1);", FT),
+    ("fl-quad-order", "src", FL, "  GSHGEOM_Result r = quad(fl, p0, a, m, index * 2u, level + 1);\n  return r != GSHGEOM_OK ? r : quad(fl, m, b, p2, index * 2u + 1u, level + 1);",
+     "  GSHGEOM_Result r = quad(fl, m, b, p2, index * 2u + 1u, level + 1);\n  return r != GSHGEOM_OK ? r : quad(fl, p0, a, m, index * 2u, level + 1);", FT),
+    ("fl-quad-error-lost", "src", FL, "  GSHGEOM_Result r = quad(fl, p0, a, m, index * 2u, level + 1);\n  return r != GSHGEOM_OK ? r : quad(fl, m, b, p2, index * 2u + 1u, level + 1);",
+     "  quad(fl, p0, a, m, index * 2u, level + 1);\n  return quad(fl, m, b, p2, index * 2u + 1u, level + 1);", FT),
     ("fl-quad-halves", "src", FL, "  WPt b = mid_pt(p1, p2);\n  WPt m = mid_pt(a, b);\n  GSHGEOM_Result r = quad(", "  WPt b = mid_pt(p0, p2);\n  WPt m = mid_pt(a, b);\n  GSHGEOM_Result r = quad(", FT),
-    ("fl-quad-emits-start", "src", FL, "    return add_point(fp, narrow(p2));\n  }\n  WPt a = mid_pt(p0, p1);", "    return add_point(fp, narrow(p0));\n  }\n  WPt a = mid_pt(p0, p1);", FT),
-    ("fl-quad-emits-control", "src", FL, "    return add_point(fp, narrow(p2));\n  }\n  WPt a = mid_pt(p0, p1);", "    return add_point(fp, narrow(p1));\n  }\n  WPt a = mid_pt(p0, p1);", FT),
+    ("fl-quad-emits-start", "src", FL, "    return emit_vertex(fl, p2, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", "    return emit_vertex(fl, p0, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", FT),
+    ("fl-quad-emits-control", "src", FL, "    return emit_vertex(fl, p2, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", "    return emit_vertex(fl, p1, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", FT),
     ("fl-cubic-d1-coefficient", "src", FL, "  int64_t d1 = abs64(3 * p1.x - 2 * p0.x - p3.x) +", "  int64_t d1 = abs64(3 * p1.x - p0.x - p3.x) +", FT),
     ("fl-cubic-d1-end", "src", FL, "  int64_t d1 = abs64(3 * p1.x - 2 * p0.x - p3.x) +", "  int64_t d1 = abs64(3 * p1.x - 2 * p0.x - 2 * p3.x) +", FT),
     ("fl-cubic-d1-y", "src", FL, "      abs64(3 * p1.y - 2 * p0.y - p3.y);", "      abs64(3 * p1.y - p0.y - 2 * p3.y);", FT),
@@ -959,28 +961,62 @@ PLANTS += [
     ("fl-cubic-d2-y", "src", FL, "      abs64(3 * p2.y - p0.y - 2 * p3.y);", "      abs64(3 * p2.y - 2 * p0.y - p3.y);", FT),
     ("fl-cubic-d2-no-y", "src", FL, "      abs64(3 * p2.y - p0.y - 2 * p3.y);", "      0;", FT),
     ("fl-cubic-d2-32bit", "src", FL, "  int64_t d2 = abs64(", "  int32_t d2 = abs64(", FT),
-    ("fl-cubic-d2-unused", "src", FL, "  if ((d1 <= FLAT_THRESHOLD && d2 <= FLAT_THRESHOLD) || depth <= 0) {", "  (void)d2;\n  if ((d1 <= FLAT_THRESHOLD) || depth <= 0) {", FT),
-    ("fl-cubic-d1-unused", "src", FL, "  if ((d1 <= FLAT_THRESHOLD && d2 <= FLAT_THRESHOLD) || depth <= 0) {", "  (void)d1;\n  if ((d2 <= FLAT_THRESHOLD) || depth <= 0) {", FT),
-    ("fl-cubic-or", "src", FL, "  if ((d1 <= FLAT_THRESHOLD && d2 <= FLAT_THRESHOLD) || depth <= 0) {", "  if ((d1 <= FLAT_THRESHOLD || d2 <= FLAT_THRESHOLD) || depth <= 0) {", FT),
-    ("fl-cubic-strict", "src", FL, "d2 <= FLAT_THRESHOLD) || depth <= 0) {", "d2 < FLAT_THRESHOLD) || depth <= 0) {", FT),
-    ("fl-cubic-strict-1", "src", FL, "  if ((d1 <= FLAT_THRESHOLD && d2", "  if ((d1 < FLAT_THRESHOLD && d2", FT),
+    ("fl-cubic-d2-unused", "src", FL, "  if (d1 <= fl->threshold && d2 <= fl->threshold) {", "  (void)d2;\n  if (d1 <= fl->threshold) {", FT),
+    ("fl-cubic-d1-unused", "src", FL, "  if (d1 <= fl->threshold && d2 <= fl->threshold) {", "  (void)d1;\n  if (d2 <= fl->threshold) {", FT),
+    ("fl-cubic-or", "src", FL, "  if (d1 <= fl->threshold && d2 <= fl->threshold) {", "  if (d1 <= fl->threshold || d2 <= fl->threshold) {", FT),
+    ("fl-cubic-strict", "src", FL, "d2 <= fl->threshold) {", "d2 < fl->threshold) {", FT),
+    ("fl-cubic-strict-1", "src", FL, "  if (d1 <= fl->threshold && d2", "  if (d1 < fl->threshold && d2", FT),
     ("fl-cubic-halves-d", "src", FL, "  WPt d = mid_pt(a, b);\n  WPt e = mid_pt(b, c);\n  WPt m = mid_pt(d, e);", "  WPt d = mid_pt(a, c);\n  WPt e = mid_pt(b, c);\n  WPt m = mid_pt(d, e);", FT),
     ("fl-cubic-halves-e", "src", FL, "  WPt e = mid_pt(b, c);\n  WPt m = mid_pt(d, e);", "  WPt e = mid_pt(a, c);\n  WPt m = mid_pt(d, e);", FT),
     ("fl-cubic-halves-m", "src", FL, "  WPt m = mid_pt(d, e);\n  GSHGEOM_Result r = cubic(", "  WPt m = mid_pt(a, e);\n  GSHGEOM_Result r = cubic(", FT),
     ("fl-cubic-halves-c", "src", FL, "  WPt c = mid_pt(p2, p3);", "  WPt c = mid_pt(p1, p3);", FT),
-    ("fl-cubic-left", "src", FL, "  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);", "  GSHGEOM_Result r = cubic(fp, p0, a, e, m, depth - 1);", FT),
-    ("fl-cubic-right", "src", FL, "  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);", "  return r != GSHGEOM_OK ? r : cubic(fp, m, d, c, p3, depth - 1);", FT),
-    ("fl-cubic-order", "src", FL, "  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);\n  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);",
-     "  GSHGEOM_Result r = cubic(fp, m, e, c, p3, depth - 1);\n  return r != GSHGEOM_OK ? r : cubic(fp, p0, a, d, m, depth - 1);", FT),
-    ("fl-cubic-error-lost", "src", FL, "  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);\n  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);",
-     "  cubic(fp, p0, a, d, m, depth - 1);\n  return cubic(fp, m, e, c, p3, depth - 1);", FT),
-    ("fl-cubic-emits-start", "src", FL, "    return add_point(fp, narrow(p3));\n  }\n  WPt a = mid_pt(p0, p1);", "    return add_point(fp, narrow(p0));\n  }\n  WPt a = mid_pt(p0, p1);", FT),
-    ("fl-cubic-emits-control", "src", FL, "    return add_point(fp, narrow(p3));\n  }\n  WPt a = mid_pt(p0, p1);", "    return add_point(fp, narrow(p2));\n  }\n  WPt a = mid_pt(p0, p1);", FT),
+    ("fl-cubic-left", "src", FL, "  GSHGEOM_Result r = cubic(fl, p0, a, d, m, index * 2u, level + 1);", "  GSHGEOM_Result r = cubic(fl, p0, a, e, m, index * 2u, level + 1);", FT),
+    ("fl-cubic-right", "src", FL, "                         : cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);", "                         : cubic(fl, m, d, c, p3, index * 2u + 1u, level + 1);", FT),
+    ("fl-cubic-order", "src", FL, "  GSHGEOM_Result r = cubic(fl, p0, a, d, m, index * 2u, level + 1);\n  return r != GSHGEOM_OK ? r\n                         : cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);",
+     "  GSHGEOM_Result r = cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);\n  return r != GSHGEOM_OK ? r\n                         : cubic(fl, p0, a, d, m, index * 2u, level + 1);", FT),
+    ("fl-cubic-error-lost", "src", FL, "  GSHGEOM_Result r = cubic(fl, p0, a, d, m, index * 2u, level + 1);\n  return r != GSHGEOM_OK ? r\n                         : cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);",
+     "  cubic(fl, p0, a, d, m, index * 2u, level + 1);\n  return cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);", FT),
+    ("fl-cubic-emits-start", "src", FL, "    return emit_vertex(fl, p3, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", "    return emit_vertex(fl, p0, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", FT),
+    ("fl-cubic-emits-control", "src", FL, "    return emit_vertex(fl, p3, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", "    return emit_vertex(fl, p2, index, level);\n  }\n  WPt a = mid_pt(p0, p1);", FT),
     # The depth cap and the tolerance.
     ("fl-tolerance", "hdr", FH, "#define GSHGEOM_FLATTEN_TOLERANCE 4", "#define GSHGEOM_FLATTEN_TOLERANCE 8", FT),
     ("fl-tolerance-tight", "hdr", FH, "#define GSHGEOM_FLATTEN_TOLERANCE 4", "#define GSHGEOM_FLATTEN_TOLERANCE 2", FT),
     ("fl-depth-shallow", "hdr", FH, "#define GSHGEOM_FLATTEN_MAX_DEPTH 20", "#define GSHGEOM_FLATTEN_MAX_DEPTH 3", FT),
     ("fl-depth-8", "hdr", FH, "#define GSHGEOM_FLATTEN_MAX_DEPTH 20", "#define GSHGEOM_FLATTEN_MAX_DEPTH 8", FT),
+    ("fl-depth-16", "hdr", FH, "#define GSHGEOM_FLATTEN_MAX_DEPTH 20", "#define GSHGEOM_FLATTEN_MAX_DEPTH 16", FT),
+    ("fl-min-tolerance-3", "hdr", FH, "#define GSHGEOM_FLATTEN_MIN_TOLERANCE 2", "#define GSHGEOM_FLATTEN_MIN_TOLERANCE 3", FT),
+    # The tolerance as a parameter: the threshold derived from it, its refusal.
+    ("fl-threshold-3t", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)3 * FLAT_SCALE * (int64_t)tolerance;", FT),
+    ("fl-threshold-32bit", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int32_t)((int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1));", FT),
+    ("fl-threshold-constant", "src", FL, "  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", "  fl->threshold = (int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1);", FT),
+    ("fl-tolerance-refuses-minimum", "src", FL, "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {", "  if (tolerance <= GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {", FT),
+    ("fl-tolerance-accepts-one", "src", FL, "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {", "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE - 1 || !emit) {", FT),
+    ("fl-tolerance-unchecked", "src", FL, "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {", "  if (!emit) {", FT),
+    ("fl-tolerance-clamped-not-refused", "src", FL, "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);",
+     "  if (!emit) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {\n    tolerance = GSHGEOM_FLATTEN_MIN_TOLERANCE;\n  }\n  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);", FT),
+    ("fl-emit-unchecked", "src", FL, "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {", "  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {", FT),
+    ("fl-cap-clamp-low", "src", FL, "  fl->levels = levels < 1 ? 1\n", "  fl->levels = levels < 0 ? 0\n", FT),
+    ("fl-cap-unclamped-low", "src", FL, "  fl->levels = levels < 1 ? 1\n      : (levels > GSHGEOM_FLATTEN_MAX_DEPTH ? GSHGEOM_FLATTEN_MAX_DEPTH : levels);", "  fl->levels = levels > GSHGEOM_FLATTEN_MAX_DEPTH ? GSHGEOM_FLATTEN_MAX_DEPTH : levels;", FT),
+    ("fl-default-tolerance-wrapper", "src", FL, "      path, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);", "      path, GSHGEOM_FLATTEN_TOLERANCE + 1, alloc, limits, out);", FT),
+    ("fl-path-tolerance-ignored-quad", "src", FL, "tolerance, current, el.p[0], el.p[1], append_vertex, fp);", "GSHGEOM_FLATTEN_TOLERANCE, current, el.p[0], el.p[1], append_vertex, fp);", FT),
+    ("fl-path-tolerance-ignored-cubic", "src", FL, "tolerance, current, el.p[0], el.p[1],\n          el.p[2], append_vertex, fp);", "GSHGEOM_FLATTEN_TOLERANCE, current, el.p[0], el.p[1],\n          el.p[2], append_vertex, fp);", FT),
+    # The pieces' places and the count of forced ones.
+    ("fl-quad-forced-not-counted", "src", FL, "  if (level >= fl->levels) {\n    fl->forced += 1;\n    return emit_vertex(fl, p2, index, level);", "  if (level >= fl->levels) {\n    return emit_vertex(fl, p2, index, level);", FT),
+    ("fl-cubic-forced-not-counted", "src", FL, "  if (level >= fl->levels) {\n    fl->forced += 1;\n    return emit_vertex(fl, p3, index, level);", "  if (level >= fl->levels) {\n    return emit_vertex(fl, p3, index, level);", FT),
+    ("fl-quad-forced-counted-always", "src", FL, "  if (sum <= fl->threshold) {\n    return emit_vertex(fl, p2, index, level);", "  if (sum <= fl->threshold) {\n    fl->forced += 1;\n    return emit_vertex(fl, p2, index, level);", FT),
+    ("fl-cubic-forced-counted-always", "src", FL, "  if (d1 <= fl->threshold && d2 <= fl->threshold) {\n    return emit_vertex(fl, p3, index, level);", "  if (d1 <= fl->threshold && d2 <= fl->threshold) {\n    fl->forced += 1;\n    return emit_vertex(fl, p3, index, level);", FT),
+    ("fl-quad-forced-not-reported", "src", FL, "  r = quad(&fl, widen(p0), widen(p1), widen(p2), 0u, 0);\n  if (forced) {\n    *forced = fl.forced;", "  r = quad(&fl, widen(p0), widen(p1), widen(p2), 0u, 0);\n  if (forced) {\n    *forced = 0;", FT),
+    ("fl-cubic-forced-not-reported", "src", FL, "  r = cubic(&fl, widen(p0), widen(p1), widen(p2), widen(p3), 0u, 0);\n  if (forced) {\n    *forced = fl.forced;", "  r = cubic(&fl, widen(p0), widen(p1), widen(p2), widen(p3), 0u, 0);\n  if (forced) {\n    *forced = 0;", FT),
+    ("fl-emit-level-lost", "src", FL, "  return fl->emit(fl->user, narrow(to), index, level);", "  (void)level;\n  return fl->emit(fl->user, narrow(to), index, 0);", FT),
+    ("fl-emit-index-lost", "src", FL, "  return fl->emit(fl->user, narrow(to), index, level);", "  (void)index;\n  return fl->emit(fl->user, narrow(to), 0u, level);", FT),
+    ("fl-emit-user-lost", "src", FL, "  return fl->emit(fl->user, narrow(to), index, level);", "  return fl->emit(NULL, narrow(to), index, level);", FT),
+    ("fl-emit-result-lost", "src", FL, "  return fl->emit(fl->user, narrow(to), index, level);", "  fl->emit(fl->user, narrow(to), index, level);\n  return GSHGEOM_OK;", FT),
+    ("fl-quad-left-index", "src", FL, "quad(fl, p0, a, m, index * 2u, level + 1);\n  return r != GSHGEOM_OK ? r : quad(", "quad(fl, p0, a, m, index, level + 1);\n  return r != GSHGEOM_OK ? r : quad(", FT),
+    ("fl-quad-right-index", "src", FL, "quad(fl, m, b, p2, index * 2u + 1u, level + 1);", "quad(fl, m, b, p2, index * 2u, level + 1);", FT),
+    ("fl-cubic-left-index", "src", FL, "cubic(fl, p0, a, d, m, index * 2u, level + 1);\n  return r != GSHGEOM_OK ? r\n", "cubic(fl, p0, a, d, m, index, level + 1);\n  return r != GSHGEOM_OK ? r\n", FT),
+    ("fl-cubic-right-index", "src", FL, "cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);", "cubic(fl, m, e, c, p3, index * 2u, level + 1);", FT),
+    ("fl-append-vertex-drops", "src", FL, "  return add_point(user, to);", "  (void)user;\n  (void)to;\n  return GSHGEOM_OK;", FT),
+    ("fl-append-vertex-error-lost", "src", FL, "  return add_point(user, to);", "  add_point(user, to);\n  return GSHGEOM_OK;", FT),
     # The revision.
     ("fl-revision-constant", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 2", "#define GSHGEOM_FLATTEN_REVISION 1", FT),
     ("fl-revision-constant-3", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 2", "#define GSHGEOM_FLATTEN_REVISION 3", FT),
@@ -1003,8 +1039,8 @@ PLANTS += [
     ("fl-line-forgets-current", "src", FL, "      r = add_point(fp, el.p[0]);\n      current = el.p[0];", "      r = add_point(fp, el.p[0]);", FT),
     ("fl-quadratic-forgets-current", "src", FL, "      current = el.p[1];\n      break;\n    case GSHGEOM_DEVICE_CUBIC:", "      break;\n    case GSHGEOM_DEVICE_CUBIC:", FT),
     ("fl-cubic-forgets-current", "src", FL, "      current = el.p[2];\n      break;\n    case GSHGEOM_DEVICE_CLOSE:", "      break;\n    case GSHGEOM_DEVICE_CLOSE:", FT),
-    ("fl-quadratic-args", "src", FL, "r = quad(fp, widen(current), widen(el.p[0]), widen(el.p[1]),", "r = quad(fp, widen(current), widen(el.p[1]), widen(el.p[0]),", FT),
-    ("fl-cubic-args", "src", FL, "r = cubic(fp, widen(current), widen(el.p[0]), widen(el.p[1]),", "r = cubic(fp, widen(current), widen(el.p[1]), widen(el.p[0]),", FT),
+    ("fl-quadratic-args", "src", FL, "tolerance, current, el.p[0], el.p[1], append_vertex, fp);", "tolerance, current, el.p[1], el.p[0], append_vertex, fp);", FT),
+    ("fl-cubic-args", "src", FL, "tolerance, current, el.p[0], el.p[1],\n          el.p[2], append_vertex, fp);", "tolerance, current, el.p[1], el.p[0],\n          el.p[2], append_vertex, fp);", FT),
     ("fl-line-adds-start", "src", FL, "      r = add_point(fp, el.p[0]);\n      current = el.p[0];", "      r = add_point(fp, current);\n      current = el.p[0];", FT),
         ("fl-skips-first", "src", FL, "for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Device_Element el;", "for (size_t i = 1; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Device_Element el;", FT),
     ("fl-begin-subpath-error", "src", FL, "  r = add_point(fp, p);\n  if (r != GSHGEOM_OK) {\n    fp->sub_n--;\n  }\n  return r;", "  r = add_point(fp, p);\n  return GSHGEOM_OK;", FT),
@@ -1015,7 +1051,7 @@ PLANTS += [
     ("fl-leaks-path", "src", FL, "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp->sub);\n  gcu_allocator_free(&alloc, fp);", "  gcu_allocator_free(&alloc, fp->pt);\n  gcu_allocator_free(&alloc, fp->sub);", FT),
     ("fl-failure-leaks", "src", FL, "  if (r != GSHGEOM_OK) {\n    flat_destroy_parts(fp);\n    return r;\n  }\n  *out = fp;", "  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  *out = fp;", FT),
     ("fl-create-oom-code", "src", FL, "  if (!fp) {\n    return GSHGEOM_ERR_OOM;\n  }", "  if (!fp) {\n    return GSHGEOM_ERR_INVALID;\n  }", FT),
-    ("fl-null-out", "src", FL, "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "  if (!path) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", FT),
+    ("fl-null-out", "src", FL, "  if (!path || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "  if (!path || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", FT),
         ("fl-one-call-leaks-device", "src", FL, "  r = gshgeom_device_path_flatten(dp, alloc, limits, out);\n  gshgeom_device_path_destroy(dp);", "  r = gshgeom_device_path_flatten(dp, alloc, limits, out);", FT),
     ("fl-one-call-error-lost", "src", FL, "  GSHGEOM_Result r = gshgeom_device_path_from_model(path, map, alloc, limits, &dp);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }",
      "  GSHGEOM_Result r = gshgeom_device_path_from_model(path, map, alloc, limits, &dp);\n  if (r != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INTERNAL;\n  }", FT),

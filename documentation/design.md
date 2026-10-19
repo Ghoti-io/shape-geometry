@@ -103,15 +103,17 @@ chord *segment* (convexity of positive weights makes that a bound), and becomes
 lines.
 
 `flatten.h` is the integer flattener, **revision 2**, ported from `font`'s
-`src/raster/flatten.c` (as of `font` commit 69d1860; shape-geometry has its own
-copy of the code and does not depend on `font`). Points are widened by eight
+`src/raster/flatten.c` (as of `font` commit 69d1860; shape-geometry does not
+depend on `font`, and `font` has since dropped its copy and calls this one).
+Points are widened by eight
 fractional bits and a curve is split at the midpoint of its widened control
 points (each midpoint `floor((u + v + 1) / 2)`, half up) until `|2 p1 - p0 - p2|`,
 or both `|3 p1 - 2 p0 - p3|` and `|3 p2 - p0 - 2 p3|`, summed over both axes,
 is at most `4 * 256 * (t - 1)` widened units, i.e. `4 * (t - 1)` units for the
-tolerance `t` (`t` is 4 units, 1/16 pixel, a constant: AD-12 makes it part of
-the definition, so the threshold is 12 units, 3,072 widened); to at most 20
-levels. A vertex is rounded to 26.6 once, half up (`floor((v + 128) / 256)`),
+tolerance `t` (the default is 4 units, 1/16 pixel, `GSHGEOM_FLATTEN_TOLERANCE`:
+AD-12 makes it part of the definition, so the threshold is 12 units, 3,072
+widened; a sink with a tolerance of its own passes it, at least
+`GSHGEOM_FLATTEN_MIN_TOLERANCE`, 2); to at most 20 levels. A vertex is rounded to 26.6 once, half up (`floor((v + 128) / 256)`),
 when it is emitted, and the end point of every piece is emitted, duplicates
 included. The output is a flattened path: polylines, each with a closed flag,
 the closing line implicit. All arithmetic is `int64`; no shift of a negative
@@ -133,22 +135,43 @@ parameter; (e) narrowing moves a vertex, and a point of a chord, by at most
 `sqrt(2)/2 = 0.7072`; (f) together `t - 0.1268 < t - 0.12`; (g) after 20
 halvings a piece's exact deviation sum is at most 4 (quadratic) or 12 (cubic)
 widened, the noise at most 160 or 360, against a threshold of 3,072: the cap
-never binds. The proof holds for every tolerance of 2 units and up (the
-threshold being derived from `t`); this library has the one value, 4, and a
-`_Static_assert` refuses a smaller one. `font`, which takes a tolerance as a
-parameter, refuses 1 and below 0 with `GFNT_ERR_INVALID`.
+never binds. The proof holds for every tolerance from 2 units to `INT32_MAX`
+(the threshold being derived from `t`, below 2^41 for any `int32`), and a
+smaller one is refused with `ERR_INVALID` before anything is emitted, never
+raised to 2. `font` takes a tolerance as an option and refuses 1 and below 0 with
+`GFNT_ERR_INVALID` itself, so the flattener's refusal is a guard for it.
 
-`tests/unit/test_flatten.cpp` checks it against the curve, not against pixels:
-inside every piece the flattener made, thirty-three exact points of the curve
+**The ways to ask.** `gshgeom_flatten_quadratic` and `gshgeom_flatten_cubic` flatten
+one curve at a tolerance, handing each vertex to a callback together with the
+parameter interval its piece covers (`leaf` and `level`: the piece is
+`[leaf / 2^level, (leaf + 1) / 2^level]`) and stopping at the callback's first
+refusal; a sink that places or flips its points before flattening (`font`: the half-up
+midpoint is not symmetric under negation) uses these. `gshgeom_device_path_flatten`
+flattens a device path at the default tolerance, and
+`gshgeom_device_path_flatten_with_tolerance` at a stated one; the two are the same
+code. `src/flatten/flatten_internal.h` has the same curve functions with a smaller depth
+cap and the count of pieces it forced, which the tests need because the proof says
+no input reaches the real cap.
+
+`tests/unit/test_tolerance.cpp` checks it against the curve, not against pixels,
+on the library's own pieces (the callback's `leaf` and `level` say which interval
+each covers), at tolerances from 2 to 1000 and the largest: inside every piece the
+flattener made, thirty-three exact points of the curve
 (Bernstein form in `long double` at dyadic parameters) are measured to that
 piece's segment, on every size class from coordinates below 2^4 up to the whole
 `int32` range, and on the corners of the `int32` square (about 53,000 vertices
-for a cubic); the smallest margin seen is recorded as a test property. Which
-parameter interval a piece covers is recovered by a model of the recursion in the
-test, which must first reproduce the library's vertices exactly. Nine vertex lists
-are pinned from an independent big-integer Python model
-(`tools/gen-hash-vectors.py`, `flatten_model`), which catches a wrong rounding
-rule that stays inside the bound (a floor midpoint at eight extra bits does).
+for a cubic); the smallest margin seen is recorded as a test property. The same
+file pins vertex lists at tolerances 2, 3, 4 and 64 from an independent big-integer
+Python model (this test began as `font`'s, when `font` had its own copy), checks
+that the depth cap is counted when it is forced (with the internal smaller cap),
+that the pieces tile the curve, that a callback's refusal stops the flattening,
+and that the path functions agree with the curve functions at every tolerance.
+`tests/unit/test_flatten.cpp` does the default tolerance through the path, where
+the piece intervals are recovered by a model of the recursion in the test, which
+must first reproduce the library's vertices exactly; nine vertex lists there are
+pinned from the same kind of model (`tools/gen-hash-vectors.py`, `flatten_model`),
+which catches a wrong rounding rule that stays inside the bound (a floor midpoint
+at eight extra bits does).
 
 ### The revision
 

@@ -64,6 +64,7 @@
 #define GSHGEOM_Device_Path GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Device_Path)
 #define GSHGEOM_Flat_Path GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Flat_Path)
 #define GSHGEOM_Flat_Subpath GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Flat_Subpath)
+#define GSHGEOM_Flatten_Emit GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Flatten_Emit)
 
 /* Public functions. */
 #define gshgeom_allocator_default GHOTIIO_SHAPE_GEOMETRY(gshgeom_allocator_default)
@@ -146,6 +147,11 @@
 #define gshgeom_device_path_hash GHOTIIO_SHAPE_GEOMETRY(gshgeom_device_path_hash)
 #define gshgeom_device_path_dump GHOTIIO_SHAPE_GEOMETRY(gshgeom_device_path_dump)
 #define gshgeom_device_path_flatten GHOTIIO_SHAPE_GEOMETRY(gshgeom_device_path_flatten)
+#define gshgeom_device_path_flatten_with_tolerance GHOTIIO_SHAPE_GEOMETRY(gshgeom_device_path_flatten_with_tolerance)
+#define gshgeom_flatten_quadratic GHOTIIO_SHAPE_GEOMETRY(gshgeom_flatten_quadratic)
+#define gshgeom_flatten_cubic GHOTIIO_SHAPE_GEOMETRY(gshgeom_flatten_cubic)
+#define gshgeom_flatten_quadratic_capped GHOTIIO_SHAPE_GEOMETRY(gshgeom_flatten_quadratic_capped)
+#define gshgeom_flatten_cubic_capped GHOTIIO_SHAPE_GEOMETRY(gshgeom_flatten_cubic_capped)
 #define gshgeom_path_flatten GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_flatten)
 #define gshgeom_flat_path_destroy GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_destroy)
 #define gshgeom_flat_path_point_count GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_point_count)

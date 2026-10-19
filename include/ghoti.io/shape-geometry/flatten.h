@@ -26,7 +26,10 @@
  * Flattening is a call into this library after the map, with error in device
  * pixels.  The flattener here is the definition's: it was `font`'s private one,
  * and a raster sink uses it so that no two sinks flatten differently.  Its
- * tolerance is part of the definition (AD-12) and is not a parameter.
+ * tolerance is part of the definition (AD-12): ::GSHGEOM_FLATTEN_TOLERANCE is
+ * the one a path is flattened to unless the caller states another, which a
+ * sink with its own tolerance option (`font`'s) does, through the curve
+ * functions or ::gshgeom_device_path_flatten_with_tolerance.
  *
  * ## The guarantee (flattener revision 2)
  *
@@ -39,13 +42,12 @@
  * against dense exact evaluation on every size class up to the whole `int32`
  * range.
  *
- * The proof holds for any tolerance of 2 units (1/32 pixel) and up, with the
- * flatness threshold derived from it.  The tolerance is not a parameter of
- * this library, so there is no value below 2 to refuse here; the compile-time
- * check in flatten.c refuses a ::GSHGEOM_FLATTEN_TOLERANCE under 2.  `font`'s
- * rasteriser, which does take a tolerance, returns `GFNT_ERR_INVALID` for 1 or
- * a negative value; this library's contract is the same one, held at the only
- * value it has.
+ * The proof holds for every tolerance from ::GSHGEOM_FLATTEN_MIN_TOLERANCE, 2
+ * units (1/32 pixel), up to INT32_MAX, with the flatness threshold derived from
+ * the tolerance and the same depth cap.  A smaller tolerance is refused with
+ * ::GSHGEOM_ERR_INVALID before anything is emitted: a tolerance asked for is a
+ * promise, so one the proof cannot keep is not rounded up to another.  The
+ * result is the same polyline on every target.
  *
  * ## The algorithm
  *
@@ -94,8 +96,14 @@
 extern "C" {
 #endif
 
-/** The flattening tolerance: 4 units of 1/64 pixel, i.e. 1/16 pixel. */
+/** The default flattening tolerance: 4 units of 1/64 pixel, i.e. 1/16 pixel. */
 #define GSHGEOM_FLATTEN_TOLERANCE 4
+
+/**
+ * The smallest tolerance accepted, in 26.6 units (two units, 1/32 pixel): the
+ * proof of the guarantee is closed from here up (flatten.c, "Tolerances").
+ */
+#define GSHGEOM_FLATTEN_MIN_TOLERANCE 2
 
 /**
  * How deep a curve may be subdivided before its chord is used as it is.  The
@@ -106,6 +114,23 @@ extern "C" {
 
 /** The revision of the flattener's definition; see the table above. */
 #define GSHGEOM_FLATTEN_REVISION 2
+
+/**
+ * Receives one vertex of a flattened curve, in order.
+ *
+ * @param user  The pointer given to the flattener.
+ * @param to    The vertex, 26.6.  The polyline starts at the curve's first
+ *              point, which is not emitted; the last vertex is its last point.
+ * @param leaf  Which piece of the curve this vertex ends: the piece covers the
+ *              parameter interval `[leaf / 2^level, (leaf + 1) / 2^level]`, so
+ *              a test, or a caller that interpolates an attribute along the
+ *              curve, knows where on the curve the segment replaces it.
+ * @param level How many times the curve was halved to reach that piece.
+ * @return ::GSHGEOM_OK to go on; anything else stops the flattening and is
+ *         returned by it (a sink that is out of room says so this way).
+ */
+typedef GSHGEOM_Result (*GSHGEOM_Flatten_Emit)(
+    void * user, GSHGEOM_Device_Point to, uint32_t leaf, int level);
 
 /** The opaque flattened path: polylines in 26.6, open or closed. */
 typedef struct GSHGEOM_Flat_Path GSHGEOM_Flat_Path;
@@ -129,6 +154,36 @@ typedef struct GSHGEOM_Flat_Subpath {
 GSHGEOM_API int gshgeom_flatten_revision(void);
 
 /**
+ * @brief Flatten one quadratic Bezier with the integer flattener.
+ *
+ * The polyline's vertices are handed to @p emit in order, each rounded to 26.6
+ * once; the guarantee above holds for any @p p0, @p p1 and @p p2 and any
+ * accepted @p tolerance, and the depth cap is never what ends a piece.  The
+ * caller flips, maps or places the points before the call and not after: the
+ * half-up midpoint is not symmetric under negation, so flattening and then
+ * flipping gives other vertices than flipping and then flattening.
+ *
+ * @param tolerance How far the polyline may stray, in 26.6 units; at least
+ *                  ::GSHGEOM_FLATTEN_MIN_TOLERANCE.
+ * @param p0   First point (any `int32` coordinates).
+ * @param p1   The control point.
+ * @param p2   Last point; the last vertex emitted.
+ * @param emit Called once per vertex.
+ * @param user Handed to @p emit.
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for a tolerance below the
+ *         minimum or a NULL @p emit (nothing is emitted); whatever @p emit
+ *         returned that was not ::GSHGEOM_OK, at which the flattening stopped.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_flatten_quadratic(int32_t tolerance,
+    GSHGEOM_Device_Point p0, GSHGEOM_Device_Point p1, GSHGEOM_Device_Point p2,
+    GSHGEOM_Flatten_Emit emit, void * user);
+
+/** @brief Flatten one cubic Bezier; see ::gshgeom_flatten_quadratic. */
+GSHGEOM_API GSHGEOM_Result gshgeom_flatten_cubic(int32_t tolerance,
+    GSHGEOM_Device_Point p0, GSHGEOM_Device_Point p1, GSHGEOM_Device_Point p2,
+    GSHGEOM_Device_Point p3, GSHGEOM_Flatten_Emit emit, void * user);
+
+/**
  * @brief Flatten a device path with the integer flattener.
  *
  * A move starts a subpath (a lone move is a subpath of one point); a line adds
@@ -146,6 +201,22 @@ GSHGEOM_API int gshgeom_flatten_revision(void);
 GSHGEOM_API GSHGEOM_Result gshgeom_device_path_flatten(
     const GSHGEOM_Device_Path * path, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out);
+
+/**
+ * @brief ::gshgeom_device_path_flatten at a tolerance of the caller's.
+ *
+ * Exactly ::gshgeom_device_path_flatten when @p tolerance is
+ * ::GSHGEOM_FLATTEN_TOLERANCE.
+ *
+ * @param tolerance As for ::gshgeom_flatten_quadratic.
+ * @return As for ::gshgeom_device_path_flatten, and ::GSHGEOM_ERR_INVALID for a
+ *         tolerance below ::GSHGEOM_FLATTEN_MIN_TOLERANCE, before anything is
+ *         allocated.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_device_path_flatten_with_tolerance(
+    const GSHGEOM_Device_Path * path, int32_t tolerance,
+    const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    GSHGEOM_Flat_Path ** out);
 
 /**
  * @brief The whole of CAP-3 in one call: map a model path, round it to 26.6

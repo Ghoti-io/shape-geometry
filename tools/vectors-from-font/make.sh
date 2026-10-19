@@ -12,8 +12,12 @@
 #   FONT_GEN_DIR=<font build's generated headers> CUTIL_CFLAGS=... \
 #     tools/vectors-from-font/make.sh <font checkout> <workdir> > tests/flatten_vectors.h
 #
-# The vectors were recorded at font commit 69d1860 (flattener revision 2).  Nothing
-# of font is linked: flatten.c needs only headers and the inline helpers of
+# The vectors were recorded at font commit 69d1860 (flattener revision 2).  Font
+# dropped its copy of the flattener after bbd9a47 and calls this library's now, so
+# <font checkout> has to be a checkout of font at 69d1860 (or bbd9a47, which has
+# the same file), for instance a scratch `git worktree` of it; the committed
+# vectors are the record, and nothing but a wish to re-record them needs this
+# again.  Nothing of font is linked: flatten.c needs only headers and the inline helpers of
 # src/core/fixed.h.  FONT_GEN_DIR is the directory holding
 # ghoti.io/font/libver_gen.h (e.g. libs/font/build/linux/release/generated).
 set -e

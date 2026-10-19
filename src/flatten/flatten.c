@@ -24,12 +24,15 @@
  * The integer flattener (flatten.h), revision 2, the proof that its polyline
  * stays within the tolerance of the curve, and the flattened path.
  *
- * Ported, as code of this library, from `font`'s `src/raster/flatten.c` at
- * `font` commit 69d1860, whose recursion it keeps exactly: the tests compare
- * its output with the vertices `font`'s flattener produced for the same input
- * (at tolerance 4), bit for bit.  There is no dependency on `font`.  A line is
- * appended to the flattened path instead of being handed to an emit callback,
- * and the library has one tolerance, not a parameter.
+ * This was `font`'s private flattener (`src/raster/flatten.c` at `font` commit
+ * 69d1860, whose recursion it keeps exactly: the tests compare its output with
+ * the vertices `font` produced for the same input, bit for bit).  `font` now
+ * calls this one and keeps no copy, so there is one flattener in the family.
+ * The recursion hands each vertex to an emit callback; the flattened path is
+ * the callback that appends it.  The tolerance is a parameter of the curve
+ * functions and of ::gshgeom_device_path_flatten_with_tolerance, not less than
+ * ::GSHGEOM_FLATTEN_MIN_TOLERANCE; the path functions without one use
+ * ::GSHGEOM_FLATTEN_TOLERANCE.
  *
  * A failed call frees what it made and writes nothing to its output.
  *
@@ -50,8 +53,8 @@
  *    2^-9 of a unit.
  * 3. **The flatness threshold leaves room for that one rounding**: a piece is
  *    flat when its L1 deviation sum is at most `4 * 256 * (t - 1)` widened
- *    units, i.e. `4 * (t - 1)` units, for the tolerance `t` (here 4: 3,072
- *    widened, 12 units).  Revision 1 spent the whole tolerance on the flatness
+ *    units, i.e. `4 * (t - 1)` units, for the tolerance `t` (at the default 4:
+ *    3,072 widened, 12 units).  Revision 1 spent the whole tolerance on the flatness
  *    test (`4 * t`) and had none to spare for rounding.
  *
  * No float, no libm, no shift of a negative value (a widening is a
@@ -61,12 +64,12 @@
  * ## The theorem
  *
  * Let the curve have control points with int32 coordinates (any value of the
- * type) and let `t >= 2` be the tolerance in 26.6 units; this library's is
- * ::GSHGEOM_FLATTEN_TOLERANCE, 4.  Then every point of the curve is within
- * `t - 0.12` units (so, here, 3.88, and within `t`) of the emitted polyline,
- * and the depth cap never forces a piece.  The proof is for every `t >= 2`
- * because the threshold is derived from `t`; the library has no other
- * tolerance, and a compile-time check below refuses a smaller one.
+ * type) and let `t >= 2` be the tolerance in 26.6 units (the default is
+ * ::GSHGEOM_FLATTEN_TOLERANCE, 4).  Then every point of the curve is within
+ * `t - 0.12` units (so, at the default, 3.88, and within `t`) of the emitted
+ * polyline, and the depth cap never forces a piece.  The proof is for every
+ * `t >= 2` up to INT32_MAX because the threshold is derived from `t`; a smaller
+ * tolerance is refused with ::GSHGEOM_ERR_INVALID, before anything is emitted.
  *
  * ## The proof
  *
@@ -75,7 +78,8 @@
  *
  * **(a) Ranges.** Every coordinate of every point the recursion makes lies in
  * the interval spanned by the corresponding input coordinates, widened, so
- * within +-2^39 widened: the inputs are there, and the half-up midpoint
+ * within +-2^39 widened (and the threshold `4W(t-1)`, with `t - 1 < 2^31`, is
+ * below 2^41): the inputs are there, and the half-up midpoint
  * `floor((u+v+1)/2)` of two integers in an interval `[lo, hi]` is in it (the
  * sum is at most `2 hi + 1`, whose half floors to `hi`).  Hence 3p, 2p and sums
  * of up to six such terms are below 2^42, far inside int64.  Narrowing
@@ -134,18 +138,20 @@
  * `2 * 3 * 2^33 * 2^-40` units = 12 widened.  The error part: coefficients
  * (2,1,1) and (3,2,1) times `E` per axis, both axes: at most `8 * 20 = 160`
  * widened for a quadratic and `12 * 30 = 360` for a cubic.  The most is 372,
- * and the threshold at this library's `t = 4` is `T = 3072` (at the smallest
- * `t = 2` it is 1024).  So every piece is accepted at or before depth 20.
+ * and the smallest threshold, at `t = 2`, is `T = 1024` (at the default `t = 4`
+ * it is 3072).  So every piece is accepted at or before depth 20.
  * (This is why the depth is 20 and was 16: at 16 a curve spanning the int32
  * range is still 4 (quadratic) or 12 (cubic) units of deviation sum from flat.)
  *
  * ## What checks the proof
  *
- * tests/unit/test_flatten.cpp evaluates the curve exactly and measures the
- * distance to the polyline, on every size class up to the whole int32 range,
- * and asserts the bound; it pins vertex lists from `font`'s flattener and from
- * an independent big-integer model (tools/gen-hash-vectors.py).  That it finds
- * a violation was shown by planting (tools/check-planted.py).
+ * tests/unit/test_tolerance.cpp evaluates the curve exactly and measures the
+ * distance to the polyline, on every size class up to the whole int32 range and
+ * at tolerances from 2 to 1000, and asserts the bound and a zero cap count; it
+ * pins vertex lists from an independent big-integer model.
+ * tests/unit/test_flatten.cpp does the same at the default tolerance through
+ * the path functions and pins the vectors `font` recorded.  That they find a
+ * violation was shown by planting (tools/check-planted.py).
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
@@ -154,6 +160,7 @@
 #include <ghoti.io/shape-geometry/hash.h>
 
 #include "../core/grow.h"
+#include "flatten_internal.h"
 
 #include <string.h>
 
@@ -215,19 +222,28 @@ static GSHGEOM_Result begin_subpath(GSHGEOM_Flat_Path * fp, Pt p) {
 /** 2^FLAT_EXTRA, the widening factor. */
 #define FLAT_SCALE ((int64_t)1 << FLAT_EXTRA)
 
-/* The proof (a theorem for t >= 2) needs the tolerance to be at least 2. */
-_Static_assert(GSHGEOM_FLATTEN_TOLERANCE >= 2,
+/* The proof (a theorem for t >= 2) needs the tolerance to be at least 2, and
+ * the default is one the proof covers. */
+_Static_assert(GSHGEOM_FLATTEN_MIN_TOLERANCE >= 2,
     "the flattener's guarantee is proved for tolerances of 2 units and up");
-
-/** The L1 flatness limit, widened: 4 * 256 * (t - 1) (3,072 at t = 4). */
-#define FLAT_THRESHOLD \
-  ((int64_t)4 * FLAT_SCALE * (GSHGEOM_FLATTEN_TOLERANCE - 1))
+_Static_assert(GSHGEOM_FLATTEN_TOLERANCE >= GSHGEOM_FLATTEN_MIN_TOLERANCE,
+    "the default tolerance is below the smallest one accepted");
 
 /** A point in widened units: 26.6 times 2^FLAT_EXTRA. */
 typedef struct WPt {
   int64_t x;
   int64_t y;
 } WPt;
+
+/** One curve's recursion: the threshold derived from the tolerance, and where
+ * the vertices go. */
+typedef struct Flattener {
+  int64_t threshold;          /* The L1 flatness limit, widened: 4 * 256 * (t - 1). */
+  GSHGEOM_Flatten_Emit emit;
+  void * user;
+  int levels;                 /* The depth cap: 1 to GSHGEOM_FLATTEN_MAX_DEPTH. */
+  int forced;                 /* Pieces the depth cap ended although not flat. */
+} Flattener;
 
 /* floor(a / b) for b > 0, without shifting a negative value. */
 static int64_t floor_div(int64_t a, int64_t b) {
@@ -266,32 +282,46 @@ static int64_t abs64(int64_t v) {
   return v < 0 ? -v : v;
 }
 
+/* The vertex a piece ends at, rounded to 26.6 once, handed to the sink. */
+static GSHGEOM_Result emit_vertex(
+    Flattener * fl, WPt to, uint32_t index, int level) {
+  return fl->emit(fl->user, narrow(to), index, level);
+}
+
 /* A quadratic piece is flat when |2 p1 - p0 - p2| summed over both axes is at
  * most the threshold (its deviation from its chord is a quarter of that).  The
  * flatness test comes before the cap, as in the proof. */
 static GSHGEOM_Result quad(
-    GSHGEOM_Flat_Path * fp, WPt p0, WPt p1, WPt p2, int depth) {
+    Flattener * fl, WPt p0, WPt p1, WPt p2, uint32_t index, int level) {
   int64_t sum = abs64(2 * p1.x - p0.x - p2.x) + abs64(2 * p1.y - p0.y - p2.y);
-  if (sum <= FLAT_THRESHOLD || depth <= 0) {
-    return add_point(fp, narrow(p2));
+  if (sum <= fl->threshold) {
+    return emit_vertex(fl, p2, index, level);
+  }
+  if (level >= fl->levels) {
+    fl->forced += 1;
+    return emit_vertex(fl, p2, index, level);
   }
   WPt a = mid_pt(p0, p1);
   WPt b = mid_pt(p1, p2);
   WPt m = mid_pt(a, b);
-  GSHGEOM_Result r = quad(fp, p0, a, m, depth - 1);
-  return r != GSHGEOM_OK ? r : quad(fp, m, b, p2, depth - 1);
+  GSHGEOM_Result r = quad(fl, p0, a, m, index * 2u, level + 1);
+  return r != GSHGEOM_OK ? r : quad(fl, m, b, p2, index * 2u + 1u, level + 1);
 }
 
 /* A cubic piece is flat when both control-point deviations d1 and d2, each
  * summed over both axes, are at most the threshold. */
-static GSHGEOM_Result cubic(
-    GSHGEOM_Flat_Path * fp, WPt p0, WPt p1, WPt p2, WPt p3, int depth) {
+static GSHGEOM_Result cubic(Flattener * fl, WPt p0, WPt p1, WPt p2, WPt p3,
+    uint32_t index, int level) {
   int64_t d1 = abs64(3 * p1.x - 2 * p0.x - p3.x) +
       abs64(3 * p1.y - 2 * p0.y - p3.y);
   int64_t d2 = abs64(3 * p2.x - p0.x - 2 * p3.x) +
       abs64(3 * p2.y - p0.y - 2 * p3.y);
-  if ((d1 <= FLAT_THRESHOLD && d2 <= FLAT_THRESHOLD) || depth <= 0) {
-    return add_point(fp, narrow(p3));
+  if (d1 <= fl->threshold && d2 <= fl->threshold) {
+    return emit_vertex(fl, p3, index, level);
+  }
+  if (level >= fl->levels) {
+    fl->forced += 1;
+    return emit_vertex(fl, p3, index, level);
   }
   WPt a = mid_pt(p0, p1);
   WPt b = mid_pt(p1, p2);
@@ -299,8 +329,73 @@ static GSHGEOM_Result cubic(
   WPt d = mid_pt(a, b);
   WPt e = mid_pt(b, c);
   WPt m = mid_pt(d, e);
-  GSHGEOM_Result r = cubic(fp, p0, a, d, m, depth - 1);
-  return r != GSHGEOM_OK ? r : cubic(fp, m, e, c, p3, depth - 1);
+  GSHGEOM_Result r = cubic(fl, p0, a, d, m, index * 2u, level + 1);
+  return r != GSHGEOM_OK ? r
+                         : cubic(fl, m, e, c, p3, index * 2u + 1u, level + 1);
+}
+
+/* The state for one curve, or ::GSHGEOM_ERR_INVALID for a tolerance the proof
+ * does not cover (or no sink).  The threshold is derived from the tolerance:
+ * 4 * 256 * (t - 1) is below 2^41 for any int32 t. */
+static GSHGEOM_Result flattener_begin(Flattener * fl, int32_t tolerance,
+    int levels, GSHGEOM_Flatten_Emit emit, void * user) {
+  if (tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || !emit) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  fl->threshold = (int64_t)4 * FLAT_SCALE * ((int64_t)tolerance - 1);
+  fl->emit = emit;
+  fl->user = user;
+  fl->levels = levels < 1 ? 1
+      : (levels > GSHGEOM_FLATTEN_MAX_DEPTH ? GSHGEOM_FLATTEN_MAX_DEPTH : levels);
+  fl->forced = 0;
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_flatten_quadratic_capped(int32_t tolerance, int levels,
+    Pt p0, Pt p1, Pt p2, GSHGEOM_Flatten_Emit emit, void * user, int * forced) {
+  Flattener fl;
+  if (forced) {
+    *forced = 0;
+  }
+  GSHGEOM_Result r = flattener_begin(&fl, tolerance, levels, emit, user);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  r = quad(&fl, widen(p0), widen(p1), widen(p2), 0u, 0);
+  if (forced) {
+    *forced = fl.forced;
+  }
+  return r;
+}
+
+GSHGEOM_Result gshgeom_flatten_cubic_capped(int32_t tolerance, int levels,
+    Pt p0, Pt p1, Pt p2, Pt p3, GSHGEOM_Flatten_Emit emit, void * user,
+    int * forced) {
+  Flattener fl;
+  if (forced) {
+    *forced = 0;
+  }
+  GSHGEOM_Result r = flattener_begin(&fl, tolerance, levels, emit, user);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  r = cubic(&fl, widen(p0), widen(p1), widen(p2), widen(p3), 0u, 0);
+  if (forced) {
+    *forced = fl.forced;
+  }
+  return r;
+}
+
+GSHGEOM_Result gshgeom_flatten_quadratic(int32_t tolerance, Pt p0, Pt p1,
+    Pt p2, GSHGEOM_Flatten_Emit emit, void * user) {
+  return gshgeom_flatten_quadratic_capped(
+      tolerance, GSHGEOM_FLATTEN_MAX_DEPTH, p0, p1, p2, emit, user, NULL);
+}
+
+GSHGEOM_Result gshgeom_flatten_cubic(int32_t tolerance, Pt p0, Pt p1, Pt p2,
+    Pt p3, GSHGEOM_Flatten_Emit emit, void * user) {
+  return gshgeom_flatten_cubic_capped(tolerance, GSHGEOM_FLATTEN_MAX_DEPTH, p0,
+      p1, p2, p3, emit, user, NULL);
 }
 
 int gshgeom_flatten_revision(void) {
@@ -320,10 +415,26 @@ void gshgeom_flat_path_destroy(GSHGEOM_Flat_Path * path) {
   }
 }
 
+/* The sink the flattened path gives the curve functions: the vertex is a point. */
+static GSHGEOM_Result append_vertex(
+    void * user, GSHGEOM_Device_Point to, uint32_t index, int level) {
+  (void)index;
+  (void)level;
+  return add_point(user, to);
+}
+
 GSHGEOM_Result gshgeom_device_path_flatten(const GSHGEOM_Device_Path * path,
     const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
     GSHGEOM_Flat_Path ** out) {
-  if (!path || !out) {
+  return gshgeom_device_path_flatten_with_tolerance(
+      path, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);
+}
+
+GSHGEOM_Result gshgeom_device_path_flatten_with_tolerance(
+    const GSHGEOM_Device_Path * path, int32_t tolerance,
+    const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    GSHGEOM_Flat_Path ** out) {
+  if (!path || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
     return GSHGEOM_ERR_INVALID;
   }
   if (!alloc) {
@@ -361,13 +472,13 @@ GSHGEOM_Result gshgeom_device_path_flatten(const GSHGEOM_Device_Path * path,
       current = el.p[0];
       break;
     case GSHGEOM_DEVICE_QUADRATIC:
-      r = quad(fp, widen(current), widen(el.p[0]), widen(el.p[1]),
-          GSHGEOM_FLATTEN_MAX_DEPTH);
+      r = gshgeom_flatten_quadratic(
+          tolerance, current, el.p[0], el.p[1], append_vertex, fp);
       current = el.p[1];
       break;
     case GSHGEOM_DEVICE_CUBIC:
-      r = cubic(fp, widen(current), widen(el.p[0]), widen(el.p[1]),
-          widen(el.p[2]), GSHGEOM_FLATTEN_MAX_DEPTH);
+      r = gshgeom_flatten_cubic(tolerance, current, el.p[0], el.p[1],
+          el.p[2], append_vertex, fp);
       current = el.p[2];
       break;
     case GSHGEOM_DEVICE_CLOSE:
