@@ -563,6 +563,7 @@ GSHGEOM_Result gshgeom_device_path_dump(
       return GSHGEOM_ERR_IO;
     }
   }
-  /* A buffered stream reports a write error at the flush. */
-  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;
+  /* A buffered stream reports a write error at the flush, and a stream's error flag is sticky:
+   * a failed write whose return value was lost (an unbuffered stream's fprintf) still sets it. */
+  return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;
 }

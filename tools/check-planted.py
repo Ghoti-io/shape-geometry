@@ -340,7 +340,8 @@ PLANTS = [
     ("dump-name-order", "src", P, '"M", "L", "Q", "C", "RQ", "RC", "Z"}', '"M", "L", "C", "Q", "RQ", "RC", "Z"}', PT),
     ("dump-no-weights", "src", P, "      for (size_t k = 0; k < verb_weights(e->verb); k++) {\n        if (put_f64",
      "      for (size_t k = 0; k < verb_weights(e->verb) / 5; k++) {\n        if (put_f64", PT),
-    ("dump-ignores-flush", "src", P, "return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;", "return GSHGEOM_OK;", PT),
+    ("dump-ignores-flush", "src", P, "return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;", "return GSHGEOM_OK;", PT),
+    ("dump-ignores-ferror", "src", P, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", PT),
     ("dump-ignores-write", "src", P, "(unsigned long long)gshgeom_path_hash(path)) < 0) {\n    return GSHGEOM_ERR_IO;",
      "(unsigned long long)gshgeom_path_hash(path)) < 0) {\n    return GSHGEOM_OK;", PT),
 
@@ -705,7 +706,8 @@ PLANTS += [
     ("md-translation-letter", "src", M, "if (fputc('t', out) == EOF) {", "if (fputc('T', out) == EOF) {", MT),
     ("md-entry-width", "src", M, 'fprintf(out, " %016llx", (unsigned long long)gshgeom_f64_bits(map->m[i][j]))', 'fprintf(out, " %llx", (unsigned long long)gshgeom_f64_bits(map->m[i][j]))', MT),
     ("md-translation-width", "src", M, 'fprintf(out, " %016llx", (unsigned long long)gshgeom_f64_bits(map->t[i]))', 'fprintf(out, " %llx", (unsigned long long)gshgeom_f64_bits(map->t[i]))', MT),
-    ("md-ignores-flush", "src", M, "return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;", "return GSHGEOM_OK;", MT),
+    ("md-ignores-flush", "src", M, "return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;", "return GSHGEOM_OK;", MT),
+    ("md-ignores-ferror", "src", M, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", MT),
     ("md-invalid-map", "src", M, "if (!out || gshgeom_map_check(map) != GSHGEOM_OK) {", "if (!out) {", MT),
 ]
 
@@ -834,7 +836,8 @@ PLANTS += [
     ("h-dump-signed", "src", DV, 'return fprintf(out, " %08x", (unsigned)(uint32_t)v);', 'return fprintf(out, " %08d", (int)v);', DT),
     ("h-dump-close-points", "src", DV, "    if (e->verb != GSHGEOM_DEVICE_CLOSE) {\n      for (unsigned k = 0; k < verb_points(e->verb); k++) {\n        if (put_i32",
      "    if (1) {\n      for (unsigned k = 0; k < verb_points(e->verb); k++) {\n        if (put_i32", DT),
-    ("h-dump-ignores-flush", "src", DV, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", DT + ["testFlatten"][:0]),
+    ("h-dump-ignores-flush", "src", DV, "  return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", DT + ["testFlatten"][:0]),
+    ("h-dump-ignores-ferror", "src", DV, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", DT),
     ("h-dump-ignores-header-error", "src", DV, "(unsigned long long)gshgeom_device_path_hash(path)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_device_path_hash(path)) < 0) {\n    return GSHGEOM_OK;", DT),
         # --- a model path under a map ---------------------------------------------
     ("fm-3d-path-ok", "src", DV, "if (!path || !map || !out || gshgeom_path_dimension(path) != 2) {", "if (!path || !map || !out) {", DT),
@@ -1083,7 +1086,8 @@ PLANTS += [
     ("fh-dump-point-letter", "src", FL, '"P %08x %08x\\n"', '"p %08x %08x\\n"', FT),
     ("fh-dump-width", "src", FL, '"P %08x %08x\\n"', '"P %x %x\\n"', FT),
     ("fh-dump-swapped", "src", FL, "(unsigned)(uint32_t)path->pt[s->first + k].x,\n              (unsigned)(uint32_t)path->pt[s->first + k].y) < 0) {", "(unsigned)(uint32_t)path->pt[s->first + k].y,\n              (unsigned)(uint32_t)path->pt[s->first + k].x) < 0) {", FT),
-    ("fh-dump-ignores-flush", "src", FL, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", FT),
+    ("fh-dump-ignores-flush", "src", FL, "  return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", FT),
+    ("fh-dump-ignores-ferror", "src", FL, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", FT),
     ("fh-dump-ignores-header-error", "src", FL, "(unsigned long long)gshgeom_flat_path_hash(path)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_flat_path_hash(path)) < 0) {\n    return GSHGEOM_OK;", FT),
             ("fh-dump-null", "src", FL, "GSHGEOM_Result gshgeom_flat_path_dump(\n    const GSHGEOM_Flat_Path * path, FILE * out) {\n  if (!path || !out) {", "GSHGEOM_Result gshgeom_flat_path_dump(\n    const GSHGEOM_Flat_Path * path, FILE * out) {\n  if (!path) {", FT),
 
@@ -1319,7 +1323,8 @@ PLANTS += [
     ("ald-row-swapped", "src", A, "put_f64(out, r->t0) < 0 || put_f64(out, r->t1) < 0 ||", "put_f64(out, r->t1) < 0 || put_f64(out, r->t0) < 0 ||", AT),
     ("ald-subpath-letter", "src", A, "fputc('S', out)", "fputc('s', out)", AT),
     ("ald-subpath-closed", "src", A, 'fprintf(out, " %d\\n", m->sub[i].closed ? 1 : 0)', 'fprintf(out, " %d\\n", m->sub[i].closed ? 0 : 1)', AT),
-    ("ald-ignores-flush", "src", A, "  return fflush(out) == 0 ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", AT),
+    ("ald-ignores-flush", "src", A, "  return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}\n", "  return GSHGEOM_OK;\n}\n", AT),
+    ("ald-ignores-ferror", "src", A, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", AT),
     ("ald-ignores-header-error", "src", A, "(unsigned long long)gshgeom_measured_hash(m)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_measured_hash(m)) < 0) {\n    return GSHGEOM_OK;", AT),
     ("ald-null-stream", "src", A, "GSHGEOM_Result gshgeom_measured_dump(const GSHGEOM_Measured * m, FILE * out) {\n  if (!m || !out) {", "GSHGEOM_Result gshgeom_measured_dump(const GSHGEOM_Measured * m, FILE * out) {\n  if (!m) {", AT),
 

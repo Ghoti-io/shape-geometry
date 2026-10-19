@@ -19,6 +19,7 @@
 #include "../alloc_tracker.h"
 #include "../along_vectors.h"
 #include "../known_answers.h"
+#include "../dump_sink.h"
 
 #include <algorithm>
 #include <clocale>
@@ -1550,6 +1551,14 @@ TEST(AlongDump, AFailingSinkIsReportedAndTheLocaleDoesNotMatter) {
     }
   }
   std::setlocale(LC_ALL, saved.c_str());
+  gshgeom_measured_destroy(m);
+  gshgeom_path_destroy(p);
+}
+
+TEST(AlongDump, EveryWriteIsChecked) {
+  GSHGEOM_Path * p = subpath_fixture2();
+  GSHGEOM_Measured * m = measure(p);
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_measured_dump, m, "measured path");
   gshgeom_measured_destroy(m);
   gshgeom_path_destroy(p);
 }

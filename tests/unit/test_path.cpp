@@ -11,6 +11,7 @@
 #include "test_helpers.h"
 
 #include "../known_answers.h"
+#include "../dump_sink.h"
 
 #include <ghoti.io/math/math.h>
 
@@ -744,6 +745,17 @@ TEST(PathDump, AFailingSinkIsReported) {
   EXPECT_EQ(gshgeom_path_dump(p, ro), GSHGEOM_ERR_IO);
   std::fclose(ro);
   EXPECT_EQ(gshgeom_path_dump(p, nullptr), GSHGEOM_ERR_INVALID);
+  gshgeom_path_destroy(p);
+}
+
+// An unbuffered stream's fprintf can return a count while the stream's error flag is set; every write
+// of the dump, failing in turn, must still be reported (buffered and unbuffered).
+TEST(PathDump, EveryWriteIsChecked) {
+  GSHGEOM_Path * p = fixture_path(2);
+  GSHGEOM_Path * p3 = fixture_path(3);
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_path_dump, p, "2D path");
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_path_dump, p3, "3D path");
+  gshgeom_path_destroy(p3);
   gshgeom_path_destroy(p);
 }
 

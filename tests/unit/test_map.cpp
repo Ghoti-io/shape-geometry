@@ -13,6 +13,7 @@
 #include "test_helpers.h"
 
 #include "../known_answers.h"
+#include "../dump_sink.h"
 
 #include <ghoti.io/math/math.h>
 
@@ -1218,6 +1219,13 @@ TEST(MapDump, FailureAndRefusal) {
   z.t[1] = -0.0;
   std::string d = DumpOf(z);
   EXPECT_NE(d.find("\nt 0000000000000000 8000000000000000\n"), std::string::npos) << d;
+}
+
+TEST(MapDump, EveryWriteIsChecked) {
+  GSHGEOM_Map m2 = Compose(Translate(1, 2), Scale(2, 3));
+  GSHGEOM_Map m3 = Identity(3);
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_map_dump, &m2, "2D map");
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_map_dump, &m3, "3D map");
 }
 
 // ---------------------------------------------------------------------------

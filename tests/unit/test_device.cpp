@@ -13,6 +13,7 @@
 
 #include "../alloc_tracker.h"
 #include "../known_answers.h"
+#include "../dump_sink.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -586,6 +587,12 @@ TEST(DevicePathDump, AFailingSinkIsReported) {
   std::fclose(ro);
   EXPECT_EQ(gshgeom_device_path_dump(p, nullptr), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_device_path_dump(nullptr, stdout), GSHGEOM_ERR_INVALID);
+  gshgeom_device_path_destroy(p);
+}
+
+TEST(DevicePathDump, EveryWriteIsChecked) {
+  GSHGEOM_Device_Path * p = fixture_dp();
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_device_path_dump, p, "device path");
   gshgeom_device_path_destroy(p);
 }
 

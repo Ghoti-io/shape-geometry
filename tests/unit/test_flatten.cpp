@@ -17,6 +17,7 @@
 #include "../alloc_tracker.h"
 #include "../flatten_vectors.h"
 #include "../known_answers.h"
+#include "../dump_sink.h"
 
 #include <algorithm>
 #include <clocale>
@@ -1042,6 +1043,14 @@ TEST(FlatPathDump, AFailingSinkIsReportedAndTheLocaleDoesNotMatter) {
     }
   }
   std::setlocale(LC_ALL, saved.c_str());
+  gshgeom_flat_path_destroy(fp);
+  gshgeom_device_path_destroy(dp);
+}
+
+TEST(FlatPathDump, EveryWriteIsChecked) {
+  GSHGEOM_Device_Path * dp = flat_fixture_device();
+  GSHGEOM_Flat_Path * fp = flatten(dp);
+  GSHGEOM_EVERY_WRITE_CHECKED(gshgeom_flat_path_dump, fp, "flat path");
   gshgeom_flat_path_destroy(fp);
   gshgeom_device_path_destroy(dp);
 }
