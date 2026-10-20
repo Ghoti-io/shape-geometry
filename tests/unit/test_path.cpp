@@ -1016,6 +1016,20 @@ TEST(PathFixed, AFractionCountPastTheBoundIsInvalidAndChangesNothing) {
   gshgeom_path_destroy(path);
 }
 
+TEST(PathFixed, AThreeDimensionalPathGetsZZero) {
+  // The builder's points are planar: in a 3D path, z is 0 (a 2D path ignores z).
+  GSHGEOM_Path * path = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 3, &path), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_move_to_fixed(path, 5, 6, 0), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to_fixed(path, 7, 8, 1), GSHGEOM_OK);
+  for (size_t i = 0; i < 2; i++) {
+    GSHGEOM_Element e;
+    ASSERT_EQ(gshgeom_path_element(path, i, &e), GSHGEOM_OK);
+    EXPECT_EQ(gshgeom_f64_bits(e.curve.p[1].z), gshgeom_f64_bits(0.0)) << i;
+  }
+  gshgeom_path_destroy(path);
+}
+
 TEST(PathFixed, TheSameAsTheDoubleVerbsBitForBit) {
   GSHGEOM_Path * a = nullptr;
   GSHGEOM_Path * b = nullptr;
