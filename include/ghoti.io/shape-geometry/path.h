@@ -45,6 +45,18 @@
  * the start and then the end, and for a rational verb the weights (3 or 4,
  * the start's first) as `f64` after the points; a close adds nothing.  The
  * limits and the allocator are not part of it.
+ *
+ * ### The fixed-point builder (story 14a, AD-5)
+ *
+ * ::gshgeom_path_move_to_fixed and the three drawing verbs after it take each
+ * coordinate as an `int32_t` `v` and a number of fraction bits `b` from 0 to
+ * ::GSHGEOM_FIXED_MAX_BITS, and add the point `v / 2^b`, which is exact in a
+ * `double` (an `int32_t` has 31 bits of magnitude, a `double` 53, and the
+ * division is by a power of two), with `z = 0`.  Nothing rounds: the builder
+ * is how a library that names no floating type (`font`, whose design units are
+ * 26.6 integers, `b` = 6) hands its coordinates to a model path.  A fraction
+ * count past the bound is ::GSHGEOM_ERR_INVALID; otherwise each is exactly the
+ * verb it names, with that verb's checks and its atomicity.
  */
 
 #ifndef GHOTI_IO_GSHGEOM_PATH_H
@@ -155,6 +167,31 @@ GSHGEOM_API GSHGEOM_Result gshgeom_path_rational_cubic_to(GSHGEOM_Path * path,
 
 /** @brief End the subpath with a line back to its start. */
 GSHGEOM_API GSHGEOM_Result gshgeom_path_close(GSHGEOM_Path * path);
+
+/** The most fraction bits a fixed-point coordinate may have (see the file comment). */
+#define GSHGEOM_FIXED_MAX_BITS 16u
+
+/**
+ * @brief ::gshgeom_path_move_to at `(x / 2^bits, y / 2^bits)`, exactly.
+ *
+ * @param bits Fraction bits, 0 to ::GSHGEOM_FIXED_MAX_BITS.
+ * @return As ::gshgeom_path_move_to; ::GSHGEOM_ERR_INVALID for @p bits past the bound.  Likewise for the three below.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_path_move_to_fixed(
+    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits);
+
+/** @brief ::gshgeom_path_line_to at `(x, y) / 2^bits`, exactly. */
+GSHGEOM_API GSHGEOM_Result gshgeom_path_line_to_fixed(
+    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits);
+
+/** @brief ::gshgeom_path_quadratic_to with the control point `(cx, cy)` and the end `(x, y)`, each `/ 2^bits`. */
+GSHGEOM_API GSHGEOM_Result gshgeom_path_quadratic_to_fixed(GSHGEOM_Path * path,
+    int32_t cx, int32_t cy, int32_t x, int32_t y, unsigned bits);
+
+/** @brief ::gshgeom_path_cubic_to with the control points `(c1x, c1y)`, `(c2x, c2y)` and the end `(x, y)`, each `/ 2^bits`. */
+GSHGEOM_API GSHGEOM_Result gshgeom_path_cubic_to_fixed(GSHGEOM_Path * path,
+    int32_t c1x, int32_t c1y, int32_t c2x, int32_t c2y, int32_t x, int32_t y,
+    unsigned bits);
 
 /**
  * @brief Read element @p index back.

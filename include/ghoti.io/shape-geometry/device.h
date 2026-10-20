@@ -40,6 +40,22 @@
  * exact) are used instead, so no addition rounds.  No FMA is involved, and none
  * could change the result: the product by 64 is exact.
  *
+ * ## The integer spelling (story 14a, AD-5)
+ *
+ * ::gshgeom_scale_26_6 is the same rule for a point a fixed-point source
+ * scales itself: a 26.6 design coordinate `p` (1/64 unit) times a 16.16 scale
+ * `S` (pixels per unit times 2^16), optionally negated (the y flip of a y-up
+ * design space into y-down device space), is `floor((s p S + 2^15) / 2^16)`
+ * 1/64 pixel with `s` the sign: half up, in y down, computed in 64-bit
+ * integers.  It equals ::gshgeom_round_26_6 of the `double` route
+ * `(s (p / 64)) (S / 65536)` wherever it answers: an answer fits an `int32_t`,
+ * so `|p S| < 2^47 + 2^15`, below the `2^53` under which every step of that
+ * route is exact.  A result that does not fit is ::GSHGEOM_ERR_LIMIT, as in the
+ * `double` rule.
+ * It is what a glyph path provider's fast tier rounds an unhinted point with,
+ * so the fast tier with hinting off is the general route under the snapped
+ * map bit for bit (shape-scene's glyph_provider.h).
+ *
  * ## Out of range
  *
  * A value whose rounding does not fit an `int32_t` is ::GSHGEOM_ERR_LIMIT:
@@ -110,6 +126,21 @@ typedef struct GSHGEOM_Device_Path GSHGEOM_Device_Path;
  *         ::GSHGEOM_ERR_LIMIT if the result does not fit an `int32_t`.
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_round_26_6(double x, int32_t * out);
+
+/**
+ * @brief The integer spelling of the rule (see the file comment):
+ *        `floor((s * p * scale + 2^15) / 2^16)`, `s` = -1 when @p flip is 1.
+ *
+ * @param p     A coordinate in 26.6 of design units.
+ * @param scale A 16.16 scale, pixels per design unit times 2^16.
+ * @param flip  0, or 1 to negate (y up to y down).
+ * @param out   Receives the 26.6 result, only on success.
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for NULL or a @p flip other than
+ *         0 and 1; ::GSHGEOM_ERR_LIMIT when the result does not fit an
+ *         `int32_t`.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_scale_26_6(
+    int32_t p, int32_t scale, int flip, int32_t * out);
 
 /**
  * @brief Apply a 2D map to a model point and round the result (the point of a

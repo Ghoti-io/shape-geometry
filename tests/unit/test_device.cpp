@@ -1196,6 +1196,132 @@ TEST(DeviceRational, ADegenerateCurveIsNotAnError) {
   gshgeom_path_destroy(mp);
 }
 
+// --- the integer spelling of the rule (story 14a, AD-5) -----------------------------------------------------
+
+// An independent statement of floor((s p S + 2^15) / 2^16): C++'s truncating division corrected to a floor.
+// False when it does not fit an int32.
+bool reference_scale(int32_t p, int32_t scale, int flip, int32_t * out) {
+  int64_t v = (int64_t)p * (int64_t)scale;
+  if (flip) {
+    v = -v;
+  }
+  int64_t n = v + 32768;
+  int64_t q = n / 65536;
+  if (n % 65536 != 0 && n < 0) {
+    q -= 1;
+  }
+  if (q < INT32_MIN || q > INT32_MAX) {
+    return false;
+  }
+  *out = (int32_t)q;
+  return true;
+}
+
+// The double route the integer one must equal: (s (p / 64)) (S / 65536), rounded by the one rule.
+GSHGEOM_Result double_route(int32_t p, int32_t scale, int flip, int32_t * out) {
+  double x = (flip ? -((double)p / 64.0) : (double)p / 64.0) * ((double)scale / 65536.0);
+  return gshgeom_round_26_6(x, out);
+}
+
+void expect_scale(int32_t p, int32_t scale, int flip) {
+  int32_t want = kSentinel;
+  bool fits = reference_scale(p, scale, flip, &want);
+  int32_t got = kSentinel;
+  GSHGEOM_Result r = gshgeom_scale_26_6(p, scale, flip, &got);
+  if (!fits) {
+    ASSERT_EQ(r, GSHGEOM_ERR_LIMIT) << "p=" << p << " S=" << scale << " flip=" << flip;
+    ASSERT_EQ(got, kSentinel);
+    return;
+  }
+  ASSERT_EQ(r, GSHGEOM_OK) << "p=" << p << " S=" << scale << " flip=" << flip;
+  ASSERT_EQ(got, want) << "p=" << p << " S=" << scale << " flip=" << flip;
+  int32_t d = kSentinel;
+  ASSERT_EQ(double_route(p, scale, flip, &d), GSHGEOM_OK) << "p=" << p << " S=" << scale;
+  ASSERT_EQ(d, got) << "the double route differs: p=" << p << " S=" << scale << " flip=" << flip;
+}
+
+TEST(DeviceScale, EveryResidueBothSignsBothFlips) {
+  // Scale 1 and 3 (odd, so p * 3 runs through every residue mod 2^16 as p does), p and -p, offset by whole units.
+  for (int32_t scale : {1, 3}) {
+    for (int32_t r = 0; r < 65536; r++) {
+      for (int32_t base : {0, 65536 * 5, -65536 * 7}) {
+        for (int flip = 0; flip < 2; flip++) {
+          expect_scale(base + r, scale, flip);
+          expect_scale(-(base + r), scale, flip);
+          if (::testing::Test::HasFatalFailure()) {
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(DeviceScale, HalfwayGoesUpInYDown) {
+  int32_t out = 0;
+  // 2048 units at 16 ppem: S = 512.  p = 3 units = 192 (26.6): 192 * 512 / 65536 = 1.5 -> 2; flipped -1.5 -> -1.
+  ASSERT_EQ(gshgeom_scale_26_6(192, 512, 0, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, 2);
+  ASSERT_EQ(gshgeom_scale_26_6(192, 512, 1, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, -1);
+  ASSERT_EQ(gshgeom_scale_26_6(-192, 512, 0, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, -1);
+  ASSERT_EQ(gshgeom_scale_26_6(-192, 512, 1, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, 2);
+  // Just below and above a half.
+  ASSERT_EQ(gshgeom_scale_26_6(32767, 1, 0, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, 0);
+  ASSERT_EQ(gshgeom_scale_26_6(32768, 1, 0, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, 1);
+  ASSERT_EQ(gshgeom_scale_26_6(-32768, 1, 0, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, 0);
+  ASSERT_EQ(gshgeom_scale_26_6(-32769, 1, 0, &out), GSHGEOM_OK);
+  EXPECT_EQ(out, -1);
+}
+
+TEST(DeviceScale, RandomOverTheWholeRangeAndAtTheEdges) {
+  uint64_t state = 0x9e3779b97f4a7c15u;
+  auto next = [&state]() {
+    state = state * 6364136223846793005u + 1442695040888963407u;
+    return (uint32_t)(state >> 32);
+  };
+  for (int i = 0; i < 400000; i++) {
+    uint32_t a = next();
+    uint32_t b = next();
+    // Mix full-range values with small ones, so both the refusals and the answers are sampled.
+    int32_t p = (int32_t)((i & 1) ? a : (a >> (a & 15)));
+    int32_t scale = (int32_t)((i & 2) ? b : (b >> (8 + (b & 15))));
+    expect_scale(p, scale, (int)(i >> 2) & 1);
+    if (::testing::Test::HasFatalFailure()) {
+      return;
+    }
+  }
+  for (int32_t p : {INT32_MIN, INT32_MIN + 1, -1, 0, 1, INT32_MAX}) {
+    for (int32_t scale : {INT32_MIN, -65536, -1, 0, 1, 65536, 65537, INT32_MAX}) {
+      for (int flip = 0; flip < 2; flip++) {
+        expect_scale(p, scale, flip);
+      }
+    }
+  }
+  // The edge of the int32 result: 2^31 - 1/2 rounds to 2^31 (refused), just below it to 2^31 - 1.
+  int32_t out = kSentinel;
+  EXPECT_EQ(gshgeom_scale_26_6(1 << 24, 1 << 23, 0, &out), GSHGEOM_ERR_LIMIT);      // 2^31 exactly
+  EXPECT_EQ(out, kSentinel);
+  EXPECT_EQ(gshgeom_scale_26_6((1 << 24) - 1, 1 << 23, 0, &out), GSHGEOM_OK);      // 2^31 - 128
+  EXPECT_EQ(out, INT32_MAX - 127);
+  EXPECT_EQ(gshgeom_scale_26_6(1 << 24, 1 << 23, 1, &out), GSHGEOM_OK);            // -2^31 fits
+  EXPECT_EQ(out, INT32_MIN);
+  EXPECT_EQ(gshgeom_scale_26_6((1 << 24) + 1, 1 << 23, 1, &out), GSHGEOM_ERR_LIMIT); // -2^31 - 128 does not
+}
+
+TEST(DeviceScale, RefusesBadArguments) {
+  int32_t out = kSentinel;
+  EXPECT_EQ(gshgeom_scale_26_6(1, 1, 0, nullptr), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_scale_26_6(1, 1, 2, &out), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_scale_26_6(1, 1, -1, &out), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(out, kSentinel);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

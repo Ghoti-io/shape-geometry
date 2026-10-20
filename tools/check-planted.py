@@ -91,6 +91,14 @@ Story 8 adds (ids start with al-, alh- and ald-):
   alh-     the measured path's hash fields, their order and width
   ald-     its dump text
 
+Story 14a adds (ids start with fx- and sc-):
+
+  fx-      the fixed-point builder: the bound on the fraction bits (each verb's
+           check, the constant), the exact division, the coordinate order, the
+           z, the order of a curve's points
+  sc-      the integer spelling of the rule: the flip and its argument check, the
+           half, the floor of a negative number, the int32 range of the result
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 
@@ -1337,6 +1345,40 @@ PLANTS += [
     ("fill-names-swapped", "src", FILS, "case GSHGEOM_FILL_NONZERO:\n    return \"non-zero\";\n  case GSHGEOM_FILL_EVEN_ODD:\n    return \"even-odd\";",
      "case GSHGEOM_FILL_NONZERO:\n    return \"even-odd\";\n  case GSHGEOM_FILL_EVEN_ODD:\n    return \"non-zero\";", FILT),
     ("fill-count-names-itself", "src", FILS, "case GSHGEOM_FILL_RULE_COUNT:\n    break;", "case GSHGEOM_FILL_RULE_COUNT:\n    return \"even-odd\";", FILT),
+]
+
+# --- story 14a: the fixed-point builder and the integer spelling of the rule ----
+PLANTS += [
+    ("fx-move-bits-inclusive", "src", P, "gshgeom_path_move_to_fixed(\n    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {\n  if (bits > GSHGEOM_FIXED_MAX_BITS) {",
+     "gshgeom_path_move_to_fixed(\n    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {\n  if (bits >= GSHGEOM_FIXED_MAX_BITS) {", PT),
+    ("fx-move-bits-unchecked", "src", P, "gshgeom_path_move_to_fixed(\n    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {\n  if (bits > GSHGEOM_FIXED_MAX_BITS) {",
+     "gshgeom_path_move_to_fixed(\n    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {\n  if (bits > 31u) {", PT),
+    ("fx-line-bits-unchecked", "src", P, "gshgeom_path_line_to_fixed(\n    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {\n  if (bits > GSHGEOM_FIXED_MAX_BITS) {",
+     "gshgeom_path_line_to_fixed(\n    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {\n  if (bits > 31u) {", PT),
+    ("fx-quadratic-bits-unchecked", "src", P, "int32_t cx, int32_t cy, int32_t x, int32_t y, unsigned bits) {\n  if (bits > GSHGEOM_FIXED_MAX_BITS) {",
+     "int32_t cx, int32_t cy, int32_t x, int32_t y, unsigned bits) {\n  if (bits > 31u) {", PT),
+    ("fx-cubic-bits-unchecked", "src", P, "    unsigned bits) {\n  if (bits > GSHGEOM_FIXED_MAX_BITS) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  return gshgeom_path_cubic_to(",
+     "    unsigned bits) {\n  if (bits > 31u) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  return gshgeom_path_cubic_to(", PT),
+    ("fx-max-bits-const", "hdr", PH, "#define GSHGEOM_FIXED_MAX_BITS 16u", "#define GSHGEOM_FIXED_MAX_BITS 15u", PT),
+    ("fx-unit-off", "src", P, "double unit = (double)((int32_t)1 << bits);", "double unit = (double)((int32_t)1 << bits) + 1.0;", PT),
+    ("fx-unit-shift", "src", P, "double unit = (double)((int32_t)1 << bits);", "double unit = (double)((int32_t)2 << bits);", PT),
+    ("fx-swapped", "src", P, "GSHGEOM_Point p = {(double)x / unit, (double)y / unit, 0.0};", "GSHGEOM_Point p = {(double)y / unit, (double)x / unit, 0.0};", PT),
+    ("fx-z", "src", P, "GSHGEOM_Point p = {(double)x / unit, (double)y / unit, 0.0};", "GSHGEOM_Point p = {(double)x / unit, (double)y / unit, 1.0};", PT),
+    ("fx-quadratic-order", "src", P, "      path, fixed_point(cx, cy, bits), fixed_point(x, y, bits));", "      path, fixed_point(x, y, bits), fixed_point(cx, cy, bits));", PT),
+    ("fx-cubic-order", "src", P, "  return gshgeom_path_cubic_to(path, fixed_point(c1x, c1y, bits),\n      fixed_point(c2x, c2y, bits), fixed_point(x, y, bits));",
+     "  return gshgeom_path_cubic_to(path, fixed_point(c2x, c2y, bits),\n      fixed_point(c1x, c1y, bits), fixed_point(x, y, bits));", PT),
+    ("sc-null-out", "src", DV, "if (!out || (flip != 0 && flip != 1)) {", "if (flip != 0 && flip != 1) {", DT),
+    ("sc-flip-two", "src", DV, "if (!out || (flip != 0 && flip != 1)) {", "if (!out || (flip != 0 && flip != 1 && flip != 2)) {", DT),
+    ("sc-flip-ignored", "src", DV, "  if (flip) {\n    v = -v;\n  }", "  (void)flip;", DT),
+    ("sc-flip-inverted", "src", DV, "  if (flip) {\n    v = -v;\n  }", "  if (!flip) {\n    v = -v;\n  }", DT),
+    ("sc-half-low", "src", DV, "int64_t n = v + 32768;", "int64_t n = v + 32767;", DT),
+    ("sc-half-high", "src", DV, "int64_t n = v + 32768;", "int64_t n = v + 32769;", DT),
+    ("sc-negative-truncates", "src", DV, ": -(int64_t)(((uint64_t)(-n) + 65535u) >> 16);", ": -(int64_t)((uint64_t)(-n) >> 16);", DT),
+    ("sc-negative-ceiling-off", "src", DV, ": -(int64_t)(((uint64_t)(-n) + 65535u) >> 16);", ": -(int64_t)(((uint64_t)(-n) + 65536u) >> 16);", DT),
+    ("sc-shift-15", "src", DV, "int64_t q = n >= 0 ? (int64_t)((uint64_t)n >> 16)", "int64_t q = n >= 0 ? (int64_t)((uint64_t)n >> 15)", DT),
+    ("sc-max-wide", "src", DV, "if (q > INT32_MAX || q < INT32_MIN) {", "if (q > (int64_t)INT32_MAX + 1 || q < INT32_MIN) {", DT),
+    ("sc-min-narrow", "src", DV, "if (q > INT32_MAX || q < INT32_MIN) {", "if (q > INT32_MAX || q <= INT32_MIN) {", DT),
+    ("sc-min-wide", "src", DV, "if (q > INT32_MAX || q < INT32_MIN) {", "if (q > INT32_MAX || q < (int64_t)INT32_MIN - 128) {", DT),
 ]
 
 

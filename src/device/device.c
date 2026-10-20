@@ -71,6 +71,28 @@ GSHGEOM_Result gshgeom_round_26_6(double x, int32_t * out) {
   return round_scaled(x * SCALE, out);
 }
 
+GSHGEOM_Result gshgeom_scale_26_6(
+    int32_t p, int32_t scale, int flip, int32_t * out) {
+  if (!out || (flip != 0 && flip != 1)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  /* |p * scale| <= 2^62: the product and its negation fit an int64_t. */
+  int64_t v = (int64_t)p * (int64_t)scale;
+  if (flip) {
+    v = -v;
+  }
+  /* floor((v + 2^15) / 2^16) by shifts of a magnitude, never of a negative
+   * number (whose right shift C leaves to the implementation). */
+  int64_t n = v + 32768;
+  int64_t q = n >= 0 ? (int64_t)((uint64_t)n >> 16)
+                     : -(int64_t)(((uint64_t)(-n) + 65535u) >> 16);
+  if (q > INT32_MAX || q < INT32_MIN) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  *out = (int32_t)q;
+  return GSHGEOM_OK;
+}
+
 GSHGEOM_Result gshgeom_device_point(const GSHGEOM_Map * map, GSHGEOM_Point p,
     GSHGEOM_Device_Point * out) {
   if (!map || !out) {

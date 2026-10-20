@@ -102,6 +102,25 @@ parameter 1/2, until its projected control points are within 1/32 pixel of the
 chord *segment* (convexity of positive weights makes that a bound), and becomes
 lines.
 
+**The integer spelling and the fixed-point builder (story 14a, AD-5).**
+`gshgeom_scale_26_6(p, S, flip)` is the same rule for a point a fixed-point
+source scales itself: a 26.6 design coordinate `p` times a 16.16 scale `S`
+(pixels per unit times 2^16), negated when `flip` is 1 (y up to y down), is
+`floor((s p S + 2^15) / 2^16)` 1/64 pixel, half up, in 64-bit integers, with no
+shift of a negative value. Wherever it answers it equals `gshgeom_round_26_6` of
+the `double` route `(s (p / 64)) (S / 65536)`: an answer fits an `int32`, so
+`|p S| < 2^47 + 2^15`, and below `2^53` every step of that route is exact. A
+result past the `int32` range is `ERR_LIMIT`, as in the `double` rule. It is what
+a glyph path provider's fast tier rounds an unhinted point with, and why the
+fast tier with hinting off is the general route under the snapped map bit for
+bit (shape-scene's `glyph_provider.h`); the test is every residue of `p S` mod
+2^16 in both signs and both flips, 400,000 random pairs over the whole `int32`
+range, and the edges of the result. The fixed-point builder
+(`gshgeom_path_move_to_fixed` and the three drawing verbs) takes `int32`
+coordinates with 0 to 16 fraction bits and adds `v / 2^b`, which is exact in a
+`double`, so a library that names no floating type (`font`, with 26.6 design
+units) hands its coordinates to a model path without a rounding of its own.
+
 `flatten.h` is the integer flattener, **revision 2**, ported from `font`'s
 `src/raster/flatten.c` (as of `font` commit 69d1860; shape-geometry does not
 depend on `font`, and `font` has since dropped its copy and calls this one).

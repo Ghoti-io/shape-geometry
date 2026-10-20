@@ -946,6 +946,92 @@ TEST(PathAllocation, GrowthKeepsEverythingAcrossManyReallocations) {
   gshgeom_path_destroy(p);
 }
 
+// --- the fixed-point builder (story 14a, AD-5) -------------------------------------------------------------
+
+namespace {
+
+// v / 2^bits by the C library's ldexp: an independent statement of the exact conversion.
+double fixed_ref(int32_t v, unsigned bits) {
+  return std::ldexp((double)v, -(int)bits);
+}
+
+void expect_point(const GSHGEOM_Path * path, size_t index, int k, double x, double y) {
+  GSHGEOM_Element e;
+  ASSERT_EQ(gshgeom_path_element(path, index, &e), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_f64_bits(e.curve.p[k].x), gshgeom_f64_bits(x)) << "element " << index << " point " << k;
+  EXPECT_EQ(gshgeom_f64_bits(e.curve.p[k].y), gshgeom_f64_bits(y)) << "element " << index << " point " << k;
+  EXPECT_EQ(gshgeom_f64_bits(e.curve.p[k].z), gshgeom_f64_bits(0.0));
+}
+
+}  // namespace
+
+TEST(PathFixed, EveryVerbIsExactAtEveryFractionCount) {
+  const int32_t values[] = {INT32_MIN, INT32_MIN + 1, -1234567, -64, -1, 0, 1, 63, 64, 99991, INT32_MAX - 1, INT32_MAX};
+  for (unsigned bits : {0u, 1u, 6u, 15u, 16u}) {
+    for (int32_t a : values) {
+      for (int32_t b : values) {
+        GSHGEOM_Path * path = nullptr;
+        ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &path), GSHGEOM_OK);
+        ASSERT_EQ(gshgeom_path_move_to_fixed(path, a, b, bits), GSHGEOM_OK);
+        ASSERT_EQ(gshgeom_path_line_to_fixed(path, b, a, bits), GSHGEOM_OK);
+        ASSERT_EQ(gshgeom_path_quadratic_to_fixed(path, a, a, b, b, bits), GSHGEOM_OK);
+        ASSERT_EQ(gshgeom_path_cubic_to_fixed(path, b, a, a, b, a, a, bits), GSHGEOM_OK);
+        double fa = fixed_ref(a, bits);
+        double fb = fixed_ref(b, bits);
+        expect_point(path, 0, 1, fa, fb);
+        expect_point(path, 1, 1, fb, fa);
+        expect_point(path, 2, 1, fa, fa);
+        expect_point(path, 2, 2, fb, fb);
+        expect_point(path, 3, 1, fb, fa);
+        expect_point(path, 3, 2, fa, fb);
+        expect_point(path, 3, 3, fa, fa);
+        gshgeom_path_destroy(path);
+        if (::testing::Test::HasFailure()) {
+          return;
+        }
+      }
+    }
+  }
+}
+
+TEST(PathFixed, AFractionCountPastTheBoundIsInvalidAndChangesNothing) {
+  GSHGEOM_Path * path = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &path), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_path_move_to_fixed(path, 1, 2, 17), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_move_to_fixed(path, 1, 2, 4000000000u), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_element_count(path), 0u);
+  ASSERT_EQ(gshgeom_path_move_to_fixed(path, 1, 2, GSHGEOM_FIXED_MAX_BITS), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_path_line_to_fixed(path, 1, 2, 17), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_quadratic_to_fixed(path, 1, 2, 3, 4, 17), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_cubic_to_fixed(path, 1, 2, 3, 4, 5, 6, 17), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_element_count(path), 1u);
+  // Each is the verb it names, with its rules: a drawing verb with no current point is invalid.
+  GSHGEOM_Path * empty = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &empty), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_path_line_to_fixed(empty, 1, 2, 6), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_quadratic_to_fixed(empty, 1, 2, 3, 4, 6), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_cubic_to_fixed(empty, 1, 2, 3, 4, 5, 6, 6), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_move_to_fixed(nullptr, 1, 2, 6), GSHGEOM_ERR_INVALID);
+  gshgeom_path_destroy(empty);
+  gshgeom_path_destroy(path);
+}
+
+TEST(PathFixed, TheSameAsTheDoubleVerbsBitForBit) {
+  GSHGEOM_Path * a = nullptr;
+  GSHGEOM_Path * b = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &a), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &b), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_move_to_fixed(a, 100, -3, 6), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_move_to(b, P(100.0 / 64.0, -3.0 / 64.0)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_quadratic_to_fixed(a, 7, 9, -11, 13, 6), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_quadratic_to(b, P(7.0 / 64.0, 9.0 / 64.0), P(-11.0 / 64.0, 13.0 / 64.0)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_close(a), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_close(b), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_path_hash(a), gshgeom_path_hash(b));
+  gshgeom_path_destroy(a);
+  gshgeom_path_destroy(b);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

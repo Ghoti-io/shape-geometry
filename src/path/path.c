@@ -280,6 +280,52 @@ GSHGEOM_Result gshgeom_path_close(GSHGEOM_Path * path) {
   return append(path, GSHGEOM_VERB_CLOSE, &start, NULL);
 }
 
+/* --- the fixed-point builder (story 14a) -------------------------------- */
+
+/* v / 2^bits: the int32 converts exactly and the division is by a power of
+ * two, so nothing rounds (a double has 53 bits; v has at most 31).  Only
+ * int32_t values become doubles: i686 converts an unsigned one through x87. */
+static GSHGEOM_Point fixed_point(int32_t x, int32_t y, unsigned bits) {
+  double unit = (double)((int32_t)1 << bits);
+  GSHGEOM_Point p = {(double)x / unit, (double)y / unit, 0.0};
+  return p;
+}
+
+GSHGEOM_Result gshgeom_path_move_to_fixed(
+    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {
+  if (bits > GSHGEOM_FIXED_MAX_BITS) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  return gshgeom_path_move_to(path, fixed_point(x, y, bits));
+}
+
+GSHGEOM_Result gshgeom_path_line_to_fixed(
+    GSHGEOM_Path * path, int32_t x, int32_t y, unsigned bits) {
+  if (bits > GSHGEOM_FIXED_MAX_BITS) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  return gshgeom_path_line_to(path, fixed_point(x, y, bits));
+}
+
+GSHGEOM_Result gshgeom_path_quadratic_to_fixed(GSHGEOM_Path * path,
+    int32_t cx, int32_t cy, int32_t x, int32_t y, unsigned bits) {
+  if (bits > GSHGEOM_FIXED_MAX_BITS) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  return gshgeom_path_quadratic_to(
+      path, fixed_point(cx, cy, bits), fixed_point(x, y, bits));
+}
+
+GSHGEOM_Result gshgeom_path_cubic_to_fixed(GSHGEOM_Path * path,
+    int32_t c1x, int32_t c1y, int32_t c2x, int32_t c2y, int32_t x, int32_t y,
+    unsigned bits) {
+  if (bits > GSHGEOM_FIXED_MAX_BITS) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  return gshgeom_path_cubic_to(path, fixed_point(c1x, c1y, bits),
+      fixed_point(c2x, c2y, bits), fixed_point(x, y, bits));
+}
+
 GSHGEOM_Result gshgeom_path_element(
     const GSHGEOM_Path * path, size_t index, GSHGEOM_Element * out) {
   if (!path || !out || index >= path->el_n) {
