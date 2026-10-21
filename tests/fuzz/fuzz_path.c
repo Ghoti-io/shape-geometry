@@ -167,12 +167,24 @@ static double coordinate(Input * in) {
     volatile double zero = 0.0;
     return pick == 21 ? zero / zero : (pick == 22 ? 1.0 / zero : -1.0 / zero);
   }
-  const int16_t raw = (int16_t)(uint16_t)(((unsigned)next(in) << 8) | next(in));
-  return (double)raw / 16.0;
+  const unsigned hi = next(in);
+  const unsigned lo = next(in);
+  return (double)(int16_t)(uint16_t)((hi << 8) | lo) / 16.0;
+}
+
+/* Every draw is a statement of its own: C leaves the order of a call's arguments and of an initializer's
+ * expressions unspecified, and compilers differ (story 14c's probe met it), so one input must mean one thing to
+ * the replay's compiler and to the fuzzer's. */
+static void coordinates(Input * in, double * out, int n) {
+  for (int i = 0; i < n; i++) {
+    out[i] = coordinate(in);
+  }
 }
 
 static GSHGEOM_Point point(Input * in, int dim) {
-  GSHGEOM_Point p = {coordinate(in), coordinate(in), 0.0};
+  GSHGEOM_Point p = {0.0, 0.0, 0.0};
+  p.x = coordinate(in);
+  p.y = coordinate(in);
   if (dim == 3) {
     p.z = coordinate(in);
   }
@@ -192,7 +204,9 @@ static int32_t fixed(Input * in) {
   if (pick < 8) {
     return table[pick];
   }
-  return (int32_t)(uint32_t)(((unsigned)next(in) << 8) | next(in)) - 32768;
+  const unsigned hi = next(in);
+  const unsigned lo = next(in);
+  return (int32_t)((hi << 8) | lo) - 32768;
 }
 
 /* --- the map ---------------------------------------------------------------------------------------- */
@@ -202,24 +216,30 @@ static GSHGEOM_Result build_map(Input * in, GSHGEOM_Map * map) {
   GSHGEOM_Result r = gshgeom_map_identity(2, map);
   const int steps = next(in) % 4;
   for (int i = 0; i < steps && r == GSHGEOM_OK; i++) {
+    double v[6];
     switch (next(in) % 6) {
       case 0:
-        r = gshgeom_map_translate(2, coordinate(in), coordinate(in), 0.0, &step);
+        coordinates(in, v, 2);
+        r = gshgeom_map_translate(2, v[0], v[1], 0.0, &step);
         break;
       case 1:
-        r = gshgeom_map_scale(2, coordinate(in), coordinate(in), 1.0, &step);
+        coordinates(in, v, 2);
+        r = gshgeom_map_scale(2, v[0], v[1], 1.0, &step);
         break;
       case 2:
-        r = gshgeom_map_rotate((GSHGEOM_Angle_Unit)(next(in) % 5), coordinate(in), &step);
+      {
+        const GSHGEOM_Angle_Unit unit = (GSHGEOM_Angle_Unit)(next(in) % 5);
+        r = gshgeom_map_rotate(unit, coordinate(in), &step);
+      }
         break;
       case 3: {
-        double m[4] = {coordinate(in), coordinate(in), coordinate(in), coordinate(in)};
-        double t[2] = {coordinate(in), coordinate(in)};
-        r = gshgeom_map_from_matrix(2, m, t, &step);
+        coordinates(in, v, 6);
+        r = gshgeom_map_from_matrix(2, v, v + 4, &step);
         break;
       }
       case 4:
-        r = gshgeom_map_design_to_model(coordinate(in), coordinate(in), coordinate(in), &step);
+        coordinates(in, v, 3);
+        r = gshgeom_map_design_to_model(v[0], v[1], v[2], &step);
         break;
       default:
         r = gshgeom_map_flip_y(2, &step);
@@ -458,18 +478,32 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         r = gshgeom_path_close(path);
         break;
       case OP_MOVE_FIXED:
-        r = gshgeom_path_move_to_fixed(path, fixed(&in), fixed(&in), next(&in) % 40);
+      {
+        const int32_t x = fixed(&in);
+        const int32_t y = fixed(&in);
+        r = gshgeom_path_move_to_fixed(path, x, y, next(&in) % 40);
+      }
         break;
       case OP_LINE_FIXED:
-        r = gshgeom_path_line_to_fixed(path, fixed(&in), fixed(&in), next(&in) % 40);
+      {
+        const int32_t x = fixed(&in);
+        const int32_t y = fixed(&in);
+        r = gshgeom_path_line_to_fixed(path, x, y, next(&in) % 40);
+      }
         break;
       case OP_QUAD_FIXED: {
-        int32_t v[4] = {fixed(&in), fixed(&in), fixed(&in), fixed(&in)};
+        int32_t v[4];
+        for (int k = 0; k < 4; k++) {
+          v[k] = fixed(&in);
+        }
         r = gshgeom_path_quadratic_to_fixed(path, v[0], v[1], v[2], v[3], next(&in) % 40);
         break;
       }
       case OP_CUBIC_FIXED: {
-        int32_t v[6] = {fixed(&in), fixed(&in), fixed(&in), fixed(&in), fixed(&in), fixed(&in)};
+        int32_t v[6];
+        for (int k = 0; k < 6; k++) {
+          v[k] = fixed(&in);
+        }
         r = gshgeom_path_cubic_to_fixed(path, v[0], v[1], v[2], v[3], v[4], v[5], next(&in) % 40);
         break;
       }
