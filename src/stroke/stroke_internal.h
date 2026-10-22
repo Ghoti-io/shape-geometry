@@ -39,8 +39,10 @@
 #include <ghoti.io/shape-geometry/macros.h>
 
 #include <ghoti.io/shape-geometry/device.h>
+#include <ghoti.io/shape-geometry/along.h>
 #include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/map.h>
+#include <ghoti.io/shape-geometry/path.h>
 #include <ghoti.io/shape-geometry/stroke.h>
 
 #include <stddef.h>
@@ -51,6 +53,35 @@ typedef struct GSHGEOM_SK_Vec {
   double x;
   double y;
 } GSHGEOM_SK_Vec;
+
+/** One segment as the joins and caps read it: its build-space control points and weights, its degree. */
+typedef struct GSHGEOM_SK_Seg {
+  int n;                 ///< Degree, 1 to 3.
+  int rational;          ///< Nonzero for the rational kinds.
+  GSHGEOM_SK_Vec p[4];   ///< Control points, build space.
+  double w[4];           ///< Weights (1 for a polynomial kind).
+  size_t elem;           ///< The index of the path element it was read from.
+} GSHGEOM_SK_Seg;
+
+/** One subpath as SG5 reads it (expand.c). */
+typedef struct GSHGEOM_SK_Sub {
+  size_t first_seg;          ///< Its first segment with extent in the segment array.
+  size_t seg_count;          ///< How many it has.
+  int closed;                ///< Ended by a close.
+  int draws;                 ///< Has a drawing verb or a close.
+  GSHGEOM_SK_Vec start;      ///< Its start, build space.
+  GSHGEOM_Point start_model; ///< Its start, model space (for the clip's path).
+  size_t first_el;           ///< Its first drawing element in the path.
+  size_t end_el;             ///< One past its last element.
+} GSHGEOM_SK_Sub;
+
+/** The centerline as SG5 reads it: subpaths and, in element order, their segments with extent (build space). */
+typedef struct GSHGEOM_SK_Reader {
+  GSHGEOM_SK_Sub * subs;
+  size_t sub_n, sub_cap;
+  GSHGEOM_SK_Seg * segs;
+  size_t seg_n, seg_cap;
+} GSHGEOM_SK_Reader;
 
 /** The 26.6 rounding's reach: sqrt(2)/2 of a unit, rounded up (in 26.6 units). */
 #define GSHGEOM_SK_ROUND 0.70711
@@ -65,6 +96,22 @@ typedef struct GSHGEOM_SK_Vec {
 /** The smallest nonzero difference between neighbouring control points the expansion's build-space arithmetic (cubes
  * and fourth powers of a length) stays inside a double's range for. */
 #define GSHGEOM_SK_BUILD_MIN 0x1p-200
+
+/** The state of a dashed expansion (dash.c). */
+typedef struct GSHGEOM_SK_Dash {
+  int active;                 ///< Nonzero when the style has a non-solid canonical array.
+  double * dashes;            ///< The canonical array (an odd array repeated), owned.
+  size_t n;                   ///< Its count (even, at most ::GSHGEOM_STROKE_DASHES_MAX).
+  double period;              ///< Its sum.
+  double offset;              ///< The style's offset.
+  int per_path;               ///< ::GSHGEOM_STROKE_DASH_PATH.
+  GSHGEOM_Measured * m;///< The centerline measured in build space.
+  GSHGEOM_Path * bpath;       ///< The mapped centerline (device width), owned; NULL under local width.
+  size_t msub;                ///< The next measured subpath.
+  size_t steps;               ///< Pattern entries visited so far.
+  size_t pieces;              ///< Dashes handed out so far.
+  double phase0;              ///< The reduced offset (per subpath).
+} GSHGEOM_SK_Dash;
 
 /** The state of one expansion. */
 typedef struct GSHGEOM_SK_Ctx {
@@ -89,6 +136,7 @@ typedef struct GSHGEOM_SK_Ctx {
   size_t work;                   ///< Curve pieces visited so far.
   size_t work_cap;               ///< The most curve pieces one expansion visits (ERR_LIMIT past it).
   int depth_cap;                 ///< How deep a curve may be split (::GSHGEOM_STROKE_MAX_DEPTH but in tests).
+  GSHGEOM_SK_Dash dash;          ///< Dashes (dash.c).
 } GSHGEOM_SK_Ctx;
 
 /** The outline (stroke.h, SG16). */
@@ -114,8 +162,33 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
 
 /* --- params.c --------------------------------------------------------------- */
 
-/** SG2 then SG3: the canonical parameters (dashes refused, ::GSHGEOM_ERR_UNSUPPORTED). */
+/** SG2 then SG3: the canonical parameters (a non-solid array keeps the caller's entries; see params.c). */
 GSHGEOM_Result gshgeom_stroke_canonical(const GSHGEOM_Stroke * in, GSHGEOM_Stroke * out);
+
+/* --- dash.c ----------------------------------------------------------------- */
+
+/** The sum of the first @p n canonical entries of a raw array (count entries, repeated), in order. */
+double gshgeom_sk_dash_period(const double * dashes, size_t count, size_t n);
+
+/** The phase reduced to [0, period) exactly (SG21, SG29). */
+double gshgeom_sk_dash_phase(double offset, double period);
+
+/** SG21 with a reduced phase @p o: the pairs of a subpath of @p length, handed to @p fn. */
+GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, size_t n, double period, double o,
+    double length, size_t * steps, size_t max_steps, GSHGEOM_Dash_Fn fn, void * ctx);
+
+/** SG26's gate and the measured path of the dashes; the canonical array comes from @p stroke. */
+GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * centerline,
+    const GSHGEOM_SK_Reader * rd, const GSHGEOM_Stroke * stroke);
+
+/** Free what dash_begin made. */
+void gshgeom_sk_dash_end(GSHGEOM_SK_Ctx * c);
+
+/** The pieces of subpath @p i of the reader, dashed (SG21 to SG25), in the context's part. */
+GSHGEOM_Result gshgeom_sk_dash_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i);
+
+/** SG11's effective tangent of the degenerate subpath @p i (expand.c). */
+GSHGEOM_SK_Vec gshgeom_sk_effective_tangent(const GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i);
 
 /* --- emit.c ----------------------------------------------------------------- */
 
@@ -191,13 +264,7 @@ GSHGEOM_Result gshgeom_sk_net_chords(const GSHGEOM_SK_Vec (*chord)[2], size_t k,
 
 /* --- join.c ----------------------------------------------------------------- */
 
-/** One segment as the joins and caps read it: its build-space control points and weights, its degree. */
-typedef struct GSHGEOM_SK_Seg {
-  int n;                 ///< Degree, 1 to 3.
-  int rational;          ///< Nonzero for the rational kinds.
-  GSHGEOM_SK_Vec p[4];   ///< Control points, build space.
-  double w[4];           ///< Weights (1 for a polynomial kind).
-} GSHGEOM_SK_Seg;
+
 
 /** SG5's start direction and the index of the control point that defines it; -1 for no extent. */
 int gshgeom_sk_start_dir(const GSHGEOM_SK_Seg * s, GSHGEOM_SK_Vec * dir);

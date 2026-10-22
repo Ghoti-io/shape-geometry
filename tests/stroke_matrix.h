@@ -107,6 +107,11 @@ inline so::Style oracle_style(const GSHGEOM_Stroke & s) {
   o.limit = s.miter_limit;
   o.cap = (int)s.cap;
   o.degenerate = (int)s.degenerate;
+  for (size_t i = 0; i < s.dash_count; i++) {
+    o.dashes.push_back(s.dashes[i]);
+  }
+  o.dash_offset = s.dash_offset;
+  o.dash_scope = (int)s.dash_scope;
   return o;
 }
 

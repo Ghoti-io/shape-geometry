@@ -44,6 +44,9 @@
  *   factors, mapped as the width space says) plus the tolerance and a pixel;
  * - the hash is the same when the expansion is asked twice.
  *
+ * A dashed style (modes 1, 2, 6 and 7 of the dash byte) draws dashes; the box and the winding checks hold for it as for
+ * a solid one (SG28).
+ *
  * The replay fails if the corpus never reaches an outcome; tools/gen-fuzz-corpus.py
  * writes it.
  */
@@ -67,13 +70,14 @@
 
 enum {
   OUT_DRAWN = 0, OUT_EMPTY, OUT_NOT_INVERTIBLE, OUT_INVALID, OUT_UNSUPPORTED, OUT_LIMIT, OUT_OOM, OUT_ALIGNED,
-  OUT_CURVE, OUT_ARCS, OUT_DEVICE, OUT_DEGENERATE, OUT_COUNT
+  OUT_CURVE, OUT_ARCS, OUT_DEVICE, OUT_DEGENERATE, OUT_DASHED, OUT_DASH_PATH, OUT_DASH_DOTS, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"an outline drawn", "width 0 (EMPTY)",
     "a singular map (NOT_INVERTIBLE)", "an invalid argument refused", "an unsupported stroke refused",
     "a limit refused", "a failed allocation", "an aligned part", "a curve stroked", "an arcs join drawn",
-    "device width drawn", "a degenerate subpath drawn"};
+    "device width drawn", "a degenerate subpath drawn", "a dashed stroke drawn", "a dashed stroke with one pattern for the path",
+    "a dashed stroke with zero-length dashes"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -271,6 +275,12 @@ static GSHGEOM_Path * build_path(Input * in, const GSHGEOM_Allocator * alloc, in
   return p;
 }
 
+/** A dash length, offset or gap from a table of the values that make patterns worth drawing (and one that is not). */
+static double dash_value(Input * in) {
+  static const double table[] = {0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 16.0, 32.0, -1.0};
+  return table[next(in) % (sizeof table / sizeof table[0])];
+}
+
 static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, int * profile) {
   gshgeom_stroke_init(s);
   s->width = coordinate(in);
@@ -281,7 +291,8 @@ static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, int * 
   s->degenerate = next(in) % 3;
   s->alignment = next(in) % 4;
   s->alignment_rule = (GSHGEOM_Fill_Rule)(next(in) % 3);
-  switch (next(in) % 8) {
+  const unsigned mode = next(in) % 8;
+  switch (mode) {
   case 1:
     dashes[0] = coordinate(in);
     dashes[1] = coordinate(in);
@@ -301,9 +312,19 @@ static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, int * 
   case 4:
     s->width_profile = profile;
     break;
-  case 5:
-    s->_reserved[next(in) % 8] = 1;
+  case 6:
+  case 7: {
+    /* a pattern of two to four entries, from the table (case 6) or any coordinate (case 7), an offset, a scope */
+    const int n = 2 + next(in) % 3;
+    for (int i = 0; i < n; i++) {
+      dashes[i] = mode == 6 ? dash_value(in) : coordinate(in);
+    }
+    s->dashes = dashes;
+    s->dash_count = (size_t)n;
+    s->dash_offset = mode == 6 ? dash_value(in) : coordinate(in);
+    s->dash_scope = next(in) % 3; /* one past the range is refused */
     break;
+  }
   default:
     break;
   }
@@ -435,7 +456,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   limits.max_points = (opts & 3) == 1 ? 64 : ((opts & 3) == 2 ? 12 : (size_t)1 << 16);
   int32_t tau = (opts & 8) ? (int32_t)tol : GSHGEOM_FLATTEN_TOLERANCE;
   GSHGEOM_Stroke s;
-  double dashes[3];
+  double dashes[4];
   int profile = 0;
   build_stroke(&in, &s, dashes, &profile);
   GSHGEOM_Map map;
@@ -501,6 +522,23 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         }
         if (!curved && gshgeom_path_element_count(path) <= 2) {
           outcomes[OUT_DEGENERATE]++;
+        }
+        int solid = s.dash_count == 0, any = 0;
+        for (size_t i = 0; i < s.dash_count; i++) {
+          solid = solid || s.dashes[i] < 0.0;
+          any = any || s.dashes[i] != 0.0;
+        }
+        if (!solid && any) {
+          outcomes[OUT_DASHED]++;
+          if (s.dash_scope == GSHGEOM_STROKE_DASH_PATH) {
+            outcomes[OUT_DASH_PATH]++;
+          }
+          for (size_t i = 0; i < s.dash_count; i += 2) {
+            if (s.dashes[i] == 0.0 && (s.cap == GSHGEOM_STROKE_CAP_ROUND || s.cap == GSHGEOM_STROKE_CAP_SQUARE)) {
+              outcomes[OUT_DASH_DOTS]++;
+              break;
+            }
+          }
         }
       }
       /* the same input gives the same bits */

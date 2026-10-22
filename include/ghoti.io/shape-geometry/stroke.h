@@ -21,7 +21,7 @@
 /**
  * @file stroke.h
  *
- * What a stroke covers, stated once (SG1 to SG18), and the expansion of a
+ * What a stroke covers, stated once (SG1 to SG30), and the expansion of a
  * stroke into an outline whose nonzero fill is that region within the device
  * tolerance.
  *
@@ -62,8 +62,7 @@
  * not apply has no effect (`miter_limit` under a join other than miter,
  * miter-clip and arcs; the dash fields with no dashes; `alignment_rule` under
  * center; `degenerate` under a butt cap, which draws nothing either way); `-0`
- * is `+0`.  A non-solid dash array is ::GSHGEOM_ERR_UNSUPPORTED:
- * dashes are not yet defined here, and are never drawn solid.
+ * is `+0`.
  *
  * **SG4 Inputs and spaces.**  The centerline is a 2D ::GSHGEOM_Path (a 3D path
  * is ::GSHGEOM_ERR_UNSUPPORTED).  The map is a 2D ::GSHGEOM_Map from the
@@ -220,6 +219,104 @@
  * (::GSHGEOM_STROKE_REVISION, ::gshgeom_stroke_revision), recorded where a
  * rebaseline lives and in no hash.
  *
+ * **SG19 The pattern.**  The canonical dash array (SG3) has an even count and a
+ * positive sum `P`, the period; an entry of an even index is a dash, of an odd
+ * index a gap.  Lengths are measured along the centerline in the width space's
+ * unit: under local width the arc length of the model path (before the map), under
+ * device width the arc length in pixels of the centerline mapped by the map.  A
+ * solid style is SG6 to SG13 unchanged.
+ *
+ * **SG20 The distance.**  The distance along a subpath is along.h's: the sum of
+ * the arc lengths of its segments with extent in element order, the closing
+ * segment of a closed subpath included, arc length at the finest tolerance
+ * along.h accepts (2^-46).  The distance along the path is the sum over its
+ * subpaths in order; a move adds nothing.  A subpath's `begin` is the path
+ * distance at its first point; its length is `L` (0 for a degenerate subpath).
+ *
+ * **SG21 Dash positions** (SVG 2 Candidate Recommendation of 2018-10-04, 13.5.7,
+ * "dash positions").  For a subpath of length `L` the phase `o` is `dash_offset`
+ * under ::GSHGEOM_STROKE_DASH_PER_SUBPATH (the pattern restarts at each subpath)
+ * and `dash_offset + begin` under ::GSHGEOM_STROKE_DASH_PATH (one pattern for the
+ * path, cut at the subpath's ends), reduced to `[0, P)` by the floored modulo.
+ * With the prefix sums `S_i = d_0 + ... + d_i`, `index` is the least `i` with
+ * `S_i >= o`.  The first piece is `<0, min(S_index - o, L)>`, a dash when `index`
+ * is even, except that a positive dash the phase has used up entirely is over
+ * and makes no zero-length dash at the start (the text's loop would; a
+ * zero-length dash exactly at the phase is kept; this is the one place the rule
+ * differs from the text's loop, and it is what makes a pattern that begins with
+ * a space expressible).  Each following entry in turn, wrapping to entry 0 after
+ * the last, starts at `position` and has length `min(d_i, L - position)`, its
+ * pair `<position, position + length>` a dash when `i` is even, and the
+ * sequence stops at the first entry that starts at or after `L`: a dash that
+ * would begin exactly at the end of the subpath is not made.  For `L = 0` the
+ * first piece only.
+ *
+ * **SG22 The shape of one dash.**  The dash `<a, b>` is the stretch of the
+ * centerline between the distances `a` and `b`, stroked as an open subpath by SG5
+ * to SG10: the body of the stretch, a cap at each end in the direction the
+ * centerline has there, and the join at every vertex strictly inside the stretch,
+ * decided from the original segments that meet at the vertex (never from the cut
+ * pieces).  A cut exactly at a vertex is an end: a cap, not a join.
+ *
+ * **SG23 Closed subpaths.**  The closing line is a segment of the subpath: it is
+ * measured and dashes run along it.  The distance ends at the start point, where
+ * the last dash and the first piece are separate dashes with a cap each, even when
+ * one ends where the other begins: the text defines each pair's own caps and no
+ * join at the start of a closed subpath, and this follows it.
+ *
+ * **SG24 Zero-length dashes.**  A dash with equal ends is a dot: round gives the
+ * disc of radius `h`, square the square of side `2h` with two sides parallel to
+ * the tangent there, butt nothing.  The tangent is the start direction (SG5) of
+ * the segment that begins at the point (at a vertex the later segment's), the end
+ * direction of the last segment at the end of the subpath, SG11's effective
+ * tangent at a degenerate subpath.  A dot is drawn whatever `degenerate` is; a
+ * degenerate subpath is itself omitted when `degenerate` says omit.
+ *
+ * **SG25 Overlap and order.**  Dashes are one union (SG13).  Pieces are emitted
+ * in this order: subpaths in order; in a subpath its dashes in increasing
+ * position; in a dash the start cap, then for each span (the part of a segment
+ * inside it) the body pieces and the join at the vertex that ends the span, then
+ * the end cap; a dot in its place.
+ *
+ * **SG26 The cut position's error.**  A dash end at distance `p` is placed within
+ * `eps` of the point at that distance, and the call is ::GSHGEOM_ERR_LIMIT unless
+ * `eps * norm <= 2^-20` pixel, `norm` the map's Frobenius norm under local width
+ * and 1 under device width, `eps = 2^-46 S + (rows + 4) 2^-53 L_total + 2^-52
+ * L_total + (n + 8) 2^-53 (L_total + 2P)`, `S` the total length of the control
+ * polygons, `L_total` the path's length, `rows` along.h's table rows and `n` the
+ * canonical count.  The first three terms are along.h's contract (an estimate:
+ * the tests measure the real error against an independent quadrature), the last
+ * SG29's arithmetic.  Moving a dash end by `delta` along the centerline moves
+ * every boundary point of the piece by at most `(1 + h kappa) delta`, `kappa` the
+ * curvature there: the outline error from the cut is at most `(1 + h kappa)
+ * 2^-20` pixel, within the reserve SG17 keeps (2^-8 pixel) where `h kappa <=
+ * 2^12`.
+ *
+ * **SG27 Alignment.**  The aligned region is the dashed region of the closed
+ * subpaths at width `2w`, the body the dashed region of the others at `w`; the
+ * clip region is of the undashed closed subpaths.
+ *
+ * **SG28 Bounds.**  A dash piece lies within the box of the undashed stroke.
+ *
+ * **SG29 Limits and arithmetic.**  A dash boundary is `(q P + S) - o` for the
+ * period count `q`, a prefix sum `S` and the phase `o`, reduced by an exact long
+ * division, so that its error does not grow with the dashes before it.  The
+ * entries visited by one call are at most the work cap (`4 max_points + 4096`);
+ * more is ::GSHGEOM_ERR_LIMIT.  A dash shorter than the spacing of doubles at its
+ * position is a dot, never dropped.
+ *
+ * **SG30 A DXF simple linetype.**  A pattern of elements (DXF group 49: positive,
+ * a dash with the pen down; negative, a space; zero, a dot), repeated from the
+ * start of the line and scaled, lowers to a dash array and an offset by
+ * ::gshgeom_stroke_dashes_from_dxf: consecutive pen-down elements are one run
+ * (a dot adding zero), consecutive spaces one run; the first and last runs are
+ * one run when they are of one kind (the pattern repeats, and the offset places
+ * the line's start inside it); the runs are rotated to start with a pen-down
+ * run.  No pen-down element draws nothing (::GSHGEOM_ERR_INVALID), no space is
+ * solid, a pattern that begins with a space and ends with a dot cannot be
+ * expressed (::GSHGEOM_ERR_UNSUPPORTED: the dot at the period's end would stand
+ * at the line's start too).
+ *
  * ## The hash and the dump (format 1)
  *
  * The hash, in the spelling of hash.h: `u32` 1, `u32` kind `0x4b525453` ("STRK"
@@ -309,6 +406,8 @@ typedef enum GSHGEOM_Stroke_Alignment {
 #define GSHGEOM_STROKE_DASHES_MAX ((size_t)65535)
 /** The revision of the expansion's construction (SG18). */
 #define GSHGEOM_STROKE_REVISION 1
+/** The most dash steps one call visits when the caller states no bound (::gshgeom_stroke_dash_each). */
+#define GSHGEOM_STROKE_DASH_STEPS_DEFAULT ((size_t)1 << 24)
 /** How many times a curve segment may be halved before a piece is refused (::GSHGEOM_ERR_LIMIT). */
 #define GSHGEOM_STROKE_MAX_DEPTH 64
 
@@ -396,6 +495,41 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand_with_tolerance(
     const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, GSHGEOM_Stroke_Outline ** out);
+
+/**
+ * @brief Receives one dash of ::gshgeom_stroke_dash_each: the distances of its two ends.
+ *
+ * @return ::GSHGEOM_OK to go on; anything else stops the enumeration and is returned by it.
+ */
+typedef GSHGEOM_Result (*GSHGEOM_Dash_Fn)(void * ctx, double start, double end);
+
+/**
+ * @brief SG21: the dash positions of a subpath of @p length, in increasing order.
+ *
+ * SG3 is applied to the raw array: a negative length or all zeros is solid and gives the one pair `<0, length>`,
+ * and an odd count is repeated once.  The phase is @p offset reduced by the floored modulo.
+ *
+ * @param max_steps At most this many entries of the pattern are visited after the first piece
+ *   (::GSHGEOM_STROKE_DASH_STEPS_DEFAULT is a bound that cannot be reached in a useful time).
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for NULL, a non-finite value or a negative length;
+ *   ::GSHGEOM_ERR_LIMIT for SG2's bounds, more entries than @p max_steps, or what @p fn returns.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_stroke_dash_each(const double * dashes, size_t count, double offset, double length,
+    size_t max_steps, GSHGEOM_Dash_Fn fn, void * ctx);
+
+/**
+ * @brief SG30: lower a DXF simple linetype to a dash array and an offset.
+ *
+ * @param elements  DXF group 49 values: positive a dash, negative a space, zero a dot.
+ * @param scale     A positive factor applied to every element.
+ * @param dashes    Receives the array (at most @p capacity entries; a pattern of `m` runs needs `m + 1`).
+ * @param dash_count Receives the count; 0 means solid.
+ * @param offset    Receives the offset (SG21's phase at the start of the line).
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID (NULL, a non-finite value, no pen-down element, a zero total);
+ *   ::GSHGEOM_ERR_LIMIT (SG2's bounds, the capacity); ::GSHGEOM_ERR_UNSUPPORTED (a space first and a dot last).
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t count, double scale,
+    double * dashes, size_t capacity, size_t * dash_count, double * offset);
 
 /** @brief Free an outline; NULL is ignored. */
 GSHGEOM_API void gshgeom_stroke_outline_destroy(GSHGEOM_Stroke_Outline * outline);

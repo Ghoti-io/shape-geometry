@@ -137,9 +137,7 @@ GSHGEOM_Result gshgeom_stroke_canonical(const GSHGEOM_Stroke * in, GSHGEOM_Strok
   if (r != GSHGEOM_OK) {
     return r;
   }
-  if (canonical_dash_count(in) != 0) {
-    return GSHGEOM_ERR_UNSUPPORTED; /* dashes are not defined here; never drawn solid */
-  }
+  size_t dash_count = canonical_dash_count(in);
   memset(out, 0, sizeof *out);
   out->width = in->width == 0.0 ? 0.0 : in->width;
   out->width_space = in->width_space;
@@ -148,10 +146,12 @@ GSHGEOM_Result gshgeom_stroke_canonical(const GSHGEOM_Stroke * in, GSHGEOM_Strok
   out->cap = in->cap;
   /* a butt cap draws nothing for a degenerate subpath whether it is drawn or omitted */
   out->degenerate = in->cap == (uint32_t)GSHGEOM_STROKE_CAP_BUTT ? (uint32_t)GSHGEOM_STROKE_DEGENERATE_DRAW : in->degenerate;
-  out->dash_count = 0;
-  out->dashes = NULL;
-  out->dash_offset = 0.0;
-  out->dash_scope = GSHGEOM_STROKE_DASH_PER_SUBPATH;
+  /* the canonical count (an odd array repeated once, SG3); the entries are the caller's, entry i being
+   * in->dashes[i % in->dash_count] */
+  out->dash_count = dash_count;
+  out->dashes = dash_count ? in->dashes : NULL;
+  out->dash_offset = dash_count && in->dash_offset != 0.0 ? in->dash_offset : 0.0;
+  out->dash_scope = dash_count ? in->dash_scope : (uint32_t)GSHGEOM_STROKE_DASH_PER_SUBPATH;
   out->alignment = in->alignment;
   out->alignment_rule = in->alignment == (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_FILL_NONZERO
                                                                                 : in->alignment_rule;

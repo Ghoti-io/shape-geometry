@@ -192,6 +192,18 @@ def stroke_scripted():
     out["s-invalid.bin"] = s_input(s_params(space=2), S_POLY)
     out["s-map-3d.bin"] = s_input(s_params(), S_POLY, map3d=9)
     out["s-dashes.bin"] = s_input(s_params(dash=bytes([1]) + raw(32) + raw(16)), S_POLY)
+    # dash mode 6: a count byte (2 + b % 3), the entries and the offset as indexes into the C file's table (0 is 0, 2 is
+    # 1, 3 is 2, 4 is 3, 5 is 4, 7 is 8), a scope byte
+    out["s-dashed.bin"] = s_input(s_params(dash=bytes([6, 0, 5, 3, 0, 0])), S_POLY)
+    out["s-dashed-path-scope.bin"] = s_input(
+        s_params(cap=1, dash=bytes([6, 0, 5, 3, 2, 1])),
+        S_POLY + [bytes([0]) + s_pt(0, 96), bytes([1]) + s_pt(100, 96)])
+    out["s-dashed-dots.bin"] = s_input(s_params(cap=1, dash=bytes([6, 0, 0, 5, 0, 0])), S_POLY)
+    out["s-dashed-closed.bin"] = s_input(s_params(join=1, dash=bytes([6, 1, 4, 3, 5, 0, 0])), S_SQUARE)
+    out["s-dashed-device.bin"] = s_input(s_params(space=1, cap=2, dash=bytes([6, 0, 5, 3, 3, 0])), S_CURVE,
+                                         map_bytes=bytes([1, 1]) + raw(48) + raw(16))
+    out["s-dashed-inside.bin"] = s_input(s_params(align=1, dash=bytes([6, 0, 5, 3, 0, 0])), S_SQUARE)
+    out["s-dashed-bad-scope.bin"] = s_input(s_params(dash=bytes([6, 0, 5, 3, 0, 2])), S_POLY)
     out["s-profile.bin"] = s_input(s_params(dash=bytes([4])), S_POLY)
     out["s-limit.bin"] = s_input(s_params(limit=raw(8)), S_POLY)
     out["s-tolerance.bin"] = s_input(s_params(), S_POLY, opts=8, tol=1)

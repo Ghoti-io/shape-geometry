@@ -284,17 +284,33 @@ TEST(StrokeCanonical, AStyleAndItsCanonicalFormGiveTheSameBits) {
   gshgeom_path_destroy(p);
 }
 
-TEST(StrokeCanonical, DashesAreRefusedNeverDrawnSolid) {
+TEST(StrokeCanonical, DashesAreDrawnNeverSolid) {
   GSHGEOM_Path * p = corner();
   GSHGEOM_Map m = identity();
-  double d1[2] = {2, 1}, d2[3] = {1, 2, 3};
-  for (int k = 0; k < 2; k++) {
+  GSHGEOM_Stroke solid = plain();
+  uint64_t solid_hash = outline_hash(p, solid, m);
+  double d1[2] = {2, 1}, d2[3] = {1, 2, 3}, d3[6] = {1, 2, 3, 1, 2, 3};
+  GSHGEOM_Stroke a = plain(), b = plain(), c = plain();
+  a.dashes = d1;
+  a.dash_count = 2;
+  b.dashes = d2;
+  b.dash_count = 3;
+  c.dashes = d3;
+  c.dash_count = 6;
+  EXPECT_NE(outline_hash(p, a, m), solid_hash);
+  EXPECT_NE(outline_hash(p, b, m), solid_hash);
+  EXPECT_NE(outline_hash(p, a, m), outline_hash(p, b, m));
+  /* SG3: an odd array is the array repeated once */
+  EXPECT_EQ(outline_hash(p, b, m), outline_hash(p, c, m));
+  /* fields that do not apply to a solid style: the offset and the scope */
+  double zeros[2] = {0, 0}, neg[2] = {1, -1};
+  for (double * z : {zeros, neg}) {
     GSHGEOM_Stroke s = plain();
-    s.dashes = k ? d2 : d1;
-    s.dash_count = k ? 3 : 2;
-    GSHGEOM_Stroke_Outline * o = nullptr;
-    EXPECT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &o), GSHGEOM_ERR_UNSUPPORTED);
-    EXPECT_EQ(o, nullptr);
+    s.dashes = z;
+    s.dash_count = 2;
+    s.dash_offset = 3;
+    s.dash_scope = GSHGEOM_STROKE_DASH_PATH;
+    EXPECT_EQ(outline_hash(p, s, m), solid_hash);
   }
   gshgeom_path_destroy(p);
 }

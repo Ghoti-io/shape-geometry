@@ -95,6 +95,10 @@ struct Style {
   /** A defect planted in the oracle itself, which its self-check must see: 1 puts the round join's sector on
    * the inner side. */
   int plant = 0;
+  /** The dash array as given (SG3 is the oracle's own to apply), the offset and the scope (0 per subpath, 1 path). */
+  std::vector<Real> dashes;
+  Real dash_offset = 0;
+  int dash_scope = 0;
 };
 
 enum { JOIN_MITER = 0, JOIN_ROUND = 1, JOIN_BEVEL = 2, JOIN_MITER_CLIP = 3, JOIN_ARCS = 4 };
@@ -972,6 +976,14 @@ struct Sub {
   bool closed = false;
   bool draws = false; ///< a drawing verb or a close
   V2 start;
+  /** A dash piece (stroke.h, SG22): the joins are given, between the original segments, not between the cut ones. */
+  bool use_joins = false;
+  std::vector<std::pair<Seg, Seg>> joins;
+  /** A zero-length dash (SG24): a point and a tangent; drawn whatever `degenerate` is. */
+  bool dot = false;
+  V2 dot_dir;
+  /** For alignment: the subpath this was cut from is a closed one with extent. */
+  bool aligned_closed = false;
 };
 
 /** The centerline read from a path (model space), every subpath in order. */
@@ -1140,6 +1152,23 @@ inline void build_region(Region & r, const std::vector<Sub> & subs, const Style 
       continue;
     }
     const Sub & sb = subs[i];
+    if (sb.dot) {
+      V2 P = sb.start;
+      V2 d = unit(sb.dot_dir);
+      V2 m = left_of(d);
+      if (st.cap == CAP_ROUND) {
+        Shape s;
+        s.kind = Shape::DISC;
+        s.c = P;
+        s.r = h;
+        r.shapes.push_back(s);
+      } else if (st.cap == CAP_SQUARE) {
+        Shape s;
+        s.poly = {P + h * m + h * d, P - h * m + h * d, P - h * m - h * d, P + h * m - h * d};
+        r.shapes.push_back(s);
+      }
+      continue;
+    }
     if (sb.segs.empty()) {
       if (!sb.draws || st.degenerate == 1) {
         continue;
@@ -1164,7 +1193,12 @@ inline void build_region(Region & r, const std::vector<Sub> & subs, const Style 
       r.bodies.push_back(make_poly(s));
     }
     size_t n = sb.segs.size();
-    for (size_t k = 0; k + 1 < n; k++) {
+    if (sb.use_joins) {
+      for (const auto & jp : sb.joins) {
+        add_join(r, jp.first, jp.second, st.join, st.limit, st.plant);
+      }
+    }
+    for (size_t k = 0; !sb.use_joins && k + 1 < n; k++) {
       add_join(r, sb.segs[k], sb.segs[k + 1], st.join, st.limit, st.plant);
     }
     if (sb.closed) {
@@ -1239,6 +1273,284 @@ inline Verdict region_contains(const Region & r, V2 x_device) {
   return v;
 }
 
+/* --- dashes: the definition of a dashed stroke (stroke.h, SG19 to SG24) ------------------- */
+
+/** A segment's arc length by composite Gauss-Legendre (8 points) over 1024 panels: independent of along.h. */
+struct Arc {
+  Poly p;
+  std::vector<Real> cum; ///< the length at each panel boundary
+  Real total = 0;
+};
+
+inline Real arc_speed(const Poly & p, Real t) {
+  Real dv = bern_eval(p.d, t);
+  return norm(poly_dir(p, t)) / (dv * dv);
+}
+
+inline Real gl8(const Poly & p, Real a, Real b) {
+  static const Real x[4] = {0.18343464249564980493947614236018L, 0.52553240991632898581773904918925L,
+      0.79666647741362673959155393647583L, 0.96028985649753623168356086856947L};
+  static const Real w[4] = {0.36268378337836198296515044927720L, 0.31370664587788728733796220198660L,
+      0.22238103445337447054435599442624L, 0.10122853629037625915253135430996L};
+  Real c = (a + b) / 2, h = (b - a) / 2, sum = 0;
+  for (int i = 0; i < 4; i++) {
+    sum += w[i] * (arc_speed(p, c - h * x[i]) + arc_speed(p, c + h * x[i]));
+  }
+  return sum * h;
+}
+
+inline Arc make_arc(const Seg & s) {
+  Arc a;
+  a.p = make_poly(s);
+  const int panels = 1024;
+  a.cum.assign(panels + 1, 0);
+  for (int i = 0; i < panels; i++) {
+    a.cum[(size_t)i + 1] = a.cum[(size_t)i] + gl8(a.p, (Real)i / panels, (Real)(i + 1) / panels);
+  }
+  a.total = a.cum[panels];
+  return a;
+}
+
+/** The length from 0 to t. */
+inline Real arc_to(const Arc & a, Real t) {
+  const int panels = 1024;
+  int i = (int)std::floor(t * panels);
+  if (i >= panels) {
+    return a.total;
+  }
+  return a.cum[(size_t)i] + gl8(a.p, (Real)i / panels, t);
+}
+
+/** The parameter at length s (0 <= s <= total), by bisection. */
+inline Real arc_param(const Arc & a, Real s) {
+  Real lo = 0, hi = 1;
+  for (int i = 0; i < 80; i++) {
+    Real mid = (lo + hi) / 2;
+    if (arc_to(a, mid) < s) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return (lo + hi) / 2;
+}
+
+/** The piece of a segment on [a, b] (homogeneous de Casteljau, twice). */
+inline void seg_halves(const Seg & s, Real t, Seg & l, Seg & r) {
+  int n = s.n;
+  Real X[4], Y[4], W[4];
+  for (int i = 0; i <= n; i++) {
+    W[i] = s.w[i];
+    X[i] = s.w[i] * s.p[i].x;
+    Y[i] = s.w[i] * s.p[i].y;
+  }
+  l = s;
+  r = s;
+  for (int lev = 1; lev <= n; lev++) {
+    for (int i = 0; i + lev <= n; i++) {
+      X[i] = (1 - t) * X[i] + t * X[i + 1];
+      Y[i] = (1 - t) * Y[i] + t * Y[i + 1];
+      W[i] = (1 - t) * W[i] + t * W[i + 1];
+    }
+    l.p[lev] = {X[0] / W[0], Y[0] / W[0]};
+    l.w[lev] = W[0];
+    r.p[n - lev] = {X[n - lev] / W[n - lev], Y[n - lev] / W[n - lev]};
+    r.w[n - lev] = W[n - lev];
+  }
+}
+
+inline Seg seg_between(const Seg & s, Real a, Real b) {
+  Seg cur = s, l, r;
+  if (a > 0) {
+    seg_halves(cur, a, l, r);
+    cur = r;
+  }
+  if (b < 1) {
+    Real u = a > 0 ? (b - a) / (1 - a) : b;
+    seg_halves(cur, u, l, r);
+    cur = l;
+  }
+  return cur;
+}
+
+/** The unit tangent at t: SG5's directions at the ends, the hodograph inside. */
+inline V2 seg_tangent(const Seg & s, Real t) {
+  if (t <= 0) {
+    return start_dir(s);
+  }
+  if (t >= 1) {
+    return end_dir(s);
+  }
+  Poly p = make_poly(s);
+  V2 e = poly_dir(p, t);
+  if (e.x != 0 || e.y != 0) {
+    return e;
+  }
+  return start_dir(seg_between(s, t, 1));
+}
+
+/**
+ * SVG 2's dash positions, transcribed from the text with a running position (13.5.7), in `long double`.  The one
+ * difference (stroke.h, SG21): a positive dash the phase has used up entirely makes no zero-length dash at the start.
+ */
+inline std::vector<std::pair<Real, Real>> dash_positions(const std::vector<Real> & raw, Real offset, Real length) {
+  bool solid = false, any = false;
+  for (Real v : raw) {
+    solid = solid || v < 0;
+    any = any || v != 0;
+  }
+  if (raw.empty() || solid || !any) {
+    return {{0, length}};
+  }
+  std::vector<Real> d = raw;
+  if (d.size() % 2) {
+    d.insert(d.end(), raw.begin(), raw.end());
+  }
+  Real sum = 0;
+  for (Real v : d) {
+    sum += v;
+  }
+  if (offset < 0) {
+    offset = sum - std::fabs(offset);
+  }
+  offset = std::fmod(offset, sum);
+  if (offset < 0) {
+    offset += sum;
+  }
+  std::vector<std::pair<Real, Real>> out;
+  size_t index = 0;
+  Real acc = d[0];
+  while (acc < offset) {
+    index++;
+    acc += d[index];
+  }
+  Real remaining = acc - offset;
+  Real dashlength = std::min(remaining, length);
+  if (index % 2 == 0 && (remaining > 0 || d[index] == 0)) {
+    out.push_back({0, dashlength});
+  }
+  Real position = dashlength;
+  while (position < length) {
+    index = (index + 1) % d.size();
+    dashlength = std::min(d[index], length - position);
+    if (index % 2 == 0) {
+      out.push_back({position, position + dashlength});
+    }
+    position += dashlength;
+  }
+  return out;
+}
+
+/** A subpath's segments located by length: the segment and parameter at length s (a boundary is the later segment's). */
+struct Located {
+  size_t k = 0;
+  Real t = 0;
+};
+
+/** The dashed pieces of the subpaths (stroke.h, SG21 to SG24), as subpaths of their own. */
+inline std::vector<Sub> dash_subs(const std::vector<Sub> & subs, const Style & st, const std::vector<V2> & tangents) {
+  std::vector<Sub> out;
+  Real path_pos = 0;
+  for (size_t i = 0; i < subs.size(); i++) {
+    const Sub & sb = subs[i];
+    if (!sb.draws) {
+      continue;
+    }
+    std::vector<Arc> arcs;
+    std::vector<Real> start;
+    Real total = 0;
+    for (const Seg & g : sb.segs) {
+      arcs.push_back(make_arc(g));
+      start.push_back(total);
+      total += arcs.back().total;
+    }
+    Real phase = st.dash_scope == 1 ? st.dash_offset + path_pos : st.dash_offset;
+    std::vector<std::pair<Real, Real>> pairs = dash_positions(st.dashes, phase, total);
+    bool closed_ext = sb.closed && !sb.segs.empty();
+    auto locate = [&](Real s, bool end_side) {
+      Located l;
+      if (s >= total) {
+        l.k = sb.segs.size() - 1;
+        l.t = 1;
+        return l;
+      }
+      size_t k = 0;
+      while (k + 1 < sb.segs.size() && start[k + 1] <= s) {
+        k++;
+      }
+      Real local = s - start[k];
+      l.k = k;
+      l.t = local <= 0 ? 0 : arc_param(arcs[k], local);
+      if (end_side && l.t <= 0 && k > 0) {
+        l.k = k - 1;
+        l.t = 1;
+      }
+      return l;
+    };
+    if (sb.segs.empty()) {
+      /* a degenerate subpath: the first piece only, a dot when it exists (unless degenerate omit) */
+      if (st.degenerate != 1 && !pairs.empty()) {
+        Sub d;
+        d.draws = true;
+        d.dot = true;
+        d.start = sb.start;
+        d.dot_dir = tangents[i];
+        out.push_back(d);
+      }
+      path_pos += total;
+      continue;
+    }
+    for (const auto & pr : pairs) {
+      Real a = std::min(pr.first, total), b = std::min(pr.second, total);
+      Located la = locate(a, false);
+      Sub d;
+      d.draws = true;
+      d.aligned_closed = closed_ext;
+      if (!(b > a)) {
+        d.dot = true;
+        d.start = seg_between(sb.segs[la.k], la.t, 1).p[0];
+        d.dot_dir = seg_tangent(sb.segs[la.k], la.t);
+        out.push_back(d);
+        continue;
+      }
+      Located lb = locate(b, true);
+      if (lb.k < la.k || (lb.k == la.k && lb.t <= la.t)) {
+        d.dot = true;
+        d.start = seg_between(sb.segs[la.k], la.t, 1).p[0];
+        d.dot_dir = seg_tangent(sb.segs[la.k], la.t);
+        out.push_back(d);
+        continue;
+      }
+      for (size_t k = la.k; k <= lb.k; k++) {
+        Real ta = k == la.k ? la.t : 0, tb = k == lb.k ? lb.t : 1;
+        if (!(tb > ta)) {
+          continue;
+        }
+        Seg piece = seg_between(sb.segs[k], ta, tb);
+        if (!has_extent(piece)) {
+          continue;
+        }
+        if (!d.segs.empty() && k > 0) {
+          d.joins.push_back({sb.segs[k - 1], sb.segs[k]});
+        }
+        d.segs.push_back(piece);
+      }
+      if (d.segs.empty()) {
+        d.dot = true;
+        d.start = seg_between(sb.segs[la.k], la.t, 1).p[0];
+        d.dot_dir = seg_tangent(sb.segs[la.k], la.t);
+      } else {
+        d.use_joins = true;
+        /* the caps' directions: the centerline's at the two cut points */
+        d.start = d.segs.front().p[0];
+      }
+      out.push_back(d);
+    }
+    path_pos += total;
+  }
+  return out;
+}
+
 /** The two regions of SG12: the body (R, or R_o off center) and the aligned part (R_c at twice the width). */
 struct Stroked {
   Region body, aligned;
@@ -1294,22 +1606,37 @@ inline Stroked build_stroke(const Centerline & cl, const Style & st, const Affin
     fallback = map.linear({1, 0});
   }
   std::vector<V2> tangents = degenerate_tangents(subs, fallback);
+  bool any_closed_extent = false;
+  for (const Sub & sb : subs) {
+    any_closed_extent = any_closed_extent || (sb.closed && !sb.segs.empty());
+  }
+  bool dashed = false;
+  {
+    bool neg = false, nz = false;
+    for (Real v : st.dashes) {
+      neg = neg || v < 0;
+      nz = nz || v != 0;
+    }
+    dashed = !st.dashes.empty() && !neg && nz;
+  }
+  if (dashed) {
+    subs = dash_subs(subs, st, tangents);
+    tangents.assign(subs.size(), fallback);
+  }
   Real h = st.width / 2;
   for (Region * r : {&out.body, &out.aligned}) {
     r->local = local;
     r->to_device = local ? map : Affine{};
     r->device_scale = local ? map.frobenius() : 1;
   }
-  auto closed_with_extent = [&](size_t i) { return subs[i].closed && !subs[i].segs.empty(); };
+  auto closed_with_extent = [&](size_t i) {
+    return subs[i].aligned_closed || (!dashed && subs[i].closed && !subs[i].segs.empty());
+  };
   if (alignment == 0) {
     build_region(out.body, subs, st, h, [](size_t) { return true; }, tangents);
   } else {
     build_region(out.body, subs, st, h, [&](size_t i) { return !closed_with_extent(i); }, tangents);
-    for (size_t i = 0; i < subs.size(); i++) {
-      if (closed_with_extent(i)) {
-        out.has_aligned = true;
-      }
-    }
+    out.has_aligned = any_closed_extent;
     build_region(out.aligned, subs, st, 2 * h, closed_with_extent, tangents);
   }
   return out;

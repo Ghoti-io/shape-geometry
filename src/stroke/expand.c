@@ -38,24 +38,8 @@
 
 #include <string.h>
 
-/** One subpath as SG5 reads it. */
-typedef struct Sub {
-  size_t first_seg;     ///< Its first segment with extent in the segment array.
-  size_t seg_count;     ///< How many it has.
-  int closed;           ///< Ended by a close.
-  int draws;            ///< Has a drawing verb or a close.
-  GSHGEOM_SK_Vec start; ///< Its start, build space.
-  GSHGEOM_Point start_model; ///< Its start, model space (for the clip's path).
-  size_t first_el;      ///< Its first drawing element in the path.
-  size_t end_el;        ///< One past its last element.
-} Sub;
-
-typedef struct Reader {
-  Sub * subs;
-  size_t sub_n, sub_cap;
-  GSHGEOM_SK_Seg * segs;
-  size_t seg_n, seg_cap;
-} Reader;
+typedef GSHGEOM_SK_Sub Sub;
+typedef GSHGEOM_SK_Reader Reader;
 
 static GSHGEOM_Result push_sub(GSHGEOM_SK_Ctx * c, Reader * rd, GSHGEOM_SK_Vec start, GSHGEOM_Point model,
     size_t first_el) {
@@ -126,6 +110,7 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
     sb->end_el = i + 1;
     GSHGEOM_SK_Seg s;
     memset(&s, 0, sizeof s);
+    s.elem = i;
     s.n = gshgeom_curve_point_count(cv.kind) - 1;
     s.rational = gshgeom_curve_is_rational(cv.kind);
     for (int k = 0; k <= s.n; k++) {
@@ -256,7 +241,7 @@ static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, 
 }
 
 /** SG11's effective tangent of the degenerate subpath i (raw, build space). */
-static GSHGEOM_SK_Vec effective_tangent(const GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {
+GSHGEOM_SK_Vec gshgeom_sk_effective_tangent(const GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i) {
   for (size_t j = i; j-- > 0;) {
     if (rd->subs[j].seg_count) {
       GSHGEOM_SK_Vec d;
@@ -277,12 +262,15 @@ static GSHGEOM_SK_Vec effective_tangent(const GSHGEOM_SK_Ctx * c, const Reader *
 
 /** One subpath's pieces in SG18's order. */
 static GSHGEOM_Result stroke_sub(GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {
+  if (c->dash.active) {
+    return gshgeom_sk_dash_sub(c, rd, i);
+  }
   const Sub * s = &rd->subs[i];
   if (s->seg_count == 0) {
     if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_OMIT) {
       return GSHGEOM_OK;
     }
-    return gshgeom_sk_degenerate(c, s->start, effective_tangent(c, rd, i));
+    return gshgeom_sk_degenerate(c, s->start, gshgeom_sk_effective_tangent(c, rd, i));
   }
   const GSHGEOM_SK_Seg * seg = &rd->segs[s->first_seg];
   size_t n = s->seg_count;
@@ -413,6 +401,9 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
   if (r == GSHGEOM_OK && !magnitudes_ok(&c, &rd, (aligned ? 2.0 : 1.0) * h * c.norm)) {
     r = GSHGEOM_ERR_LIMIT;
   }
+  if (r == GSHGEOM_OK && c.st.dash_count) {
+    r = gshgeom_sk_dash_begin(&c, centerline, &rd, stroke);
+  }
   if (r == GSHGEOM_OK) {
     r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->body);
   }
@@ -429,6 +420,7 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
     c.part = to_aligned ? o->aligned : o->body;
     r = stroke_sub(&c, &rd, i);
   }
+  gshgeom_sk_dash_end(&c);
   gcu_allocator_free(&c.alloc, rd.subs);
   gcu_allocator_free(&c.alloc, rd.segs);
   gcu_allocator_free(&c.alloc, c.scratch);
