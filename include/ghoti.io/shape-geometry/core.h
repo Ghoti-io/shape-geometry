@@ -41,7 +41,7 @@ extern "C" {
  *
  * Zero is success.  ::GSHGEOM_RESULT_COUNT closes the enum so that a test can
  * check the string table is complete.  This is the suite's fixed vocabulary
- * with nothing added; most of it is never returned by this library (it reads
+ * with nothing added; some of it is never returned by this library (it reads
  * no bytes), and is here so that the one enum is the same on every library of
  * the family.
  */
@@ -49,7 +49,7 @@ typedef enum {
   GSHGEOM_OK = 0,          ///< The operation succeeded.
   GSHGEOM_ERR_IO,          ///< A write to a caller's stream failed.
   GSHGEOM_ERR_FORMAT,      ///< Not returned by this library.
-  GSHGEOM_ERR_UNSUPPORTED, ///< Not returned by this library.
+  GSHGEOM_ERR_UNSUPPORTED, ///< A stroke this library does not define yet (stroke.h: a 3D centerline, a width profile, dashes).
   GSHGEOM_ERR_LIMIT,       ///< A stated cap was exceeded; nothing was truncated.
   GSHGEOM_ERR_CORRUPT,     ///< Not returned by this library.
   GSHGEOM_ERR_OOM,         ///< The allocator returned NULL.

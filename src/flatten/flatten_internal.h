@@ -60,6 +60,24 @@ GSHGEOM_Result gshgeom_flatten_cubic_capped(int32_t tolerance, int levels,
     GSHGEOM_Device_Point p3, GSHGEOM_Flatten_Emit emit, void * user,
     int * forced);
 
+/**
+ * An empty flattened path, built point by point by the stroke expansion
+ * (src/stroke/).  `limits->max_points` bounds it as it bounds the flattener's.
+ *
+ * @return ::GSHGEOM_OK, ::GSHGEOM_ERR_OOM.
+ */
+GSHGEOM_Result gshgeom_flat_path_new(const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out);
+
+/** Start a subpath at @p p.  ::GSHGEOM_ERR_LIMIT past `max_points`; ::GSHGEOM_ERR_OOM. */
+GSHGEOM_Result gshgeom_flat_path_begin(GSHGEOM_Flat_Path * path, GSHGEOM_Device_Point p);
+
+/** Add @p p to the last subpath.  ::GSHGEOM_ERR_LIMIT past `max_points`; ::GSHGEOM_ERR_OOM. */
+GSHGEOM_Result gshgeom_flat_path_add(GSHGEOM_Flat_Path * path, GSHGEOM_Device_Point p);
+
+/** Mark the last subpath closed. */
+void gshgeom_flat_path_close_last(GSHGEOM_Flat_Path * path);
+
 #ifdef __cplusplus
 }
 #endif

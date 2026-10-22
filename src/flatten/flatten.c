@@ -514,6 +514,39 @@ GSHGEOM_Result gshgeom_path_flatten(const GSHGEOM_Path * path,
 }
 
 /* ---------------------------------------------------------------------- */
+/* The builder the stroke expansion uses (flatten_internal.h)              */
+/* ---------------------------------------------------------------------- */
+
+GSHGEOM_Result gshgeom_flat_path_new(const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out) {
+  if (!alloc) {
+    alloc = gshgeom_allocator_default();
+  }
+  GSHGEOM_Flat_Path * fp = gcu_allocator_calloc(alloc, 1, sizeof *fp);
+  if (!fp) {
+    return GSHGEOM_ERR_OOM;
+  }
+  fp->alloc = *alloc;
+  fp->max_points = (limits && limits->max_points) ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;
+  *out = fp;
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_flat_path_begin(GSHGEOM_Flat_Path * path, GSHGEOM_Device_Point p) {
+  return begin_subpath(path, p);
+}
+
+GSHGEOM_Result gshgeom_flat_path_add(GSHGEOM_Flat_Path * path, GSHGEOM_Device_Point p) {
+  return add_point(path, p);
+}
+
+void gshgeom_flat_path_close_last(GSHGEOM_Flat_Path * path) {
+  if (path->sub_n) {
+    path->sub[path->sub_n - 1].closed = 1;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
 /* Readback                                                                */
 /* ---------------------------------------------------------------------- */
 

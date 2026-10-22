@@ -1,0 +1,443 @@
+/*
+ * SPDX-License-Identifier: LGPL-3.0-only
+ *
+ * Copyright (C) 2026 Corey Pennycuff
+ *
+ * This file is part of Ghoti.io Shape Geometry.
+ *
+ * Ghoti.io Shape Geometry is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * Ghoti.io Shape Geometry is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file
+ *
+ * The expansion (stroke.h, SG4 to SG18): the checks, the not-invertible and
+ * zero-width statuses, the centerline read into subpaths of segments with
+ * extent (SG5) in build space, the magnitude rule of the arithmetic bound
+ * (emit.c (a)), the parts of SG12, and the pieces in SG18's order.
+ */
+
+#include <ghoti.io/shape-geometry/macros.h>
+
+#include <ghoti.io/math/basic.h>
+#include <ghoti.io/shape-geometry/device.h>
+
+#include "../core/grow.h"
+#include "../flatten/flatten_internal.h"
+#include "stroke_internal.h"
+
+#include <string.h>
+
+/** One subpath as SG5 reads it. */
+typedef struct Sub {
+  size_t first_seg;     ///< Its first segment with extent in the segment array.
+  size_t seg_count;     ///< How many it has.
+  int closed;           ///< Ended by a close.
+  int draws;            ///< Has a drawing verb or a close.
+  GSHGEOM_SK_Vec start; ///< Its start, build space.
+  GSHGEOM_Point start_model; ///< Its start, model space (for the clip's path).
+  size_t first_el;      ///< Its first drawing element in the path.
+  size_t end_el;        ///< One past its last element.
+} Sub;
+
+typedef struct Reader {
+  Sub * subs;
+  size_t sub_n, sub_cap;
+  GSHGEOM_SK_Seg * segs;
+  size_t seg_n, seg_cap;
+} Reader;
+
+static GSHGEOM_Result push_sub(GSHGEOM_SK_Ctx * c, Reader * rd, GSHGEOM_SK_Vec start, GSHGEOM_Point model,
+    size_t first_el) {
+  void * g = rd->subs;
+  GSHGEOM_Result r = gshgeom_grow(&c->alloc, &g, &rd->sub_cap, rd->sub_n + 1, sizeof *rd->subs);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  rd->subs = g;
+  Sub * s = &rd->subs[rd->sub_n++];
+  memset(s, 0, sizeof *s);
+  s->first_seg = rd->seg_n;
+  s->start = start;
+  s->start_model = model;
+  s->first_el = first_el;
+  s->end_el = first_el;
+  return GSHGEOM_OK;
+}
+
+static int has_extent(const GSHGEOM_SK_Seg * s) {
+  for (int k = 1; k <= s->n; k++) {
+    if (s->p[k].x != s->p[0].x || s->p[k].y != s->p[0].y) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/** Read the centerline: subpaths and segments with extent, in build space (SG5, SG10). */
+static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, Reader * rd) {
+  size_t n = gshgeom_path_element_count(path);
+  int open = 0;
+  GSHGEOM_SK_Vec start = {0.0, 0.0};
+  GSHGEOM_Point start_model = {0.0, 0.0, 0.0};
+  for (size_t i = 0; i < n; i++) {
+    GSHGEOM_Element el;
+    GSHGEOM_Result r = gshgeom_path_element(path, i, &el);
+    if (r != GSHGEOM_OK) {
+      return GSHGEOM_ERR_INTERNAL;
+    }
+    GSHGEOM_Curve cv = el.curve;
+    if (!c->local) {
+      r = gshgeom_map_apply_curve(&c->map, &el.curve, &cv);
+      if (r != GSHGEOM_OK) {
+        return r;
+      }
+    }
+    if (el.verb == GSHGEOM_VERB_MOVE) {
+      start = gshgeom_sk_v(cv.p[0].x, cv.p[0].y);
+      start_model = el.curve.p[0];
+      r = push_sub(c, rd, start, start_model, i + 1);
+      if (r != GSHGEOM_OK) {
+        return r;
+      }
+      open = 1;
+      continue;
+    }
+    if (!open) {
+      /* a drawing verb after a close starts a subpath at the closed one's start */
+      r = push_sub(c, rd, start, start_model, i);
+      if (r != GSHGEOM_OK) {
+        return r;
+      }
+      open = 1;
+    }
+    Sub * sb = &rd->subs[rd->sub_n - 1];
+    sb->draws = 1;
+    sb->end_el = i + 1;
+    GSHGEOM_SK_Seg s;
+    memset(&s, 0, sizeof s);
+    s.n = gshgeom_curve_point_count(cv.kind) - 1;
+    s.rational = gshgeom_curve_is_rational(cv.kind);
+    for (int k = 0; k <= s.n; k++) {
+      s.p[k] = gshgeom_sk_v(cv.p[k].x, cv.p[k].y);
+      s.w[k] = s.rational ? cv.w[k] : 1.0;
+    }
+    if (has_extent(&s)) {
+      void * g = rd->segs;
+      r = gshgeom_grow(&c->alloc, &g, &rd->seg_cap, rd->seg_n + 1, sizeof *rd->segs);
+      if (r != GSHGEOM_OK) {
+        return r;
+      }
+      rd->segs = g;
+      rd->segs[rd->seg_n++] = s;
+      sb->seg_count++;
+    }
+    if (el.verb == GSHGEOM_VERB_CLOSE) {
+      sb->closed = 1;
+      open = 0;
+    }
+  }
+  return GSHGEOM_OK;
+}
+
+static double fabs_(double x) {
+  return x < 0 ? -x : x;
+}
+
+/** The magnitude rule (emit.c (a)): every quantity the arithmetic bound is proved for is within 2^30 pixels. */
+static int point_ok(const GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec p) {
+  if (c->local) {
+    const GSHGEOM_Map * m = &c->map;
+    double r0 = fabs_(m->m[0][0] * p.x) + fabs_(m->m[0][1] * p.y) + fabs_(m->t[0]);
+    double r1 = fabs_(m->m[1][0] * p.x) + fabs_(m->m[1][1] * p.y) + fabs_(m->t[1]);
+    return r0 <= GSHGEOM_SK_MAG_LIMIT && r1 <= GSHGEOM_SK_MAG_LIMIT;
+  }
+  return fabs_(p.x) <= GSHGEOM_SK_MAG_LIMIT && fabs_(p.y) <= GSHGEOM_SK_MAG_LIMIT;
+}
+
+static int magnitudes_ok(const GSHGEOM_SK_Ctx * c, const Reader * rd, double h_dev_widest) {
+  double L = c->st.miter_limit > 2.0 ? c->st.miter_limit : 2.0;
+  if (!(h_dev_widest * L * 2.0 <= GSHGEOM_SK_MAG_LIMIT)) {
+    return 0;
+  }
+  for (size_t i = 0; i < rd->sub_n; i++) {
+    if (!point_ok(c, rd->subs[i].start)) {
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < rd->seg_n; i++) {
+    const GSHGEOM_SK_Seg * s = &rd->segs[i];
+    for (int k = 0; k <= s->n; k++) {
+      if (!point_ok(c, s->p[k])) {
+        return 0;
+      }
+      /* the build-space arithmetic (cubes of a difference, squares of a cross product) stays inside the range of a
+       * double: a nonzero difference of neighbours is at least 2^-200 (the other end of the range is bounded by the
+       * device magnitude and the map's smallest scale) */
+      if (k > 0) {
+        double dx = fabs_(s->p[k].x - s->p[k - 1].x), dy = fabs_(s->p[k].y - s->p[k - 1].y);
+        double dm = dx > dy ? dx : dy;
+        if (dm != 0.0 && dm < GSHGEOM_SK_BUILD_MIN) {
+          return 0;
+        }
+      }
+      GSHGEOM_SK_Vec d = gshgeom_sk_sub(s->p[k], s->p[0]);
+      if (!(c->norm * gshgeom_sk_norm(d) <= GSHGEOM_SK_MAG_LIMIT)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+/** The clip's region F (SG12): the closed subpaths with extent, flattened after the map at the tolerance. */
+static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, const Reader * rd,
+    GSHGEOM_Flat_Path ** out) {
+  GSHGEOM_Path * mp = NULL;
+  GSHGEOM_Result r = gshgeom_path_create(&c->alloc, &c->limits, 2, &mp);
+  for (size_t i = 0; i < rd->sub_n && r == GSHGEOM_OK; i++) {
+    const Sub * s = &rd->subs[i];
+    if (!s->closed || s->seg_count == 0) {
+      continue;
+    }
+    r = gshgeom_path_move_to(mp, s->start_model);
+    for (size_t e = s->first_el; e < s->end_el && r == GSHGEOM_OK; e++) {
+      GSHGEOM_Element el;
+      r = gshgeom_path_element(path, e, &el);
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      const GSHGEOM_Point * p = el.curve.p;
+      switch (el.verb) {
+      case GSHGEOM_VERB_LINE:
+        r = gshgeom_path_line_to(mp, p[1]);
+        break;
+      case GSHGEOM_VERB_QUADRATIC:
+        r = gshgeom_path_quadratic_to(mp, p[1], p[2]);
+        break;
+      case GSHGEOM_VERB_CUBIC:
+        r = gshgeom_path_cubic_to(mp, p[1], p[2], p[3]);
+        break;
+      case GSHGEOM_VERB_RATIONAL_QUADRATIC:
+        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], el.curve.w);
+        break;
+      case GSHGEOM_VERB_RATIONAL_CUBIC:
+        r = gshgeom_path_rational_cubic_to(mp, p[1], p[2], p[3], el.curve.w);
+        break;
+      case GSHGEOM_VERB_CLOSE:
+        r = gshgeom_path_close(mp);
+        break;
+      default:
+        r = GSHGEOM_ERR_INTERNAL;
+        break;
+      }
+    }
+  }
+  GSHGEOM_Device_Path * dp = NULL;
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_device_path_from_model(mp, &c->map, &c->alloc, &c->limits, &dp);
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_device_path_flatten_with_tolerance(dp, c->tau, &c->alloc, &c->limits, out);
+  }
+  gshgeom_device_path_destroy(dp);
+  gshgeom_path_destroy(mp);
+  return r;
+}
+
+/** SG11's effective tangent of the degenerate subpath i (raw, build space). */
+static GSHGEOM_SK_Vec effective_tangent(const GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {
+  for (size_t j = i; j-- > 0;) {
+    if (rd->subs[j].seg_count) {
+      GSHGEOM_SK_Vec d;
+      (void)gshgeom_sk_end_dir(&rd->segs[rd->subs[j].first_seg + rd->subs[j].seg_count - 1], &d);
+      return d;
+    }
+  }
+  for (size_t j = i + 1; j < rd->sub_n; j++) {
+    if (rd->subs[j].seg_count) {
+      GSHGEOM_SK_Vec d;
+      (void)gshgeom_sk_start_dir(&rd->segs[rd->subs[j].first_seg], &d);
+      return d;
+    }
+  }
+  /* no segment with extent anywhere: local +x (under device width, the map's image of it) */
+  return c->local ? gshgeom_sk_v(1.0, 0.0) : gshgeom_sk_v(c->map.m[0][0], c->map.m[1][0]);
+}
+
+/** One subpath's pieces in SG18's order. */
+static GSHGEOM_Result stroke_sub(GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {
+  const Sub * s = &rd->subs[i];
+  if (s->seg_count == 0) {
+    if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_OMIT) {
+      return GSHGEOM_OK;
+    }
+    return gshgeom_sk_degenerate(c, s->start, effective_tangent(c, rd, i));
+  }
+  const GSHGEOM_SK_Seg * seg = &rd->segs[s->first_seg];
+  size_t n = s->seg_count;
+  GSHGEOM_Result r = GSHGEOM_OK;
+  if (!s->closed) {
+    GSHGEOM_SK_Vec d;
+    (void)gshgeom_sk_start_dir(&seg[0], &d);
+    r = gshgeom_sk_cap(c, seg[0].p[0], gshgeom_sk_scale(-1.0, d));
+  }
+  for (size_t k = 0; k < n && r == GSHGEOM_OK; k++) {
+    r = gshgeom_sk_body(c, &seg[k]);
+    if (r == GSHGEOM_OK && k + 1 < n) {
+      r = gshgeom_sk_join(c, &seg[k], &seg[k + 1]);
+    } else if (r == GSHGEOM_OK && s->closed) {
+      r = gshgeom_sk_join(c, &seg[k], &seg[0]);
+    }
+  }
+  if (r == GSHGEOM_OK && !s->closed) {
+    GSHGEOM_SK_Vec d;
+    (void)gshgeom_sk_end_dir(&seg[n - 1], &d);
+    r = gshgeom_sk_cap(c, seg[n - 1].p[seg[n - 1].n], d);
+  }
+  return r;
+}
+
+GSHGEOM_Result gshgeom_stroke_expand(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    GSHGEOM_Stroke_Outline ** out) {
+  return gshgeom_stroke_expand_with_tolerance(
+      centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);
+}
+
+GSHGEOM_Result gshgeom_stroke_expand_with_tolerance(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    GSHGEOM_Stroke_Outline ** out) {
+  return gshgeom_stroke_expand_capped(centerline, stroke, map, tolerance, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, out);
+}
+
+GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    int depth_cap, GSHGEOM_Stroke_Outline ** out) {
+  if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  GSHGEOM_Result r = gshgeom_map_check(map);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if (map->dim != 2) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  GSHGEOM_SK_Ctx c;
+  memset(&c, 0, sizeof c);
+  r = gshgeom_stroke_canonical(stroke, &c.st);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if (gshgeom_path_dimension(centerline) != 2) {
+    return GSHGEOM_ERR_UNSUPPORTED; /* the definition is planar */
+  }
+  if (!alloc) {
+    alloc = gshgeom_allocator_default();
+  }
+  c.alloc = *alloc;
+  gshgeom_limits_default(&c.limits);
+  if (limits) {
+    if (limits->max_elements) {
+      c.limits.max_elements = limits->max_elements;
+    }
+    if (limits->max_points) {
+      c.limits.max_points = limits->max_points;
+    }
+  }
+  c.tau = tolerance;
+  c.budget = ((double)tolerance - GSHGEOM_SK_MARGIN) / 64.0;
+  c.rho = (GSHGEOM_SK_ROUND + GSHGEOM_SK_ETA) / 64.0;
+  c.map = *map;
+  c.local = c.st.width_space == GSHGEOM_STROKE_WIDTH_LOCAL;
+  c.work_cap = 4 * c.limits.max_points + 4096;
+  c.depth_cap = depth_cap < 1 ? 1 : (depth_cap > GSHGEOM_STROKE_MAX_DEPTH ? GSHGEOM_STROKE_MAX_DEPTH : depth_cap);
+  GSHGEOM_Stroke_Outline * o = gcu_allocator_calloc(&c.alloc, 1, sizeof *o);
+  if (!o) {
+    return GSHGEOM_ERR_OOM;
+  }
+  o->alloc = c.alloc;
+  o->alignment = c.st.alignment;
+  o->rule = c.st.alignment_rule;
+  o->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;
+  int invertible = 0;
+  r = gshgeom_stroke_map_invertible(map, &invertible);
+  if (r != GSHGEOM_OK) {
+    gshgeom_stroke_outline_destroy(o);
+    return r;
+  }
+  if (!invertible) {
+    o->status = GSHGEOM_STROKE_NOT_INVERTIBLE; /* SG15, decided before SG14 */
+    *out = o;
+    return GSHGEOM_OK;
+  }
+  if (c.st.width == 0.0) {
+    o->status = GSHGEOM_STROKE_EMPTY; /* SG14 */
+    *out = o;
+    return GSHGEOM_OK;
+  }
+  if (c.local) {
+    c.lin[0][0] = map->m[0][0];
+    c.lin[0][1] = map->m[0][1];
+    c.lin[1][0] = map->m[1][0];
+    c.lin[1][1] = map->m[1][1];
+    double f = map->m[0][0] * map->m[0][0] + map->m[0][1] * map->m[0][1] + map->m[1][0] * map->m[1][0] +
+        map->m[1][1] * map->m[1][1];
+    c.norm = gmath_sqrt(f) * (1.0 + 0x1p-40);
+  } else {
+    c.lin[0][0] = c.lin[1][1] = 1.0;
+    c.norm = 1.0;
+  }
+  Reader rd;
+  memset(&rd, 0, sizeof rd);
+  r = read_centerline(&c, centerline, &rd);
+  int aligned = c.st.alignment != GSHGEOM_STROKE_ALIGN_CENTER;
+  int any_closed = 0;
+  for (size_t i = 0; i < rd.sub_n; i++) {
+    if (rd.subs[i].closed && rd.subs[i].seg_count) {
+      any_closed = 1;
+    }
+  }
+  double h = c.st.width / 2.0;
+  if (r == GSHGEOM_OK && !magnitudes_ok(&c, &rd, (aligned ? 2.0 : 1.0) * h * c.norm)) {
+    r = GSHGEOM_ERR_LIMIT;
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->body);
+  }
+  if (r == GSHGEOM_OK && aligned && any_closed) {
+    r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->aligned);
+    if (r == GSHGEOM_OK) {
+      r = build_clip(&c, centerline, &rd, &o->clip);
+    }
+  }
+  for (size_t i = 0; i < rd.sub_n && r == GSHGEOM_OK; i++) {
+    int to_aligned = aligned && rd.subs[i].closed && rd.subs[i].seg_count;
+    c.h = to_aligned ? 2.0 * h : h;
+    c.h_dev = c.h * c.norm;
+    c.part = to_aligned ? o->aligned : o->body;
+    r = stroke_sub(&c, &rd, i);
+  }
+  gcu_allocator_free(&c.alloc, rd.subs);
+  gcu_allocator_free(&c.alloc, rd.segs);
+  gcu_allocator_free(&c.alloc, c.scratch);
+  gcu_allocator_free(&c.alloc, c.arcbuf);
+  if (r != GSHGEOM_OK) {
+    gshgeom_stroke_outline_destroy(o);
+    return r;
+  }
+  o->status = GSHGEOM_STROKE_DRAWN;
+  *out = o;
+  return GSHGEOM_OK;
+}

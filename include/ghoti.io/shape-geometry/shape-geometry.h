@@ -39,5 +39,6 @@
 #include <ghoti.io/shape-geometry/map.h>
 #include <ghoti.io/shape-geometry/orient.h>
 #include <ghoti.io/shape-geometry/path.h>
+#include <ghoti.io/shape-geometry/stroke.h>
 
 #endif // GHOTI_IO_GSHGEOM_GSHGEOM_H

@@ -3,7 +3,9 @@
 **Status:** parts 1 to 4 of the shape-geometry plan: curves, model paths,
 bounds and the hash spelling; maps, the orientation rules, the exact
 predicates and the route predicate; the 26.6 device path and the integer
-flattener (revision 2); along-path parametrization; the fill rules.
+flattener (revision 2); along-path parametrization; the fill rules; strokes:
+the definition of the covered region and the expansion (construction revision
+1), solid strokes only (dashes are refused until they are defined).
 
 Paths, transforms and flattening for the shape family, bit-identical on every host.
 
@@ -264,6 +266,111 @@ default, and what every font format means) and `GSHGEOM_FILL_EVEN_ODD` (1),
 The values are pinned (spine AD-4); a further rule is appended after them. The
 rule is applied by `shape-cpu`; `font`'s `GFNT_FillRule` is this type under its
 old name.
+
+## Strokes
+
+`stroke.h` states what a stroke covers, once, as rules SG1 to SG18, and
+`gshgeom_stroke_expand` turns a centerline, the parameters and a map into an
+outline whose nonzero fill is that region within the tolerance. The rules are
+the normative text; this section records where they come from, the readings of
+the texts they follow, the construction and its proof in outline, and the
+revision.
+
+### Sources
+
+The rules follow SVG 2 and the WHATWG HTML standard's canvas line styles, each
+pinned (`tools/svg2-texts/fetch.sh` fetches them and checks their SHA-256): the
+SVG 2 Candidate Recommendation of 2018-10-04 (its painting and paths chapters),
+the SVG 2 editor's draft at `w3c/svgwg` commit `f846f12e3f50`, the SVG Strokes
+module draft at the same commit, and the WHATWG HTML source at commit
+`c6c3055c1287`. The editor's draft has withdrawn the `miter-clip` and `arcs`
+values of `stroke-linejoin`; the 2018 Candidate Recommendation is the one text
+that defines them, and SG8 follows it.
+
+Where the texts leave a point open, the rules settle it by the limit of the
+cases they define, and say so:
+
+| Point | Reading |
+|---|---|
+| The body's half width | The CR's stroke-shape algorithm says "within distance stroke-width" of the centerline, where its caps and joins use half the width: half the width (SG6), the erratum read as every renderer reads it. |
+| A cusp inside a segment | The literal union of normals sweeps nothing at an exact cusp; every nearby curve's normals sweep a half turn there. SG6 adds the disc, which keeps the region continuous in the control points. |
+| Miter-clip's clip distance | The CR's property text: half the miter limit times the width from the join point. One sentence of its miter-clip description says "half the value of miter length"; read as the same distance. |
+| A reversal (`phi = pi`) | Each join's limit as the turn approaches a half turn: nothing for bevel and miter, the half disc ahead for round, the rectangle of length `L h` for miter-clip. Arcs' two one-sided limits differ (each pairs a different segment's curvature with a side), so it is their union. |
+| Arcs: the curvature of an end | The CR gives it for quadratic and cubic Beziers and elliptical arcs; SG8 uses the curvature of the segment at that end for every kind (for a rational kind with the weights' factor `w_0 w_2 / w_1^2`), which is what the CR's formulas are. |
+| Arcs: "curvature greater than 2 / stroke-width" | The path's curvature magnitude, `|kappa| > 1 / h`, strict, decided exactly: the radius at which an offset edge degenerates, and the reading that does not depend on the direction of travel. |
+| Arcs: a vanishing first difference | The CR says the curvature is infinite and a line is used: a line, whose curvature counts as zero for the fallbacks. |
+| Arcs: which meeting point | The closest to the vertex that is on both extensions. An extension that is a line is a ray (forward from the incoming edge's end along its direction, backward from the outgoing edge's start), so a meeting point behind its start is not on it; a circle is all of itself. Of two candidates the closer is the one on the vertex's side of the line of centres (a circle and a line: nearer the vertex's foot along the line), a comparison that needs no distances; they tie exactly when the vertex is on that line, which is a reversal of two curved segments, and the tie goes to the one reached first along the incoming edge's extension. |
+| Arcs: the radius adjustment | The least positive amount that makes the circles touch; a circle and a line: the circle alone grows (the limit of both circle cases as one radius tends to infinity); where nothing can touch (parallel tangents), the CR's rectangle. |
+| Arcs: the region | The bevel together with what the closed boundary V, A, the first extension to the meeting point, the second extension back to B, V encloses by nonzero winding: the region the CR's lines and arcs enclose, read literally. Where the extensions curl past the vertex (a reversal of two curved segments) that region is not star-shaped from the vertex, and a union of segments from the vertex would cover a far larger area than the CR's boundary encloses. |
+| Arcs: the clip | The clip is applied to the boundary: its parts in the half plane, closed along the clip line, enclose exactly the region cut by the half plane (a closed curve and its clipping wind the same about every point of the half plane). `Gamma` is the circle tangent to the bisector at the vertex through the meeting point (a line when the point is on the bisector); the clip line is perpendicular to `Gamma` at arc length `L h`, keeping the vertex's side. A meeting point behind the vertex on the bisector takes the straight clip. |
+| Arcs under device width | The curvatures of the mapped curve: the CR's non-scaling-stroke clause computes the whole outline in host space. |
+| A degenerate square's direction | SVG 2's effective tangent, read literally across subpaths: the end direction of the last segment with extent before it in the path, else the start direction of the first after it, else local `+x`. |
+| Canvas | One-point subpaths are dropped and zero-length segments pruned: a canvas front-end lowers to "omit". |
+
+### The construction (revision 1)
+
+The region is a union of pieces: the body of a stretch of a segment, a join, a
+cap, a degenerate shape. Each piece is emitted as the convex hull of a few core
+points it computes, inflated by an octagon and rounded to 26.6, as positively
+wound polygons (src/stroke/emit.c). A piece states two bounds: how far the
+region can be outside its core hull (`d_in`) and how far the core hull can be
+outside the region (`d_out`). The inflation is `d_in` plus the rounding's reach,
+so after the rounding the polygon still contains its piece; the outward reach is
+`d_out + 1.0826 (d_in + rho) + rho`, `rho` the rounding and arithmetic allowance,
+and a piece is emitted only when that is within `tau - 1/4` units. The outline
+therefore contains the region and lies within `tau - 1/4` units of it, and no
+polygon winds negatively, so overlaps never cancel (SG13).
+
+Lines, joins, caps and degenerate shapes are polygons of their own corners, or
+circular sectors drawn as the control polygons of halved rational quadratic arcs
+(no angle is formed). A curve segment is split by de Casteljau at the parameter
+7/16 until each piece is a **band** (both cones of its hodograph narrower than a
+quarter turn, its curvature bound times `h` below the cosine of the cone's width,
+so no two normals meet and each rail is a graph over its chord within
+`(lambda / 2) sin(alpha)`) or a **fan** (a short piece: the double sector of its
+normal cone about its start, or a disc when its end normals are nearly opposite,
+which is how a cusp gets its disc). Errors of the doubles are carried with every
+coefficient. A piece still refused after 64 splits is `ERR_LIMIT`, never drawn
+coarser. The arcs join is built from its boundary: the straight edges and the
+circumscribed polylines of the extensions' quarter-turn sub-arcs (each within
+the allowed distance of its arc), cut by the clip's half plane (the boundary's
+parts inside it, with the gaps closed along the clip line, where chords that run
+both ways over the same stretch cancel), then cut into slabs at every height an
+edge ends or two edges cross, and each stretch of nonzero winding between
+neighbouring edges is one trapezoid. Every piece is positively wound; the
+boundary may have at most 2048 edges, past which the join is `ERR_LIMIT`. The
+arcs join's clip is the one place `math`'s trigonometry is used.
+
+The proof is above the code: emit.c (the theorem and the rounding), body.c (bands
+and fans), join.c (SG9's exact decision and the miter tip's error), arc.c (arcs
+and the arcs join). Its arithmetic bound assumes every magnitude is within
+`2^30` pixels (anchors, the mapped control points' offsets, the half width and
+the miter tip); a larger one is `ERR_LIMIT`.
+
+### What checks it
+
+`tests/stroke_oracle.h` decides membership from the rules alone, in
+`long double`, sharing no code with the expansion, and samples a superset of the
+region's boundary at 1/256 pixel. `tests/unit/test_stroke_oracle.cpp` checks it
+first where the region is the set of points within `h` of the centerline (round
+joins and caps), sees it fail with a sector on the inner side, and checks it
+against the exact verdicts of `tools/gen-stroke-vectors.py` (an independent model
+in mpmath, run in the pinned oracle image). `tests/unit/test_stroke_matrix.cpp`
+compares the outline with the oracle at every decided point over the case matrix,
+checks that no polygon winds negatively and every vertex is inside the
+conservative stroke box plus the tolerance, and records the deviation profile.
+`tests/unit/test_stroke.cpp` covers the parameters, statuses, parts, hash, dump,
+limits and allocation failure.
+
+### The revision
+
+`GSHGEOM_STROKE_REVISION` and `gshgeom_stroke_revision()` number the
+construction. The number is recorded where a rebaseline lives and is in no hash;
+there is no selector for an older revision.
+
+| Revision | What it was |
+|---|---|
+| 1 | The pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. |
 
 ## Tests and gates
 

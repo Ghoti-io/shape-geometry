@@ -43,6 +43,7 @@
 #include <ghoti.io/shape-geometry/macros.h>
 
 #include <stddef.h>
+#include <stdint.h>
 
 /** The most terms one call takes. */
 #define GSHGEOM_EXACT_MAX_TERMS 32
@@ -72,5 +73,32 @@ void gshgeom_exact_put_det3(GSHGEOM_ExactTerm * t, size_t * n, int neg,
  * (a caller bug otherwise; zero is returned).
  */
 int gshgeom_exact_sign(const GSHGEOM_ExactTerm * terms, size_t count);
+
+/* --- the wide sum (sum.c) ------------------------------------------------------- */
+
+/** The most factors one term of the wide sum takes. */
+#define GSHGEOM_EXACT_SUM_FACTORS 12
+/** Words of one product of GSHGEOM_EXACT_SUM_FACTORS mantissas (53 bits each, two words each). */
+#define GSHGEOM_EXACT_SUM_PRODUCT_WORDS 24
+/** The wide accumulator: 25,600 bits of two's complement (sum.c says why that is enough). */
+#define GSHGEOM_EXACT_SUM_WORDS 800
+
+/**
+ * An exact sum of products of up to twelve doubles, built term by term.  Its
+ * sign is exact for any number of terms below a few thousand.
+ */
+typedef struct GSHGEOM_ExactSum {
+  uint32_t w[GSHGEOM_EXACT_SUM_WORDS]; ///< The sum times 2^12888, two's complement, least significant first.
+  int bad;                             ///< Set by a term with a non-finite factor or a bad count (a caller bug).
+} GSHGEOM_ExactSum;
+
+/** Start an empty sum. */
+void gshgeom_exact_sum_init(GSHGEOM_ExactSum * s);
+
+/** Add `(-1)^neg * f[0] * ... * f[n-1]`, `n` from 1 to GSHGEOM_EXACT_SUM_FACTORS, every factor finite. */
+void gshgeom_exact_sum_add(GSHGEOM_ExactSum * s, int neg, int n, const double * f);
+
+/** The sign of the sum: -1, 0 or +1, exactly (0 after a bad term). */
+int gshgeom_exact_sum_sign(const GSHGEOM_ExactSum * s);
 
 #endif /* GHOTI_IO_GSHGEOM_EXACT_H */
