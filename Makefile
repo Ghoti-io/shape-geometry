@@ -785,6 +785,11 @@ LDCONF_INSTALL_PATH ?= /etc/ld.so.conf.d
 PC_REQUIRES := $(DEP_PCS)
 PKGCONFIG_INSTALL_PATH ?= $(PC_INSTALL_PATH)
 
+# What a library that strokes takes from this one for its tests (strokes story S4): the geometric oracle of a stroke
+# (tests/stroke_oracle.h), installed as <ghoti.io/shape-geometry/testing/stroke_oracle.h> so that a sink is gated
+# against the installed text, through pkg-config, as this library's own tests are.  C++; only a test includes it.
+TESTING_HEADERS := tests/stroke_oracle.h
+
 install: all ## Install the library
 	@mkdir -p $(LIB_INSTALL_PATH)/$(SUITE)
 ifeq ($(OS_NAME), Linux)
@@ -807,6 +812,8 @@ endif
 	@if [ -d $(GEN_DIR)/ghoti.io ]; then \
 		cp -r $(GEN_DIR)/ghoti.io $(INCLUDE_INSTALL_PATH)/$(SUITE)/$(PROJECT)$(BRANCH)/ ; \
 	fi
+	@mkdir -p $(INCLUDE_INSTALL_PATH)/$(SUITE)/$(PROJECT)$(BRANCH)/ghoti.io/$(PROJECT)/testing
+	@cp $(TESTING_HEADERS) $(INCLUDE_INSTALL_PATH)/$(SUITE)/$(PROJECT)$(BRANCH)/ghoti.io/$(PROJECT)/testing/
 	@mkdir -p $(PKGCONFIG_INSTALL_PATH)
 	@cat pkgconfig/$(SUITE)-$(PROJECT).pc | sed 's/(SUITE)/$(SUITE)/g; s/(PROJECT)/$(PROJECT)/g; s/(BRANCH)/$(BRANCH)/g; s/(VERSION)/$(VERSION)/g; s|(PC_LIB_DIR)|$(PC_LIB_DIR)|g; s|(PC_INCLUDE_DIR)|$(PC_INCLUDE_DIR)|g; s|(REQUIRES)|$(PC_REQUIRES)|g' > $(PKGCONFIG_INSTALL_PATH)/$(SUITE)-$(PROJECT)$(BRANCH).pc
 ifeq ($(OS_NAME), Linux)

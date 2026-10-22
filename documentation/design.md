@@ -194,6 +194,18 @@ pinned from the same kind of model (`tools/gen-hash-vectors.py`, `flatten_model`
 which catches a wrong rounding rule that stays inside the bound (a floor midpoint
 at eight extra bits does).
 
+**The canonical map** (SG31, `gshgeom_stroke_canonical_map`). The expansion rounds every vertex to 26.6 after the
+map, so its bits depend on the map's translation, and an expansion shared between translations would be the
+expansion of another one. The region does not depend on position at all, so a sink splits the translation: the
+whole pixels `(floor tx, floor ty)` and a fraction in `[0, 1)`, expands at the map with the fraction only, and draws
+the outline moved by the whole pixels. The outline is then a function of the centerline, the parameters, the linear
+part and the fraction, the same bits at every whole-pixel translation (a translation that is not exactly a whole
+number of pixels from another has another fraction: `0.3 + 64` rounds in `double`), which is what lets a cache of
+expansions serve a translated stroke and a hit be the miss bit for bit. The split is exact: `t - floor t` is exact
+below 2^52; for a tiny negative `t` the difference would round to 1, which is taken as 0 with the whole pixel one
+more (the error is far below a 26.6 unit); a translation past 2^40 is `ERR_LIMIT`. It is one function here, so that
+every sink that wants these bits (the CPU sink, the test sink) calls the same code.
+
 ### The revision
 
 The flattener is versioned: `GSHGEOM_FLATTEN_REVISION` and

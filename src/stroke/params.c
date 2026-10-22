@@ -32,6 +32,8 @@
 
 #include "stroke_internal.h"
 
+#include <ghoti.io/math/basic.h>
+
 #include <string.h>
 
 /** A finite double: neither NaN nor an infinity (no libm: x - x is 0 exactly when x is finite). */
@@ -171,6 +173,39 @@ GSHGEOM_Result gshgeom_stroke_map_invertible(const GSHGEOM_Map * map, int * inve
     return GSHGEOM_ERR_INTERNAL;
   }
   *invertible = sign != 0;
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_stroke_canonical_map(
+    const GSHGEOM_Map * map, GSHGEOM_Map * canonical, int64_t * shift_x, int64_t * shift_y) {
+  if (!map || !canonical || !shift_x || !shift_y || gshgeom_map_check(map) != GSHGEOM_OK || map->dim != 2) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  const double limit = 0x1p40;
+  if (!(map->t[0] > -limit && map->t[0] < limit && map->t[1] > -limit && map->t[1] < limit)) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  double whole[2];
+  double frac[2];
+  for (int i = 0; i < 2; i++) {
+    double f = gmath_floor(map->t[i]);
+    double d = map->t[i] - f; /* exact below 2^52, but for the one rounding to 1 of a tiny negative translation */
+    if (d >= 1.0) {
+      f += 1.0;
+      d = 0.0;
+    }
+    whole[i] = f;
+    frac[i] = d + 0.0; /* -0 is +0 */
+  }
+  GSHGEOM_Map out = *map;
+  out.t[0] = frac[0];
+  out.t[1] = frac[1];
+  /* The tag says what the values are: a translation only if one is left. */
+  out.kind = frac[0] != 0.0 || frac[1] != 0.0 ? out.kind | (uint32_t)GSHGEOM_MAP_TRANSLATES
+                                               : out.kind & ~(uint32_t)GSHGEOM_MAP_TRANSLATES;
+  *canonical = out;
+  *shift_x = (int64_t)whole[0];
+  *shift_y = (int64_t)whole[1];
   return GSHGEOM_OK;
 }
 

@@ -327,6 +327,14 @@
  * the dot SG21 keeps at the phase is behind the start.  No pen-down element draws
  * nothing (::GSHGEOM_ERR_INVALID), no space is solid.
  *
+ * **SG31 The canonical map** (strokes story S4).  ::gshgeom_stroke_canonical_map splits a 2D map's translation `(tx, ty)`
+ * into its whole pixels `(floor tx, floor ty)` and a fraction in `[0, 1)` (exact in `double`; a fraction that would
+ * round to 1 is 0 with the whole pixel one more; a translation past 2^40 is ::GSHGEOM_ERR_LIMIT).  The region is
+ * translation-invariant (SG6 to SG13 mention no position), so the expansion at the map with the fraction only,
+ * moved by the whole pixels, is the expansion at the map within SG17; and it is a function of the centerline, the
+ * parameters, the linear part and the fraction, the same bits at every whole-pixel translation, which is what lets a
+ * sink share one expansion between them, and every sink that wants these bits call the same code.
+ *
  * ## The hash and the dump (format 1)
  *
  * The hash, in the spelling of hash.h: `u32` 1, `u32` kind `0x4b525453` ("STRK"
@@ -470,6 +478,23 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_check(const GSHGEOM_Stroke * stroke);
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_stroke_map_invertible(
     const GSHGEOM_Map * map, int * invertible);
+
+/**
+ * @brief SG31: split a map's translation so that an expansion can be shared by every whole-pixel translation.
+ *
+ * With `(tx, ty)` the map's translation, `floor` taken exactly, `canonical` is the map with the same linear part and the
+ * translation `(tx - floor tx, ty - floor ty)`, in `[0, 1)` (exact in `double`; a difference that would round to 1 is
+ * taken as 0 with the whole pixels one more), and `*shift_x`, `*shift_y` are the whole pixels `(floor tx, floor ty)`.  The
+ * region of SG6 to SG13 is translation-invariant, so the stroke of `canonical` moved by the whole pixels is the stroke
+ * of the map, SG17 holding at the true map; and the expansion of `canonical` is a function of the centerline, the
+ * parameters, the linear part and the fraction alone, the same bits at every whole-pixel translation.  A sink that
+ * wants those bits (the CPU sink, the test sink) calls this and then ::gshgeom_stroke_expand with `canonical`.
+ *
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for NULL, an invalid or 3D map; ::GSHGEOM_ERR_LIMIT when a translation
+ *   component is past 2^40 in magnitude (its whole pixels would pass any coordinate a sink draws).
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_stroke_canonical_map(
+    const GSHGEOM_Map * map, GSHGEOM_Map * canonical, int64_t * shift_x, int64_t * shift_y);
 
 /**
  * @brief Expand a stroke at the default tolerance (SG16).

@@ -1580,6 +1580,19 @@ STROKE_PLANTS = [
     ('sk-dxf-nudge-sum-short', "src", SKX, '  for (size_t i = 0; i + 2 < k; i++) {\n        at += dashes[i];', '  for (size_t i = 0; i + 3 < k; i++) {\n        at += dashes[i];', STD),
     ('sk-dxf-nudge-always', "src", SKX, '    int dot_last = lead == 0.0 && dashes[k - 1] == 0.0;', '    int dot_last = lead == 0.0;', STD),
     ('sk-dxf-lone-dot-no-offset', "src", SKX, '        off = period * 0x1p-52; /* the only dot', '        off = period * 0x1p-60; /* the only dot', STD),
+    # SG31: the canonical map (strokes story S4)
+    ('sg31-floor-ceiling', 'src', SKP, '    double f = gmath_floor(map->t[i]);', '    double f = -gmath_floor(-map->t[i]);', ["testStroke_canonical"]),
+    ('sg31-fraction-unrounded', 'src', SKP, '    if (d >= 1.0) {\n      f += 1.0;\n      d = 0.0;\n    }', '', ["testStroke_canonical"]),
+    ('sg31-fraction-not-reset', 'src', SKP, '      d = 0.0;\n', '      d = d;\n', ["testStroke_canonical"]),
+    ('sg31-negative-zero', 'src', SKP, '    frac[i] = d + 0.0; /* -0 is +0 */', '    frac[i] = d;', ["testStroke_canonical"]),
+    ('sg31-one-axis', 'src', SKP, '  out.t[1] = frac[1];\n', '  out.t[1] = map->t[1];\n', ["testStroke_canonical"]),
+    ('sg31-shift-x-sign', 'src', SKP, '  *shift_x = (int64_t)whole[0];', '  *shift_x = -(int64_t)whole[0];', ["testStroke_canonical"]),
+    ('sg31-shift-y-swapped', 'src', SKP, '  *shift_y = (int64_t)whole[1];', '  *shift_y = (int64_t)whole[0];', ["testStroke_canonical"]),
+    ('sg31-limit-open', 'src', SKP, '  const double limit = 0x1p40;', '  const double limit = 0x1p80;', ["testStroke_canonical"]),
+    ('sg31-limit-y-unchecked', 'src', SKP, ' && map->t[1] > -limit && map->t[1] < limit)) {', ')) {', ["testStroke_canonical"]),
+    ('sg31-linear-part-dropped', 'src', SKP, '  GSHGEOM_Map out = *map;', '  GSHGEOM_Map out = *map;\n  out.m[0][1] = 0.0;', ["testStroke_canonical"]),
+    ('sg31-3d-accepted', 'src', SKP, 'gshgeom_map_check(map) != GSHGEOM_OK || map->dim != 2) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double limit', 'gshgeom_map_check(map) != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double limit', ["testStroke_canonical"]),
+    ('sg31-kind-stale', 'src', SKP, '  out.kind = frac[0] != 0.0 || frac[1] != 0.0 ?', '  out.kind = 1 ?', ["testStroke_canonical"]),
 ]
 
 PLANTS += STROKE_PLANTS
