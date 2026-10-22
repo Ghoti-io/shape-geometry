@@ -752,6 +752,110 @@ int main(void) {
     }
   }
 
+  /* Dashed strokes (stroke.h, SG19 to SG30), appended after the solid ones so that every earlier result is unchanged:
+   * the same kind of random paths under five dash patterns (a dot pattern, an odd array and a zero gap among them),
+   * offsets either side of zero, both scopes, every join and cap, both width spaces and every alignment.  The cut
+   * positions come from along.h's quadrature and the pattern's arithmetic, the dots' directions from the
+   * hodograph: a fused multiply-add, an excess of precision or a libm call moves a dash end and with it the hash. */
+  {
+    static const double pat0[2] = {2.5, 1.5}, pat1[3] = {1.0, 2.0, 3.0}, pat2[2] = {0.0, 1.75},
+                        pat3[4] = {4.0, 1.0, 0.5, 1.0}, pat4[2] = {0.75, 0.25};
+    static const double * const pats[5] = {pat0, pat1, pat2, pat3, pat4};
+    static const size_t counts[5] = {2, 3, 2, 4, 2};
+    GSHGEOM_Map rot, sc, m;
+    if (gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 17.0, &rot) != GSHGEOM_OK ||
+        gshgeom_map_scale(2, 6.0, 4.5, 1.0, &sc) != GSHGEOM_OK || gshgeom_map_compose(&rot, &sc, &m) != GSHGEOM_OK) {
+      return fail("dash map");
+    }
+    for (int i = 0; i < 60; i++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("path create failed");
+      }
+      GSHGEOM_Result r = gshgeom_path_move_to(path, random_point(2));
+      int steps = 1 + (int)(next() % 4);
+      for (int k = 0; k < steps && r == GSHGEOM_OK; k++) {
+        double w3[3], w4[4];
+        for (int j = 0; j < 3; j++) {
+          w3[j] = weight();
+        }
+        for (int j = 0; j < 4; j++) {
+          w4[j] = weight();
+        }
+        GSHGEOM_Point q1 = random_point(2);
+        GSHGEOM_Point q2 = random_point(2);
+        GSHGEOM_Point q3 = random_point(2);
+        switch (next() % 7) {
+        case 0:
+          r = gshgeom_path_line_to(path, q1);
+          break;
+        case 1:
+          r = gshgeom_path_quadratic_to(path, q1, q2);
+          break;
+        case 2:
+          r = gshgeom_path_cubic_to(path, q1, q2, q3);
+          break;
+        case 3:
+          r = gshgeom_path_rational_quadratic_to(path, q1, q2, w3);
+          break;
+        case 4:
+          r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4);
+          break;
+        case 5:
+          r = gshgeom_path_move_to(path, q1);
+          break;
+        default:
+          r = gshgeom_path_close(path);
+          break;
+        }
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a dashed stroke path step was refused");
+      }
+      GSHGEOM_Stroke s;
+      gshgeom_stroke_init(&s);
+      s.width = 0.25 + (double)(next() % 32) / 32.0;
+      s.join = (uint32_t)(i % 5);
+      s.cap = (uint32_t)((i / 5) % 3);
+      s.width_space = (uint32_t)((i / 15) % 2);
+      s.alignment = (uint32_t)((i / 30) % 3);
+      s.miter_limit = 1.0 + (double)(next() % 16) / 2.0;
+      s.dashes = pats[i % 5];
+      s.dash_count = counts[i % 5];
+      s.dash_offset = (double)((int)(next() % 9) - 3) * 0.75;
+      s.dash_scope = (uint32_t)((i / 5) % 2);
+      if (s.width_space == GSHGEOM_STROKE_WIDTH_DEVICE) {
+        s.width = s.width * 4.0;
+      }
+      GSHGEOM_Stroke_Outline * o = NULL;
+      r = gshgeom_stroke_expand_with_tolerance(path, &s, &m, (i % 4 == 3) ? 2 : GSHGEOM_FLATTEN_TOLERANCE, NULL, NULL,
+          &o);
+      feed_int((int)r);
+      count++;
+      if (r == GSHGEOM_OK) {
+        gshgeom_hash_u64(&total, gshgeom_stroke_outline_hash(o));
+        feed_int((int)gshgeom_flat_path_point_count(gshgeom_stroke_outline_body(o)));
+      }
+      gshgeom_stroke_outline_destroy(o);
+      gshgeom_path_destroy(path);
+    }
+    /* the DXF lowering of a few patterns, and the positions of a pattern on a few lengths */
+    {
+      static const double dxf[6] = {0.5, -0.25, 0.0, -0.25, 1.25, -0.125};
+      double out[8];
+      size_t n = 0;
+      double off = 0.0;
+      GSHGEOM_Result rr = gshgeom_stroke_dashes_from_dxf(dxf, 6, 3.0, out, 8, &n, &off);
+      feed_int((int)rr);
+      feed_int((int)n);
+      for (size_t k = 0; k < n; k++) {
+        feed(out[k]);
+      }
+      feed(off);
+      count++;
+    }
+  }
+
   printf("shape-geometry.hash %016" PRIx64 "\n", gshgeom_hash_value(&total));
   printf("shape-geometry.count %lu\n", count);
   return 0;
