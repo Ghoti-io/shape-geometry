@@ -405,40 +405,48 @@ test-watch: ## Watch sources and rerun the tests
 
 examples: $(APP_DIR)/$(TARGET) $(EXAMPLES) ## Build the examples
 
-# The fuzz target (story 16; CAP-15, AD-19), replayed over its committed corpus in an ordinary build: no libFuzzer,
-# no clang. The replay fails on no input and on a corpus that misses one of the outcomes the target lists, and the
-# corpus must be what tools/gen-fuzz-corpus.py writes.
-FUZZ_INPUTS = $(shell find tests/fuzz/corpus/path -type f 2>/dev/null | sort)
+# The fuzz targets (story 16; CAP-15, AD-19): fuzz_path (path building, maps, flattening, measuring) and fuzz_stroke
+# (the stroke expansion), each replayed over its committed corpus in an ordinary build: no libFuzzer, no clang. The
+# replay fails on no input and on a corpus that misses one of the outcomes the target lists, and each corpus must be
+# what tools/gen-fuzz-corpus.py writes.
+FUZZ_TARGETS := path stroke
+FUZZ_INPUTS_path = $(shell find tests/fuzz/corpus/path -type f 2>/dev/null | sort)
+FUZZ_INPUTS_stroke = $(shell find tests/fuzz/corpus/stroke -type f 2>/dev/null | sort)
+FUZZ_INPUTS = $(FUZZ_INPUTS_path)
 REPLAY := $(APP_DIR)/fuzz/replay_path$(EXE_EXTENSION)
+REPLAYS := $(foreach f,$(FUZZ_TARGETS),$(APP_DIR)/fuzz/replay_$(f)$(EXE_EXTENSION))
+REPLAYS_PLANTED := $(foreach f,$(FUZZ_TARGETS),$(APP_DIR)/fuzz/replay_$(f)_planted$(EXE_EXTENSION))
 
-$(REPLAY): tests/fuzz/fuzz_path.c tests/fuzz/replay_main.c $(APP_DIR)/$(STATIC_TARGET) \
+$(APP_DIR)/fuzz/replay_%$(EXE_EXTENSION): tests/fuzz/fuzz_%.c tests/fuzz/replay_main.c $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_path.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
+	$(CC) $(CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_$*.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
-check-fuzz-corpus: ## Fail if the committed fuzz corpus is not what tools/gen-fuzz-corpus.py writes
+check-fuzz-corpus: ## Fail if the committed fuzz corpora are not what tools/gen-fuzz-corpus.py writes
 	@python3 tools/gen-fuzz-corpus.py --check
 
-# The gate is seen to fail twice before it is believed: the replay built with GSHGEOM_FUZZ_PLANT (one flattened point
-# moved past the box the harness checks) must abort on the corpus, and the real replay over one file must refuse a
+# Each gate is seen to fail twice before it is believed: the replay built with GSHGEOM_FUZZ_PLANT (a planted
+# violation of what the harness checks) must abort on the corpus, and the real replay over one file must refuse a
 # corpus that leaves an outcome unreached.
-REPLAY_PLANTED := $(APP_DIR)/fuzz/replay_path_planted$(EXE_EXTENSION)
-
-$(REPLAY_PLANTED): tests/fuzz/fuzz_path.c tests/fuzz/replay_main.c $(APP_DIR)/$(STATIC_TARGET) \
+$(APP_DIR)/fuzz/replay_%_planted$(EXE_EXTENSION): tests/fuzz/fuzz_%.c tests/fuzz/replay_main.c $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -DGSHGEOM_FUZZ_PLANT $(INCLUDE) -o $@ tests/fuzz/fuzz_path.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
+	$(CC) $(CFLAGS) -DGSHGEOM_FUZZ_PLANT $(INCLUDE) -o $@ tests/fuzz/fuzz_$*.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
-fuzz-replay: $(REPLAY) $(REPLAY_PLANTED) ## Feed every corpus file once through the fuzz entry point
-	@if [ -z "$(strip $(FUZZ_INPUTS))" ]; then printf 'fuzz-replay: the corpus is empty; this measures nothing\n' >&2; exit 1; fi
-	@if LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(REPLAY_PLANTED) $(FUZZ_INPUTS) > $(BUILD_DIR)/fuzz-planted.out 2>&1; then \
-		printf 'fuzz-replay: FAIL: the planted replay passed; the harness checks nothing\n' >&2; exit 1; fi
-	@grep -q 'invariant failed' $(BUILD_DIR)/fuzz-planted.out || { printf 'fuzz-replay: FAIL: the planted replay failed for another reason\n' >&2; cat $(BUILD_DIR)/fuzz-planted.out >&2; exit 1; }
-	@if LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(REPLAY) $(firstword $(FUZZ_INPUTS)) > $(BUILD_DIR)/fuzz-one.out 2>&1; then \
-		printf 'fuzz-replay: FAIL: one input reached every outcome; the outcome check checks nothing\n' >&2; exit 1; fi
-	@grep -q 'never reached' $(BUILD_DIR)/fuzz-one.out || { printf 'fuzz-replay: FAIL: one input failed for another reason\n' >&2; cat $(BUILD_DIR)/fuzz-one.out >&2; exit 1; }
-	@printf 'fuzz-replay: the planted replay aborted and one input left outcomes unreached, as they must\n'
-	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(REPLAY) $(FUZZ_INPUTS)
+fuzz-replay: $(REPLAYS) $(REPLAYS_PLANTED) ## Feed every corpus file once through each fuzz entry point
+	@for f in $(FUZZ_TARGETS); do \
+		case $$f in path) inputs="$(FUZZ_INPUTS_path)";; stroke) inputs="$(FUZZ_INPUTS_stroke)";; esac; \
+		first=$$(printf '%s\n' $$inputs | head -n 1); \
+		if [ -z "$$inputs" ]; then printf 'fuzz-replay: the %s corpus is empty; this measures nothing\n' "$$f" >&2; exit 1; fi; \
+		if LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(APP_DIR)/fuzz/replay_$${f}_planted$(EXE_EXTENSION) $$inputs > $(BUILD_DIR)/fuzz-$$f-planted.out 2>&1; then \
+			printf 'fuzz-replay: FAIL: the planted %s replay passed; the harness checks nothing\n' "$$f" >&2; exit 1; fi; \
+		grep -q 'invariant failed' $(BUILD_DIR)/fuzz-$$f-planted.out || { printf 'fuzz-replay: FAIL: the planted %s replay failed for another reason\n' "$$f" >&2; cat $(BUILD_DIR)/fuzz-$$f-planted.out >&2; exit 1; }; \
+		if LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(APP_DIR)/fuzz/replay_$$f$(EXE_EXTENSION) $$first > $(BUILD_DIR)/fuzz-$$f-one.out 2>&1; then \
+			printf 'fuzz-replay: FAIL: one %s input reached every outcome; the outcome check checks nothing\n' "$$f" >&2; exit 1; fi; \
+		grep -q 'never reached' $(BUILD_DIR)/fuzz-$$f-one.out || { printf 'fuzz-replay: FAIL: one %s input failed for another reason\n' "$$f" >&2; cat $(BUILD_DIR)/fuzz-$$f-one.out >&2; exit 1; }; \
+		printf 'fuzz-replay: %s: the planted replay aborted and one input left outcomes unreached, as they must\n' "$$f"; \
+		LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(APP_DIR)/fuzz/replay_$$f$(EXE_EXTENSION) $$inputs || exit 1; \
+	done
 
 # Every example is run, not only compiled (story 16): one that is only compiled rots unseen, its calls still linking
 # while what it claims stops being true. Each example checks what it shows and exits non-zero when that does not
@@ -723,23 +731,26 @@ $(foreach pair,$(TEST_PAIRS),\
 
 ASAN_TEST_EXECUTABLES := $(addprefix $(ASAN_APP_DIR)/,$(addsuffix $(EXE_EXTENSION),$(TEST_NAMES)))
 ASAN_RUNTIME := $(shell $(CC) -print-file-name=libasan.so 2>/dev/null)
-ASAN_REPLAY := $(ASAN_APP_DIR)/fuzz/replay_path$(EXE_EXTENSION)
+ASAN_REPLAYS := $(foreach f,$(FUZZ_TARGETS),$(ASAN_APP_DIR)/fuzz/replay_$(f)$(EXE_EXTENSION))
 
-$(ASAN_REPLAY): tests/fuzz/fuzz_path.c tests/fuzz/replay_main.c $(ASAN_ARCHIVE) $(ASAN_FLAGS_STAMP)
+$(ASAN_APP_DIR)/fuzz/replay_%$(EXE_EXTENSION): tests/fuzz/fuzz_%.c tests/fuzz/replay_main.c $(ASAN_ARCHIVE) $(ASAN_FLAGS_STAMP)
 	@mkdir -p $(@D)
-	$(CC) $(ASAN_CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_path.c tests/fuzz/replay_main.c $(ASAN_LDFLAGS) $(ASAN_SELF_LIBRARY) $(DEP_LIBS)
+	$(CC) $(ASAN_CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_$*.c tests/fuzz/replay_main.c $(ASAN_LDFLAGS) $(ASAN_SELF_LIBRARY) $(DEP_LIBS)
 
-test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAY) ## Build with ASan+UBSan and run the tests, and the fuzz replay
+test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAYS) ## Build with ASan+UBSan and run the tests, and the fuzz replays
 	@for test_exe in $(ASAN_TEST_EXECUTABLES); do \
 		printf '\n### ASan+UBSan %s ###\n\n' "$$(basename $$test_exe)"; \
 		LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
 			$$test_exe --gtest_brief=1 || exit 1; \
 	done
-	@printf '\n### ASan+UBSan fuzz replay ###\n\n'
+	@printf '\n### ASan+UBSan fuzz replays ###\n\n'
 	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
-			$(ASAN_REPLAY) $(FUZZ_INPUTS)
+			$(ASAN_APP_DIR)/fuzz/replay_path$(EXE_EXTENSION) $(FUZZ_INPUTS_path)
+	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
+		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
+			$(ASAN_APP_DIR)/fuzz/replay_stroke$(EXE_EXTENSION) $(FUZZ_INPUTS_stroke)
 	@printf '\nASan+UBSan suite clean.\n'
 
 ####################################################################
@@ -747,18 +758,21 @@ test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAY) ## Build with ASan+UBSan and 
 ####################################################################
 
 # libFuzzer needs clang; `make fuzz-replay` (in `make test`) needs only the compiler of the build. The set below names
-# -ffp-contract=off, which check-fp-contract reads. The whole library is compiled into the fuzzer, instrumented.
+# -ffp-contract=off, which check-fp-contract reads. The whole library is compiled into each fuzzer, instrumented.
+# FUZZ_ONLY=stroke runs one target.
 FUZZ_CC ?= clang
 FUZZ_TIME ?= 60
 FUZZ_CFLAGS := -std=c17 -O1 -g -ffp-contract=off $(ARCH_FP_FLAGS) -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -DGSHGEOM_BUILD
 
-fuzz: | $(LIBVER_GEN) ## Build the libFuzzer target and run it for FUZZ_TIME seconds from the committed corpus
+fuzz: | $(LIBVER_GEN) ## Build the libFuzzer targets and run each for FUZZ_TIME seconds from its committed corpus
 	@if ! command -v $(FUZZ_CC) >/dev/null 2>&1; then \
-		printf 'fuzz: needs %s (libFuzzer); `make fuzz-replay` runs the committed corpus without it\n' "$(FUZZ_CC)" >&2; exit 1; \
+		printf 'fuzz: needs %s (libFuzzer); `make fuzz-replay` runs the committed corpora without it\n' "$(FUZZ_CC)" >&2; exit 1; \
 	fi
-	@mkdir -p $(BUILD_DIR)/fuzz $(BUILD_DIR)/fuzz-corpus
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(INCLUDE) -o $(BUILD_DIR)/fuzz/fuzz_path tests/fuzz/fuzz_path.c $(SOURCES) $(LDFLAGS) $(DEP_LIBS)
-	LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(BUILD_DIR)/fuzz/fuzz_path -max_total_time=$(FUZZ_TIME) $(BUILD_DIR)/fuzz-corpus tests/fuzz/corpus/path
+	@for f in $(or $(FUZZ_ONLY),$(FUZZ_TARGETS)); do \
+		mkdir -p $(BUILD_DIR)/fuzz $(BUILD_DIR)/fuzz-corpus-$$f || exit 1; \
+		$(FUZZ_CC) $(FUZZ_CFLAGS) $(INCLUDE) -o $(BUILD_DIR)/fuzz/fuzz_$$f tests/fuzz/fuzz_$$f.c $(SOURCES) $(LDFLAGS) $(DEP_LIBS) || exit 1; \
+		LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(BUILD_DIR)/fuzz/fuzz_$$f -max_total_time=$(FUZZ_TIME) $(BUILD_DIR)/fuzz-corpus-$$f tests/fuzz/corpus/$$f || exit 1; \
+	done
 
 fuzz-clean: ## Remove the fuzz build
 	-@rm -rf $(BUILD_DIR)/fuzz

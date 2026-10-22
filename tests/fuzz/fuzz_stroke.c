@@ -1,0 +1,519 @@
+/*
+ * SPDX-License-Identifier: LGPL-3.0-only
+ *
+ * Copyright (C) 2026 Corey Pennycuff
+ *
+ * This file is part of Ghoti.io Shape Geometry.
+ *
+ * Ghoti.io Shape Geometry is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * Ghoti.io Shape Geometry is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file
+ *
+ * The stroke expansion driven by bytes (stroke.h): one entry point for
+ * libFuzzer and for the replay gate (`make fuzz-replay`).
+ *
+ * Three header bytes choose the limits, the allocation that fails and the
+ * tolerance.  Then the parameters, every field drawn so that it can be valid or
+ * not (an enumeration one past its range, a non-finite width, dashes, a width
+ * profile, a reserved byte); a map built from translations, scales, rotations and
+ * raw matrices; and a centerline of every verb, its coordinates from a table of
+ * degenerate values or from the bytes.  After each expansion the library's
+ * stated properties are checked, and a violation is an `abort`:
+ *
+ * - the result is one the header lists, a failure returns no outline and the
+ *   counting allocator holds nothing live at the end;
+ * - a status has the parts SG14 to SG16 give it, the alignment part exactly when
+ *   a closed subpath with extent is aligned;
+ * - every subpath of every part is closed and has at least three points, no part
+ *   holds more points than `max_points`, and no subpath winds negatively (the fan
+ *   of each from its first vertex has no negative triangle, decided exactly);
+ * - every vertex of body and aligned lies in the conservative stroke box (the
+ *   centerline's box outset by the half width times the join's and the cap's
+ *   factors, mapped as the width space says) plus the tolerance and a pixel;
+ * - the hash is the same when the expansion is asked twice.
+ *
+ * The replay fails if the corpus never reaches an outcome; tools/gen-fuzz-corpus.py
+ * writes it.
+ */
+
+#include <ghoti.io/shape-geometry/shape-geometry.h>
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CHECK(cond) \
+  do { \
+    if (!(cond)) { \
+      fprintf(stderr, "fuzz_stroke: invariant failed: %s (line %d)\n", #cond, __LINE__); \
+      abort(); \
+    } \
+  } while (0)
+
+/* --- the outcomes the corpus must reach ----------------------------------------------------------- */
+
+enum {
+  OUT_DRAWN = 0, OUT_EMPTY, OUT_NOT_INVERTIBLE, OUT_INVALID, OUT_UNSUPPORTED, OUT_LIMIT, OUT_OOM, OUT_ALIGNED,
+  OUT_CURVE, OUT_ARCS, OUT_DEVICE, OUT_DEGENERATE, OUT_COUNT
+};
+
+static const char * const outcome_names[OUT_COUNT] = {"an outline drawn", "width 0 (EMPTY)",
+    "a singular map (NOT_INVERTIBLE)", "an invalid argument refused", "an unsupported stroke refused",
+    "a limit refused", "a failed allocation", "an aligned part", "a curve stroked", "an arcs join drawn",
+    "device width drawn", "a degenerate subpath drawn"};
+
+static unsigned long outcomes[OUT_COUNT];
+
+int gshgeom_fuzz_unreached(void);
+
+int gshgeom_fuzz_unreached(void) {
+  int missing = 0;
+  for (int i = 0; i < OUT_COUNT; i++) {
+    if (outcomes[i] == 0) {
+      fprintf(stderr, "fuzz_stroke: the corpus never reached: %s\n", outcome_names[i]);
+      missing++;
+    }
+  }
+  return missing;
+}
+
+/* --- a counting allocator that can fail one call -------------------------------------------------- */
+
+typedef struct Counter {
+  long live;
+  long calls;
+  long fail_at; /* -1 never */
+  int failed;
+} Counter;
+
+static int fails(Counter * c) {
+  if (c->fail_at >= 0 && c->calls++ == c->fail_at) {
+    c->failed = 1;
+    return 1;
+  }
+  return 0;
+}
+
+static void * c_malloc(void * ctx, size_t n) {
+  Counter * c = ctx;
+  void * p = fails(c) ? NULL : malloc(n ? n : 1);
+  c->live += p != NULL;
+  return p;
+}
+
+static void * c_calloc(void * ctx, size_t k, size_t n) {
+  Counter * c = ctx;
+  void * p = fails(c) ? NULL : calloc(k ? k : 1, n ? n : 1);
+  c->live += p != NULL;
+  return p;
+}
+
+static void * c_realloc(void * ctx, void * old, size_t n) {
+  Counter * c = ctx;
+  void * p = fails(c) ? NULL : realloc(old, n ? n : 1);
+  c->live += p != NULL && old == NULL;
+  return p;
+}
+
+static void c_free(void * ctx, void * p) {
+  ((Counter *)ctx)->live -= p != NULL;
+  free(p);
+}
+
+/* --- the input ---------------------------------------------------------------------------------------- */
+
+typedef struct Input {
+  const uint8_t * data;
+  size_t size;
+  size_t at;
+} Input;
+
+static uint8_t next(Input * in) {
+  return in->at < in->size ? in->data[in->at++] : 0;
+}
+
+/** A coordinate: a degenerate value from the table, or a number in 1/16 from two bytes. */
+static double coordinate(Input * in) {
+  static const double table[] = {0.0, -0.0, 1.0, -1.0, 0.5, 1.0 / 64.0, 4.9406564584124654e-324, 2.2250738585072014e-308,
+      33554431.0, 33554432.0, 0x1p100, -0x1p100, 1e300, 0x1p-64, 0x1p64, 1e-9, 3.0, 8.0};
+  const uint8_t pick = next(in);
+  if (pick < 20) {
+    const size_t n = sizeof table / sizeof table[0];
+    if (pick < n) {
+      return table[pick];
+    }
+    volatile double zero = 0.0;
+    return pick == 18 ? zero / zero : 1.0 / zero;
+  }
+  const unsigned hi = next(in);
+  const unsigned lo = next(in);
+  return (double)(int16_t)(uint16_t)((hi << 8) | lo) / 16.0;
+}
+
+static GSHGEOM_Point point(Input * in) {
+  GSHGEOM_Point p = {0.0, 0.0, 0.0};
+  p.x = coordinate(in);
+  p.y = coordinate(in);
+  return p;
+}
+
+static void weights(Input * in, double * w, int n) {
+  static const double table[] = {1.0, 0.70710678118654752, 2.0, 0.0, 1e-6, 1e6, 0.5, 3.0};
+  for (int i = 0; i < n; i++) {
+    w[i] = table[next(in) % (sizeof table / sizeof table[0])];
+  }
+}
+
+static GSHGEOM_Result build_map(Input * in, GSHGEOM_Map * map) {
+  GSHGEOM_Map step;
+  GSHGEOM_Result r = gshgeom_map_identity(2, map);
+  const int steps = next(in) % 4;
+  for (int i = 0; i < steps && r == GSHGEOM_OK; i++) {
+    double v[6];
+    switch (next(in) % 5) {
+    case 0:
+      for (int k = 0; k < 2; k++) {
+        v[k] = coordinate(in);
+      }
+      r = gshgeom_map_translate(2, v[0], v[1], 0.0, &step);
+      break;
+    case 1:
+      for (int k = 0; k < 2; k++) {
+        v[k] = coordinate(in);
+      }
+      r = gshgeom_map_scale(2, v[0], v[1], 1.0, &step);
+      break;
+    case 2: {
+      const GSHGEOM_Angle_Unit unit = (GSHGEOM_Angle_Unit)(next(in) % 4);
+      r = gshgeom_map_rotate(unit, coordinate(in), &step);
+      break;
+    }
+    case 3:
+      for (int k = 0; k < 6; k++) {
+        v[k] = coordinate(in);
+      }
+      r = gshgeom_map_from_matrix(2, v, v + 4, &step);
+      break;
+    default:
+      r = gshgeom_map_flip_y(2, &step);
+      break;
+    }
+    if (r == GSHGEOM_OK) {
+      GSHGEOM_Map outer = *map;
+      r = gshgeom_map_compose(&step, &outer, map);
+    }
+  }
+  return r;
+}
+
+static GSHGEOM_Path * build_path(Input * in, const GSHGEOM_Allocator * alloc, int * curved) {
+  GSHGEOM_Path * p = NULL;
+  int dim = next(in) == 7 ? 3 : 2;
+  if (gshgeom_path_create(alloc, NULL, dim, &p) != GSHGEOM_OK) {
+    return NULL;
+  }
+  const int ops = next(in) % 24;
+  for (int i = 0; i < ops; i++) {
+    double w[4];
+    switch (next(in) % 7) {
+    case 0:
+      (void)gshgeom_path_move_to(p, point(in));
+      break;
+    case 1:
+      (void)gshgeom_path_line_to(p, point(in));
+      break;
+    case 2: {
+      GSHGEOM_Point c = point(in);
+      GSHGEOM_Point e = point(in);
+      *curved |= gshgeom_path_quadratic_to(p, c, e) == GSHGEOM_OK;
+      break;
+    }
+    case 3: {
+      GSHGEOM_Point c1 = point(in);
+      GSHGEOM_Point c2 = point(in);
+      GSHGEOM_Point e = point(in);
+      *curved |= gshgeom_path_cubic_to(p, c1, c2, e) == GSHGEOM_OK;
+      break;
+    }
+    case 4: {
+      GSHGEOM_Point c = point(in);
+      GSHGEOM_Point e = point(in);
+      weights(in, w, 3);
+      *curved |= gshgeom_path_rational_quadratic_to(p, c, e, w) == GSHGEOM_OK;
+      break;
+    }
+    case 5: {
+      GSHGEOM_Point c1 = point(in);
+      GSHGEOM_Point c2 = point(in);
+      GSHGEOM_Point e = point(in);
+      weights(in, w, 4);
+      *curved |= gshgeom_path_rational_cubic_to(p, c1, c2, e, w) == GSHGEOM_OK;
+      break;
+    }
+    default:
+      (void)gshgeom_path_close(p);
+      break;
+    }
+  }
+  return p;
+}
+
+static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, int * profile) {
+  gshgeom_stroke_init(s);
+  s->width = coordinate(in);
+  s->width_space = next(in) % 3;
+  s->join = next(in) % 6;
+  s->miter_limit = coordinate(in);
+  s->cap = next(in) % 4;
+  s->degenerate = next(in) % 3;
+  s->alignment = next(in) % 4;
+  s->alignment_rule = (GSHGEOM_Fill_Rule)(next(in) % 3);
+  switch (next(in) % 8) {
+  case 1:
+    dashes[0] = coordinate(in);
+    dashes[1] = coordinate(in);
+    s->dashes = dashes;
+    s->dash_count = 2;
+    break;
+  case 2:
+    dashes[0] = coordinate(in);
+    dashes[1] = coordinate(in);
+    dashes[2] = coordinate(in);
+    s->dashes = dashes;
+    s->dash_count = 3;
+    break;
+  case 3:
+    s->dash_count = 2; /* NULL dashes */
+    break;
+  case 4:
+    s->width_profile = profile;
+    break;
+  case 5:
+    s->_reserved[next(in) % 8] = 1;
+    break;
+  default:
+    break;
+  }
+}
+
+static double absd(double x) {
+  return x < 0 ? -x : x;
+}
+
+/** The conservative box (see the file comment) in device pixels, or 0 when there is nothing to bound. */
+static int stroke_box(const GSHGEOM_Path * p, const GSHGEOM_Stroke * s, const GSHGEOM_Map * m, double box[4]) {
+  GSHGEOM_Bounds b;
+  if (gshgeom_path_bounds(p, &b) != GSHGEOM_OK) {
+    return 0;
+  }
+  double x0 = b.min.x, y0 = b.min.y, x1 = b.max.x, y1 = b.max.y;
+  int any = !b.empty;
+  size_t n = gshgeom_path_element_count(p);
+  for (size_t i = 0; i < n; i++) {
+    GSHGEOM_Element el;
+    (void)gshgeom_path_element(p, i, &el);
+    /* every point any subpath starts at (a degenerate subpath is its point) */
+    double x = el.curve.p[0].x, y = el.curve.p[0].y;
+    if (!any) {
+      x0 = x1 = x;
+      y0 = y1 = y;
+      any = 1;
+    }
+    x0 = x < x0 ? x : x0;
+    x1 = x > x1 ? x : x1;
+    y0 = y < y0 ? y : y0;
+    y1 = y > y1 ? y : y1;
+  }
+  if (!any) {
+    return 0;
+  }
+  if (s->join == GSHGEOM_STROKE_JOIN_ARCS) {
+    /* the arcs join's region is bounded by arcs that can curl a long way round (two curved segments at a reversal,
+     * circles of any radius), so no box from the path and the width bounds it; its extent is checked against the
+     * geometric oracle instead (tests/unit/test_stroke_matrix.cpp) */
+    return 0;
+  }
+  double f = 1.0;
+  if (s->join == GSHGEOM_STROKE_JOIN_MITER) {
+    f = s->miter_limit > f ? s->miter_limit : f;
+  }
+  if (s->join == GSHGEOM_STROKE_JOIN_MITER_CLIP) {
+    /* the clipped tip's corners are L h along the bisector and up to h to the side: within (L + 1) h */
+    f = s->miter_limit + 1.0 > f ? s->miter_limit + 1.0 : f;
+  }
+  if (s->cap == GSHGEOM_STROKE_CAP_SQUARE && f < 1.5) {
+    f = 1.5;
+  }
+  double hb = s->width / 2.0 * f * (s->alignment == GSHGEOM_STROKE_ALIGN_CENTER ? 1.0 : 2.0);
+  double out = 0.0;
+  if (s->width_space == GSHGEOM_STROKE_WIDTH_LOCAL) {
+    x0 -= hb;
+    y0 -= hb;
+    x1 += hb;
+    y1 += hb;
+  } else {
+    out = hb;
+  }
+  double xs[4] = {x0, x1, x1, x0}, ys[4] = {y0, y0, y1, y1};
+  box[0] = box[1] = 1e308;
+  box[2] = box[3] = -1e308;
+  for (int k = 0; k < 4; k++) {
+    double dx = m->m[0][0] * xs[k] + m->m[0][1] * ys[k] + m->t[0];
+    double dy = m->m[1][0] * xs[k] + m->m[1][1] * ys[k] + m->t[1];
+    box[0] = dx - out < box[0] ? dx - out : box[0];
+    box[1] = dy - out < box[1] ? dy - out : box[1];
+    box[2] = dx + out > box[2] ? dx + out : box[2];
+    box[3] = dy + out > box[3] ? dy + out : box[3];
+  }
+  return 1;
+}
+
+/* `oriented`: every ring has three vertices and is positively oriented (the body and the aligned part, written as
+ * positively wound pieces);
+ * the clip part is a fill of the centerline under the alignment rule, so its rings may wind either way */
+static void check_part(const GSHGEOM_Flat_Path * fp, size_t max_points, const double * box, double slack,
+    int oriented) {
+  if (!fp) {
+    return;
+  }
+  CHECK(gshgeom_flat_path_point_count(fp) <= max_points);
+  const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(fp);
+  size_t ns = gshgeom_flat_path_subpath_count(fp);
+  for (size_t i = 0; i < ns; i++) {
+    GSHGEOM_Flat_Subpath sp;
+    CHECK(gshgeom_flat_path_subpath(fp, i, &sp) == GSHGEOM_OK);
+    CHECK(sp.closed == 1);
+    CHECK(sp.count >= (oriented ? 3u : 2u)); /* the clip part is the centerline's own closed subpaths: a there-and-back is two */
+    for (size_t k = 0; k < sp.count; k++) {
+      GSHGEOM_Device_Point v = pts[sp.first + k];
+#ifdef GSHGEOM_FUZZ_PLANT
+      if (i == 0 && k == 0) {
+        v.x = INT32_MAX; /* a vertex moved out of the box: the harness must see it */
+      }
+#endif
+      if (box) {
+        double x = v.x / 64.0, y = v.y / 64.0;
+        CHECK(x >= box[0] - slack && x <= box[2] + slack && y >= box[1] - slack && y <= box[3] + slack);
+      }
+      if (oriented && k >= 1 && k + 1 < sp.count) {
+        GSHGEOM_Device_Point a = pts[sp.first], c = pts[sp.first + k + 1];
+        GSHGEOM_Point pa = {a.x, a.y, 0.0}, pb = {v.x, v.y, 0.0}, pc = {c.x, c.y, 0.0};
+        int sg = 0;
+        CHECK(gshgeom_orient2d(pa, pb, pc, &sg) == GSHGEOM_OK);
+#ifndef GSHGEOM_FUZZ_PLANT
+        CHECK(sg >= 0);
+#endif
+      }
+    }
+  }
+}
+
+int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
+
+int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
+  Input in = {data, size, 0};
+  const uint8_t opts = next(&in);
+  const uint8_t fail_at = next(&in);
+  const uint8_t tol = next(&in);
+  Counter counter = {0, 0, (opts & 4) ? (long)fail_at : -1, 0};
+  GSHGEOM_Allocator alloc = {&counter, c_malloc, c_calloc, c_realloc, c_free};
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  limits.max_points = (opts & 3) == 1 ? 64 : ((opts & 3) == 2 ? 12 : (size_t)1 << 16);
+  int32_t tau = (opts & 8) ? (int32_t)tol : GSHGEOM_FLATTEN_TOLERANCE;
+  GSHGEOM_Stroke s;
+  double dashes[3];
+  int profile = 0;
+  build_stroke(&in, &s, dashes, &profile);
+  GSHGEOM_Map map;
+  if (build_map(&in, &map) != GSHGEOM_OK) {
+    gshgeom_map_identity(2, &map);
+  }
+  if (next(&in) == 9) {
+    gshgeom_map_identity(3, &map); /* a 3D map: refused */
+  }
+  int curved = 0;
+  GSHGEOM_Path * path = build_path(&in, NULL, &curved);
+  if (!path) {
+    return 0;
+  }
+  void * mark = malloc(1); /* a pointer the expansion must leave alone on failure */
+  if (!mark) {
+    gshgeom_path_destroy(path);
+    return 0;
+  }
+  GSHGEOM_Stroke_Outline * o = (GSHGEOM_Stroke_Outline *)mark;
+  GSHGEOM_Stroke_Outline * const sentinel = o;
+  GSHGEOM_Result r = gshgeom_stroke_expand_with_tolerance(path, &s, &map, tau, &alloc, &limits, &o);
+  CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_INVALID || r == GSHGEOM_ERR_UNSUPPORTED || r == GSHGEOM_ERR_LIMIT ||
+      r == GSHGEOM_ERR_OOM);
+  if (r == GSHGEOM_ERR_OOM) {
+    CHECK(counter.failed);
+  }
+  if (r != GSHGEOM_OK) {
+    CHECK(o == sentinel);
+    outcomes[r == GSHGEOM_ERR_INVALID ? OUT_INVALID
+                                      : r == GSHGEOM_ERR_UNSUPPORTED ? OUT_UNSUPPORTED
+                                                                     : r == GSHGEOM_ERR_LIMIT ? OUT_LIMIT : OUT_OOM]++;
+  } else {
+    GSHGEOM_Stroke_Status st = gshgeom_stroke_outline_status(o);
+    CHECK(st < GSHGEOM_STROKE_STATUS_COUNT);
+    if (st != GSHGEOM_STROKE_DRAWN) {
+      CHECK(!gshgeom_stroke_outline_body(o) && !gshgeom_stroke_outline_aligned(o) && !gshgeom_stroke_outline_clip(o));
+      outcomes[st == GSHGEOM_STROKE_EMPTY ? OUT_EMPTY : OUT_NOT_INVERTIBLE]++;
+      CHECK(st == GSHGEOM_STROKE_EMPTY ? s.width == 0.0 : 1);
+    } else {
+      outcomes[OUT_DRAWN]++;
+      CHECK(gshgeom_stroke_outline_body(o) != NULL);
+      CHECK((gshgeom_stroke_outline_aligned(o) != NULL) == (gshgeom_stroke_outline_clip(o) != NULL));
+      if (gshgeom_stroke_outline_aligned(o)) {
+        CHECK(s.alignment != GSHGEOM_STROKE_ALIGN_CENTER);
+        outcomes[OUT_ALIGNED]++;
+      }
+      double box[4] = {0.0, 0.0, 0.0, 0.0};
+      int have = stroke_box(path, &s, &map, box);
+      double slack = tau / 64.0 + 1.0 + 1e-6 * (absd(box[0]) + absd(box[1]) + absd(box[2]) + absd(box[3]));
+      check_part(gshgeom_stroke_outline_body(o), limits.max_points, have ? box : NULL, slack, 1);
+      check_part(gshgeom_stroke_outline_aligned(o), limits.max_points, have ? box : NULL, slack, 1);
+      check_part(gshgeom_stroke_outline_clip(o), limits.max_points, NULL, 0.0, 0);
+      if (gshgeom_flat_path_subpath_count(gshgeom_stroke_outline_body(o))) {
+        if (curved) {
+          outcomes[OUT_CURVE]++;
+        }
+        if (s.join == GSHGEOM_STROKE_JOIN_ARCS) {
+          outcomes[OUT_ARCS]++;
+        }
+        if (s.width_space == GSHGEOM_STROKE_WIDTH_DEVICE) {
+          outcomes[OUT_DEVICE]++;
+        }
+        if (!curved && gshgeom_path_element_count(path) <= 2) {
+          outcomes[OUT_DEGENERATE]++;
+        }
+      }
+      /* the same input gives the same bits */
+      uint64_t h = gshgeom_stroke_outline_hash(o);
+      GSHGEOM_Stroke_Outline * o2 = NULL;
+      CHECK(gshgeom_stroke_expand_with_tolerance(path, &s, &map, tau, NULL, &limits, &o2) == GSHGEOM_OK);
+      CHECK(gshgeom_stroke_outline_hash(o2) == h);
+      gshgeom_stroke_outline_destroy(o2);
+    }
+    gshgeom_stroke_outline_destroy(o);
+  }
+  CHECK(counter.live == 0);
+  free(mark);
+  gshgeom_path_destroy(path);
+  return 0;
+}

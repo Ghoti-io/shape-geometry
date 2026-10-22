@@ -672,6 +672,86 @@ int main(void) {
     }
   }
 
+  /* Strokes (stroke.h, SG18): random 2D paths of every kind, stroked with every
+   * join and cap, both width spaces and every alignment, under a map that
+   * rotates and scales unequally, at the default tolerance and at 2: each
+   * outline's hash, which covers every vertex of every part.  The expansion's
+   * decisions are exact predicates and its constructions sums of products, the
+   * arc length of the arcs join math's trigonometry, so a fused multiply-add, an
+   * excess of precision or a libm call changes vertices and with them the hash. */
+  {
+    GSHGEOM_Map rot, sc, m;
+    if (gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 17.0, &rot) != GSHGEOM_OK ||
+        gshgeom_map_scale(2, 6.0, 4.5, 1.0, &sc) != GSHGEOM_OK || gshgeom_map_compose(&rot, &sc, &m) != GSHGEOM_OK) {
+      return fail("stroke map");
+    }
+    for (int i = 0; i < 60; i++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("path create failed");
+      }
+      GSHGEOM_Result r = gshgeom_path_move_to(path, random_point(2));
+      int steps = 1 + (int)(next() % 4);
+      for (int k = 0; k < steps && r == GSHGEOM_OK; k++) {
+        double w3[3], w4[4];
+        for (int j = 0; j < 3; j++) {
+          w3[j] = weight();
+        }
+        for (int j = 0; j < 4; j++) {
+          w4[j] = weight();
+        }
+        GSHGEOM_Point q1 = random_point(2);
+        GSHGEOM_Point q2 = random_point(2);
+        GSHGEOM_Point q3 = random_point(2);
+        switch (next() % 6) {
+        case 0:
+          r = gshgeom_path_line_to(path, q1);
+          break;
+        case 1:
+          r = gshgeom_path_quadratic_to(path, q1, q2);
+          break;
+        case 2:
+          r = gshgeom_path_cubic_to(path, q1, q2, q3);
+          break;
+        case 3:
+          r = gshgeom_path_rational_quadratic_to(path, q1, q2, w3);
+          break;
+        case 4:
+          r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4);
+          break;
+        default:
+          r = gshgeom_path_close(path);
+          break;
+        }
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a stroke path step was refused");
+      }
+      GSHGEOM_Stroke s;
+      gshgeom_stroke_init(&s);
+      s.width = 0.25 + (double)(next() % 64) / 32.0;
+      s.join = (uint32_t)(i % 5);
+      s.cap = (uint32_t)((i / 5) % 3);
+      s.width_space = (uint32_t)((i / 15) % 2);
+      s.alignment = (uint32_t)((i / 30) % 3);
+      s.miter_limit = 1.0 + (double)(next() % 16) / 2.0;
+      if (s.width_space == GSHGEOM_STROKE_WIDTH_DEVICE) {
+        s.width = s.width * 4.0;
+      }
+      GSHGEOM_Stroke_Outline * o = NULL;
+      r = gshgeom_stroke_expand_with_tolerance(path, &s, &m, (i % 4 == 3) ? 2 : GSHGEOM_FLATTEN_TOLERANCE, NULL, NULL,
+          &o);
+      feed_int((int)r);
+      count++;
+      if (r == GSHGEOM_OK) {
+        gshgeom_hash_u64(&total, gshgeom_stroke_outline_hash(o));
+        feed_int((int)gshgeom_flat_path_point_count(gshgeom_stroke_outline_body(o)));
+      }
+      gshgeom_stroke_outline_destroy(o);
+      gshgeom_path_destroy(path);
+    }
+  }
+
   printf("shape-geometry.hash %016" PRIx64 "\n", gshgeom_hash_value(&total));
   printf("shape-geometry.count %lu\n", count);
   return 0;
