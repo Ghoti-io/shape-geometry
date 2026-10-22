@@ -13,8 +13,7 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
 The dependency rules and the determinism gates that bind this library are in
 the Makefile's header comment and in `tools/`: `check-fp-contract`,
 `check-edges`, `check-libm` and `check-no-x87`, each shown to fail on a planted
-violation by `make check-gates`. The plan is in the workspace, not in this
-repository.
+violation by `make check-gates`.
 
 ## Model
 
@@ -52,7 +51,7 @@ shared with the library); the cross-target value over curves and paths is
 ## Maps
 
 A map (`map.h`) is `M p + t` in 2D or 3D, with a kind tag. Maps are multiplied
-in one function, and the order is the spine's: `gshgeom_map_compose_chain`
+in one function, and the order is fixed: `gshgeom_map_compose_chain`
 takes the chain root first and the target last and forms
 `target . root . ... . leaf` by composing from the root down and the target
 last; every entry is `((a0 b0 + a1 b1) + a2 b2)` with no fused multiply-add, so
@@ -264,7 +263,7 @@ library with no use for the rest of this one (`font`, whose headers carry no
 floating-point type) can include it alone: `GSHGEOM_FILL_NONZERO` (0, the
 default, and what every font format means) and `GSHGEOM_FILL_EVEN_ODD` (1),
 `GSHGEOM_FILL_RULE_COUNT` closing the enumeration, and `gshgeom_fill_rule_string`.
-The values are pinned (spine AD-4); a further rule is appended after them. The
+The values are pinned; a further rule is appended after them. The
 rule is applied by `shape-cpu`; `font`'s `GFNT_FillRule` is this type under its
 old name.
 

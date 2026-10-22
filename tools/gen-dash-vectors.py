@@ -49,11 +49,8 @@ def positions(dashes, offset, length):
     index = 0
     while sum(dashes[: index + 1]) < offset:
         index += 1
-    remaining = sum(dashes[: index + 1]) - offset
-    dashlength = min(remaining, length)
-    # the one departure from the text's loop (stroke.h SG21): a positive dash the phase has used up entirely is
-    # over, not a zero-length dash at the start; a zero-length dash exactly at the phase is kept
-    if index % 2 == 0 and (remaining > 0 or dashes[index] == 0):
+    dashlength = min(sum(dashes[: index + 1]) - offset, length)
+    if index % 2 == 0:
         out.append((F(0), dashlength))
     position = dashlength
     while position < length:
@@ -128,6 +125,8 @@ DXF = [
     ("dot_dash", [F(0), F(2), F(-1)], F(1)),
     ("solid", [F(3), F(1)], F(1)),
     ("space_first_dot_last", [F(-1), F(2), F(-3), F(0)], F(1)),
+    ("space_first_dash_last", [F(-1), F(2), F(1)], F(1)),
+    ("spaces_merge_dot_last", [F(-1), F(2), F(-3), F(0), F(-2)], F(1)),
     ("dots_only_spaced", [F(0), F(-2), F(0), F(-4)], F(1)),
 ]
 
@@ -145,8 +144,8 @@ def normalize(intervals, span):
 
 
 def lower(vals):
-    """The lowering (stroke.h SG30), in Fractions: (dash list, offset), None for solid, "unsupported" for the one
-    pattern the positions model cannot express (a space first and a dot last)."""
+    """The lowering (stroke.h SG30), in Fractions: (dash list, offset), None for solid, "unsupported" for a pattern
+    that begins with a space no trailing space continues (the positions model cannot express it)."""
     down = [v >= 0 for v in vals]
     if all(down):
         return None
@@ -165,8 +164,8 @@ def lower(vals):
         start_off = last[1]
     offset = start_off
     if not runs[0][0]:
-        if runs[-1][0] and runs[-1][1] == 0:
-            return "unsupported"
+        if start_off == 0:
+            return "unsupported"  # the phase would stand at the end of the dash before: a dash of no length (SG21)
         first = runs.pop(0)
         runs.append(first)
         period = sum(r[1] for r in runs)
