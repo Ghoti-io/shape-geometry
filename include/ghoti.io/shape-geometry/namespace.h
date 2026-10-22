@@ -225,6 +225,7 @@
 #define gshgeom_sk_dash_end GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_end)
 #define gshgeom_sk_dash_sub GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_sub)
 #define gshgeom_sk_effective_tangent GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_effective_tangent)
+#define gshgeom_sk_solid_sub GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_solid_sub)
 #define gshgeom_sk_lin GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_lin)
 #define gshgeom_sk_anchor GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_anchor)
 #define gshgeom_sk_fits GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_fits)

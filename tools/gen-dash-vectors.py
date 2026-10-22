@@ -49,8 +49,11 @@ def positions(dashes, offset, length):
     index = 0
     while sum(dashes[: index + 1]) < offset:
         index += 1
-    dashlength = min(sum(dashes[: index + 1]) - offset, length)
-    if index % 2 == 0:
+    remaining = sum(dashes[: index + 1]) - offset
+    dashlength = min(remaining, length)
+    # half open (stroke.h SG21, F3): a positive dash the phase has used up is over; the CR's loop would make a dash of
+    # no length here.  A dash of no length exactly at the phase is kept.
+    if index % 2 == 0 and (remaining > 0 or dashes[index] == 0):
         out.append((F(0), dashlength))
     position = dashlength
     while position < length:
@@ -145,7 +148,7 @@ def normalize(intervals, span):
 
 def lower(vals):
     """The lowering (stroke.h SG30), in Fractions: (dash list, offset), None for solid, "unsupported" for a pattern
-    that begins with a space no trailing space continues (the positions model cannot express it)."""
+    that begins with a space no trailing space continues and ends with a dot."""
     down = [v >= 0 for v in vals]
     if all(down):
         return None
@@ -164,8 +167,8 @@ def lower(vals):
         start_off = last[1]
     offset = start_off
     if not runs[0][0]:
-        if start_off == 0:
-            return "unsupported"  # the phase would stand at the end of the dash before: a dash of no length (SG21)
+        if start_off == 0 and runs[-1][1] == 0:
+            return "unsupported"  # the phase would stand exactly at the dot that ends the period (SG21 keeps it)
         first = runs.pop(0)
         runs.append(first)
         period = sum(r[1] for r in runs)

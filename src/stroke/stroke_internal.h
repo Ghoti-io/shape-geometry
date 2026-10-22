@@ -173,9 +173,16 @@ double gshgeom_sk_dash_period(const double * dashes, size_t count, size_t n);
 /** The phase reduced to [0, period) exactly (SG21, SG29). */
 double gshgeom_sk_dash_phase(double offset, double period);
 
+/** What a dash says of itself beyond its ends (SG21, SG23). */
+#define GSHGEOM_SK_POS_BEGINS_BEFORE 1 /**< the first piece began before the path: the phase is inside its dash */
+#define GSHGEOM_SK_POS_ENDS_AFTER 2    /**< the dash would have gone on past the end of the subpath */
+
+/** Receives one dash of ::gshgeom_sk_dash_positions with its flags. */
+typedef GSHGEOM_Result (*GSHGEOM_SK_PosFn)(void * ctx, double start, double end, int flags);
+
 /** SG21 with a reduced phase @p o: the pairs of a subpath of @p length, handed to @p fn. */
 GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, size_t n, double period, double o,
-    double length, size_t * steps, size_t max_steps, GSHGEOM_Dash_Fn fn, void * ctx);
+    double length, size_t * steps, size_t max_steps, GSHGEOM_SK_PosFn fn, void * ctx);
 
 /** SG26's gate and the measured path of the dashes; the canonical array comes from @p stroke. */
 GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * centerline,
@@ -186,6 +193,9 @@ void gshgeom_sk_dash_end(GSHGEOM_SK_Ctx * c);
 
 /** The pieces of subpath @p i of the reader, dashed (SG21 to SG25), in the context's part. */
 GSHGEOM_Result gshgeom_sk_dash_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i);
+
+/** The solid stroke of subpath @p i (expand.c): what a dash that covers the whole of a closed subpath is. */
+GSHGEOM_Result gshgeom_sk_solid_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i);
 
 /** SG11's effective tangent of the degenerate subpath @p i (expand.c). */
 GSHGEOM_SK_Vec gshgeom_sk_effective_tangent(const GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i);

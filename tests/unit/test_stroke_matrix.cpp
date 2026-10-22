@@ -470,6 +470,27 @@ TEST(StrokeMatrix, DashesAtVerticesAndDots) {
   }
 }
 
+TEST(StrokeMatrix, DashesAcrossTheStartOfAClosedSubpath) {
+  /* SG23: a dash that crosses the start is one dash joined at the start vertex; one that ends or begins exactly there
+   * is two; one that covers the whole subpath is its closed stroke.  The square's perimeter is 56 */
+  Ops sq = {{'M', {0, 0}}, {'L', {16, 0}}, {'L', {16, 12}}, {'L', {0, 12}}, {'Z', {}}};
+  Ops rect = {{'M', {0, 0}}, {'L', {20, 0}}, {'L', {20, 10}}, {'L', {0, 10}}, {'Z', {}}};
+  Ops tri = {{'M', {0, 0}}, {'L', {12, 3}}, {'L', {5, 14}}, {'Z', {}}};
+  Ops round = circle(0, 0, 9);
+  for (int join : {MITER, ROUND, BEVEL}) {
+    for (int cap : {BUTT, RCAP, SQUARE}) {
+      GSHGEOM_Stroke st = style(3, join, 4, cap);
+      run(dashed("wraps", sq, st, {30, 10}, 10));
+      run(dashed("starts exactly at the start", sq, st, {30, 10}, 0));
+      run(dashed("ends exactly at the end", rect, st, {35, 5}, 15));
+      run(dashed("covers it all", sq, st, {1000, 5}, 10));
+      run(dashed("wraps, a corner inside the wrapped part", tri, st, {20, 7}, 4));
+      run(dashed("wraps on a circle", round, st, {30, 9}, 12));
+      run(dashed("wraps, one pattern for the path", sq, st, {30, 10}, 10, 1));
+    }
+  }
+}
+
 TEST(StrokeMatrix, DashesOnCurves) {
   std::vector<std::pair<std::string, Ops>> curves = {
       {"quadratic", {{'M', {0, 0}}, {'Q', {10, 18, 20, 0}}}},

@@ -75,14 +75,11 @@ TEST(DashPositions, ChosenCasesByHand) {
   ASSERT_EQ(p.size(), 3u);
   EXPECT_EQ(p[2].a, 20); EXPECT_EQ(p[2].b, 20);
   /* a negative offset counts back from the period's end: -3 on [5,3] is 5 into the period, exactly the end of the
-   * dash, which the text's rule leaves as a dash of no length at the start; the gap runs 0-3 and the next dash
-   * begins at 3 */
+   * dash, which is over (half open, F3): the gap runs 0-3 and the next dash begins at 3 */
   p = positions({5, 3}, -3, 8);
-  ASSERT_EQ(p.size(), 2u);
-  EXPECT_EQ(p[0].a, 0);
-  EXPECT_EQ(p[0].b, 0);
-  EXPECT_EQ(p[1].a, 3);
-  EXPECT_EQ(p[1].b, 8);
+  ASSERT_EQ(p.size(), 1u);
+  EXPECT_EQ(p[0].a, 3);
+  EXPECT_EQ(p[0].b, 8);
   /* all zero, a negative length, an empty array: solid */
   for (std::vector<double> d : {std::vector<double>{0, 0}, std::vector<double>{1, -1}, std::vector<double>{}}) {
     p = positions(d, 3, 9);
@@ -93,25 +90,26 @@ TEST(DashPositions, ChosenCasesByHand) {
 }
 
 TEST(DashPositions, ThePhaseAtTheEndOfADash) {
-  /* SVG 2's rule, read literally: the least index whose prefix sum reaches the phase, so a phase exactly at the end of a
-   * dash is in that dash, with nothing left of it: a dash of no length at the start, then the gap 0-3 and the next
-   * dash 3-8 */
+  /* F3: the CR takes the least index whose prefix sum reaches the phase, which leaves a dash of no length at the start
+   * when the phase is exactly the end of a positive dash; every renderer draws nothing there, and so does this: the
+   * dash is over, the gap runs 0-3 and the next dash is 3-8 */
   auto p = positions({5, 3}, 5, 20);
-  ASSERT_GE(p.size(), 2u);
-  EXPECT_EQ(p[0].a, 0);
-  EXPECT_EQ(p[0].b, 0);
-  EXPECT_EQ(p[1].a, 3);
-  EXPECT_EQ(p[1].b, 8);
-  /* a dotted line starts with a dot */
+  ASSERT_GE(p.size(), 1u);
+  EXPECT_EQ(p[0].a, 3);
+  EXPECT_EQ(p[0].b, 8);
+  /* a dash of no length exactly at the phase is kept: a dotted line starts with a dot */
   p = positions({0, 10}, 0, 5);
   ASSERT_EQ(p.size(), 1u);
   EXPECT_EQ(p[0].a, 0);
   EXPECT_EQ(p[0].b, 0);
-  /* the phase at the end of a gap is the start of the next dash: no dash of no length */
+  /* the phase at the end of a gap is the start of the next dash */
   p = positions({5, 3}, 8, 5);
   ASSERT_EQ(p.size(), 1u);
   EXPECT_EQ(p[0].a, 0);
   EXPECT_EQ(p[0].b, 5);
+  /* a phase used up by the only dash of a short path: nothing */
+  p = positions({1, 10}, 1, 5);
+  EXPECT_EQ(p.size(), 0u);
   /* inside a gap */
   p = positions({5, 3}, 6, 1);
   EXPECT_EQ(p.size(), 0u);
@@ -120,6 +118,8 @@ TEST(DashPositions, ThePhaseAtTheEndOfADash) {
   ASSERT_EQ(p.size(), 1u);
   EXPECT_EQ(p[0].b, 0);
   p = positions({5, 3}, 6, 0);
+  EXPECT_EQ(p.size(), 0u);
+  p = positions({5, 3}, 5, 0);
   EXPECT_EQ(p.size(), 0u);
   /* a dash that would begin exactly at the end of the subpath is not made (while position < pathlength) */
   p = positions({5, 5}, 0, 10);
@@ -268,6 +268,80 @@ TEST(DashDxf, Errors) {
   EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(big, 2, 4.0, out, 8, &n, &off), GSHGEOM_ERR_LIMIT);
   double small[2] = {0x1p-60, -1};
   EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(small, 2, 0x1p-10, out, 8, &n, &off), GSHGEOM_ERR_LIMIT);
+}
+
+namespace {
+
+/** The winding number of an outline around (x, y) pixels. */
+int winding_at(const GSHGEOM_Flat_Path * fp, double x, double y) {
+  const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(fp);
+  double px = x * 64.0, py = y * 64.0;
+  int w = 0;
+  for (size_t s = 0; s < gshgeom_flat_path_subpath_count(fp); s++) {
+    GSHGEOM_Flat_Subpath sp;
+    gshgeom_flat_path_subpath(fp, s, &sp);
+    for (size_t i = 0; i < sp.count; i++) {
+      GSHGEOM_Device_Point a = pts[sp.first + i], b = pts[sp.first + (i + 1) % sp.count];
+      double c = (double)(b.x - a.x) * (py - a.y) - (px - a.x) * (double)(b.y - a.y);
+      if (a.y <= py && b.y > py && c > 0) {
+        w++;
+      } else if (a.y > py && b.y <= py && c < 0) {
+        w--;
+      }
+    }
+  }
+  return w;
+}
+
+/** A closed rectangle w by h from the origin, stroked at width 2 with miter joins and butt caps, dashed; whether the
+ * outline covers the point (x, y). */
+bool covered(double w, double h, std::vector<double> d, double offset, double x, double y) {
+  GSHGEOM_Path * path = nullptr;
+  EXPECT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &path), GSHGEOM_OK);
+  GSHGEOM_Point p0 = {0, 0, 0}, p1 = {w, 0, 0}, p2 = {w, h, 0}, p3 = {0, h, 0};
+  gshgeom_path_move_to(path, p0);
+  gshgeom_path_line_to(path, p1);
+  gshgeom_path_line_to(path, p2);
+  gshgeom_path_line_to(path, p3);
+  gshgeom_path_close(path);
+  GSHGEOM_Stroke s;
+  gshgeom_stroke_init(&s);
+  s.width = 2;
+  s.dashes = d.data();
+  s.dash_count = d.size();
+  s.dash_offset = offset;
+  GSHGEOM_Map m;
+  gshgeom_map_identity(2, &m);
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  EXPECT_EQ(gshgeom_stroke_expand(path, &s, &m, nullptr, nullptr, &o), GSHGEOM_OK);
+  bool in = winding_at(gshgeom_stroke_outline_body(o), x, y) != 0;
+  gshgeom_stroke_outline_destroy(o);
+  gshgeom_path_destroy(path);
+  return in;
+}
+
+} // namespace
+
+TEST(DashWrap, ADashAcrossTheStartIsOneDash) {
+  /* a 20 by 20 square (perimeter 80), the start vertex (0, 0) joined by a miter whose outer corner is (-1, -1); the
+   * point (-0.7, -0.7) is covered only by that join */
+  /* [50, 10] at the phase 10: the first piece began before the path and the last dash (50 to 100) would go on past
+   * the end: one dash, joined at the start vertex */
+  EXPECT_TRUE(covered(20, 20, {50, 10}, 10, -0.7, -0.7));
+  /* the same pattern with the phase 0: the first dash begins exactly at the start, so the two stay separate and the
+   * start vertex has two butt ends and no join */
+  EXPECT_FALSE(covered(20, 20, {50, 10}, 0, -0.7, -0.7));
+  /* a dash that ends exactly at the start (20 by 10, perimeter 60, [35, 5] from the phase 15: dashes 0-20, 25-60) and
+   * a first piece that began before it: two dashes */
+  EXPECT_FALSE(covered(20, 10, {35, 5}, 15, -0.7, -0.7));
+  /* a dash that covers the whole subpath is the closed stroke: joined at the start vertex, no caps */
+  EXPECT_TRUE(covered(20, 20, {1000, 5}, 10, -0.7, -0.7));
+  /* and a pattern that is on only inside, with gaps at the start, covers nothing there */
+  EXPECT_FALSE(covered(20, 20, {10, 70}, 0, -0.7, -0.7));
+  /* the body is still covered where the dash is, and the gap is a gap: (10, 0) is position 10 on the top edge, in the
+   * first dash 0-40; (15, 20) is position 45 on the bottom edge, in the gap 40-50 */
+  EXPECT_TRUE(covered(20, 20, {50, 10}, 10, 10, 0));
+  EXPECT_FALSE(covered(20, 20, {50, 10}, 10, 15, 20));
 }
 
 int main(int argc, char ** argv) {

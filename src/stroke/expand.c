@@ -261,10 +261,15 @@ GSHGEOM_SK_Vec gshgeom_sk_effective_tangent(const GSHGEOM_SK_Ctx * c, const GSHG
 }
 
 /** One subpath's pieces in SG18's order. */
+
 static GSHGEOM_Result stroke_sub(GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {
   if (c->dash.active) {
     return gshgeom_sk_dash_sub(c, rd, i);
   }
+  return gshgeom_sk_solid_sub(c, rd, i);
+}
+
+GSHGEOM_Result gshgeom_sk_solid_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i) {
   const Sub * s = &rd->subs[i];
   if (s->seg_count == 0) {
     if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_OMIT) {

@@ -240,8 +240,11 @@
  * path, cut at the subpath's ends), reduced to `[0, P)` by the floored modulo.
  * With the prefix sums `S_i = d_0 + ... + d_i`, `index` is the least `i` with
  * `S_i >= o`.  The first piece is `<0, min(S_index - o, L)>`, a dash when `index`
- * is even (the text's rule, read literally: a phase exactly at the end of a dash
- * is in that dash with nothing left of it, a dash of no length at the start).
+ * is even, except that a positive dash the phase has used up entirely (`S_index =
+ * o`) is over and leaves no dash of no length at the start: the one tie where this
+ * differs from the text's loop, which would make one (a dot under a round or square
+ * cap; every shipping renderer draws nothing, and a DXF linetype that begins with a
+ * space could not be lowered).  A dash of no length exactly at the phase is kept.
  * Each following entry in turn, wrapping to entry 0 after the last, starts at
  * `position` and has length `min(d_i, L - position)`, its pair
  * `<position, position + length>` a dash when `i` is even, and the
@@ -254,13 +257,19 @@
  * to SG10: the body of the stretch, a cap at each end in the direction the
  * centerline has there, and the join at every vertex strictly inside the stretch,
  * decided from the original segments that meet at the vertex (never from the cut
- * pieces).  A cut exactly at a vertex is an end: a cap, not a join.
+ * pieces).  A cut exactly at a vertex is an end: a cap, not a join (SG23 adds the
+ * join of a dash across the start of a closed subpath).
  *
  * **SG23 Closed subpaths.**  The closing line is a segment of the subpath: it is
- * measured and dashes run along it.  The distance ends at the start point, where
- * the last dash and the first piece are separate dashes with a cap each, even when
- * one ends where the other begins: the text defines each pair's own caps and no
- * join at the start of a closed subpath, and this follows it.
+ * measured and dashes run along it.  The distance ends at the start point.  A dash
+ * that crosses the start point is one dash: when the first piece began before the
+ * path (the phase is inside its dash) and the last dash would go on past the end of
+ * the subpath, they are joined, the last dash running on through the closing line into
+ * the first segment with a join (SG8) at the start vertex and a cap only at its two
+ * ends; it is emitted where the last dash is.  A dash that ends exactly at the start
+ * point, or a first piece that begins exactly there, stays separate, each with its
+ * cap.  A dash that would cover the whole subpath is the stroke of the closed subpath
+ * (joined at the start vertex, no caps).
  *
  * **SG24 Zero-length dashes.**  A dash with equal ends is a dot: round gives the
  * disc of radius `h`, square the square of side `2h` with two sides parallel to
@@ -313,9 +322,8 @@
  * run.  A dot first with a dash last keeps the dot apart (a zero-length space
  * between).  No pen-down element draws nothing (::GSHGEOM_ERR_INVALID), no space
  * is solid, and a pattern that begins with a space which no trailing space
- * continues cannot be expressed (::GSHGEOM_ERR_UNSUPPORTED: the line would start
- * exactly at the end of the dash before it, where SG21 begins with a dash of no
- * length).
+ * continues and ends with a dot cannot be expressed (::GSHGEOM_ERR_UNSUPPORTED:
+ * the line would start exactly at that dot, which SG21 keeps).
  *
  * ## The hash and the dump (format 1)
  *

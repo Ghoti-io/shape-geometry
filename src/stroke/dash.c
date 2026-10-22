@@ -41,6 +41,8 @@
 
 #include "stroke_internal.h"
 
+#include <string.h>
+
 #include <ghoti.io/shape-geometry/along.h>
 
 /** The remainder of x >= 0 modulo s > 0, exactly (+ - * only; no libm). */
@@ -122,7 +124,7 @@ double gshgeom_sk_dash_phase(double offset, double period) {
 }
 
 GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, size_t n, double period, double o,
-    double length, size_t * steps, size_t max_steps, GSHGEOM_Dash_Fn fn, void * ctx) {
+    double length, size_t * steps, size_t max_steps, GSHGEOM_SK_PosFn fn, void * ctx) {
   /* the least index whose prefix sum reaches the phase */
   double s_ex = 0.0, s_in = 0.0;
   size_t index = n - 1;
@@ -135,11 +137,14 @@ GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, si
     s_ex = s_in;
   }
   double remaining = s_in - o;
-  /* the first piece: a dash when the index is even (SG21, the text's rule: a phase exactly at the end of a dash
-   * leaves a dash of no length at the start) */
-  if ((index % 2u) == 0) {
+  double d_index = entry(dashes, count, index);
+  /* the first piece: a dash when the index is even (SG21), except that a positive dash the phase has used up
+   * entirely is over: it leaves no dash of no length at the start (F3; a dash of no length exactly at the phase is
+   * kept).  It begins before the path when the phase is inside it. */
+  if ((index % 2u) == 0 && (remaining > 0.0 || d_index == 0.0)) {
     double e = remaining < length ? remaining : length;
-    GSHGEOM_Result r = fn(ctx, 0.0, e);
+    int flags = (s_ex < o ? GSHGEOM_SK_POS_BEGINS_BEFORE : 0) | (remaining > length ? GSHGEOM_SK_POS_ENDS_AFTER : 0);
+    GSHGEOM_Result r = fn(ctx, 0.0, e, flags);
     if (r != GSHGEOM_OK) {
       return r;
     }
@@ -161,10 +166,12 @@ GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, si
         break;
       }
       double end = (q * period + s_end) - o;
+      int flags = 0;
       if (end > length) {
         end = length;
+        flags = GSHGEOM_SK_POS_ENDS_AFTER;
       }
-      GSHGEOM_Result r = fn(ctx, start, end);
+      GSHGEOM_Result r = fn(ctx, start, end, flags);
       if (r != GSHGEOM_OK) {
         return r;
       }
@@ -176,6 +183,17 @@ GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, si
     }
   }
   return GSHGEOM_OK;
+}
+
+typedef struct Trampoline {
+  GSHGEOM_Dash_Fn fn;
+  void * ctx;
+} Trampoline;
+
+static GSHGEOM_Result trampoline(void * ctx, double a, double b, int flags) {
+  (void)flags;
+  Trampoline * t = ctx;
+  return t->fn(t->ctx, a, b);
 }
 
 GSHGEOM_Result gshgeom_stroke_dash_each(const double * dashes, size_t count, double offset, double length,
@@ -208,8 +226,9 @@ GSHGEOM_Result gshgeom_stroke_dash_each(const double * dashes, size_t count, dou
   }
   double period = gshgeom_sk_dash_period(dashes, count, n);
   size_t steps = 0;
-  return gshgeom_sk_dash_positions(dashes, count, n, period, reduce(offset, period), length, &steps, max_steps, fn,
-      ctx);
+  Trampoline t = {fn, ctx};
+  return gshgeom_sk_dash_positions(dashes, count, n, period, reduce(offset, period), length, &steps, max_steps,
+      trampoline, &t);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -399,6 +418,11 @@ typedef struct Cb {
   const GSHGEOM_SK_Reader * rd;
   size_t sub;
   double begin, end; ///< the subpath's distances on the path
+  /* a dash that wraps across the start of a closed subpath (SG23): the last dash and the first piece are one */
+  int wrap;          ///< nonzero when this subpath has one
+  size_t index;      ///< the dash being handed out (0 for the first)
+  size_t total;      ///< how many dashes there are (counted by a first pass when wrapping)
+  double held_end;   ///< where the first piece ends, held until the last dash
 } Cb;
 
 /** The segment and parameter at a distance (SG20): a boundary belongs to the later segment, the end to the last. */
@@ -442,11 +466,92 @@ static GSHGEOM_Result dot(const Cb * cb, size_t k, double t) {
   return gshgeom_sk_degenerate(cb->c, seg_point(s, t), seg_dir(s, t));
 }
 
+/** Where a start distance is: a start that is the end of a segment is the start of the next. */
+static GSHGEOM_Result locate_start(const Cb * cb, double s, size_t * k, double * t) {
+  const Sub * sub = &cb->rd->subs[cb->sub];
+  size_t last = sub->first_seg + sub->seg_count - 1;
+  GSHGEOM_Result r = locate(cb, s, k, t);
+  if (r == GSHGEOM_OK && *t >= 1.0 && *k < last) {
+    (*k)++;
+    *t = 0.0;
+  }
+  return r;
+}
+
+/** Where an end distance is: an end that is the start of a segment is the end of the one before. */
+static GSHGEOM_Result locate_end(const Cb * cb, double s, size_t * k, double * t) {
+  const Sub * sub = &cb->rd->subs[cb->sub];
+  GSHGEOM_Result r = locate(cb, s, k, t);
+  if (r == GSHGEOM_OK && *t <= 0.0 && *k > sub->first_seg) {
+    (*k)--;
+    *t = 1.0;
+  }
+  return r;
+}
+
+/**
+ * The dash from (k0, t0) to (k1, t1): its start cap, its spans with the joins between, its end cap (SG22, SG25).  With
+ * @p wrap the dash runs on from the last segment of the subpath into the first, through the start vertex, where it has
+ * a join (SG23).  The first and last spans may collapse under the cut: the dash then starts or ends at a vertex.
+ */
+static GSHGEOM_Result emit_run(const Cb * cb, size_t k0, double t0, size_t k1, double t1, int wrap) {
+  GSHGEOM_SK_Ctx * c = cb->c;
+  const Sub * sub = &cb->rd->subs[cb->sub];
+  const Seg * segs = cb->rd->segs;
+  size_t f = sub->first_seg, N = sub->seg_count;
+  size_t r0 = k0 - f, r1 = k1 - f;
+  size_t m = wrap ? (N - r0) + r1 + 1 : r1 - r0 + 1;
+  size_t j0 = 0;
+  double ta = t0, tb = t1;
+  Seg first, lastp;
+  for (;;) {
+    if (piece(&segs[f + (r0 + j0) % N], ta, m == 1 ? tb : 1.0, &first)) {
+      break;
+    }
+    if (m == 1) {
+      return dot(cb, f + (r0 + j0) % N, ta); /* nothing of the dash has extent: a dot at its start */
+    }
+    j0++;
+    m--;
+    ta = 0.0;
+  }
+  if (m == 1) {
+    lastp = first;
+  } else {
+    for (;;) {
+      if (piece(&segs[f + (r0 + j0 + m - 1) % N], 0.0, tb, &lastp)) {
+        break;
+      }
+      m--;
+      tb = 1.0;
+      if (m == 1) {
+        lastp = first; /* computed to the end of its segment */
+        break;
+      }
+    }
+  }
+  size_t kfirst = f + (r0 + j0) % N, klast = f + (r0 + j0 + m - 1) % N;
+  GSHGEOM_Result r = gshgeom_sk_cap(c, first.p[0], gshgeom_sk_scale(-1.0, seg_dir(&segs[kfirst], ta)));
+  for (size_t jj = 0; jj < m && r == GSHGEOM_OK; jj++) {
+    size_t k = f + (r0 + j0 + jj) % N;
+    r = gshgeom_sk_body(c, jj == 0 ? &first : (jj == m - 1 ? &lastp : &segs[k]));
+    if (r == GSHGEOM_OK && jj + 1 < m) {
+      r = gshgeom_sk_join(c, &segs[k], &segs[f + (r0 + j0 + jj + 1) % N]);
+    }
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_sk_cap(c, lastp.p[lastp.n], seg_dir(&segs[klast], tb));
+  }
+  return r;
+}
+
 /** One dash <a, b> of the subpath (SG22 to SG25). */
-static GSHGEOM_Result on_dash(void * ctx, double a, double b) {
+static GSHGEOM_Result on_dash(void * ctx, double a, double b, int flags) {
+  (void)flags;
   Cb * cb = ctx;
   GSHGEOM_SK_Ctx * c = cb->c;
   const Sub * sub = &cb->rd->subs[cb->sub];
+  size_t idx = cb->index++;
   if (++c->dash.pieces > c->work_cap) {
     return GSHGEOM_ERR_LIMIT;
   }
@@ -454,82 +559,54 @@ static GSHGEOM_Result on_dash(void * ctx, double a, double b) {
     /* a degenerate subpath: SG11's shape, the pattern being on at its point */
     return gshgeom_sk_degenerate(c, sub->start, gshgeom_sk_effective_tangent(c, cb->rd, cb->sub));
   }
-  const Seg * segs = cb->rd->segs;
-  size_t f = sub->first_seg, last = f + sub->seg_count - 1;
-  double s0 = cb->begin + a, s1 = cb->begin + b;
-  if (s1 > cb->end) {
-    s1 = cb->end;
+  if (cb->wrap && idx == 0) {
+    cb->held_end = b; /* the first piece goes with the last dash */
+    return GSHGEOM_OK;
   }
+  double s0 = cb->begin + a, s1 = cb->begin + b;
   size_t k0, k1;
   double t0, t1;
-  GSHGEOM_Result r = locate(cb, s0, &k0, &t0);
+  GSHGEOM_Result r = locate_start(cb, s0, &k0, &t0);
   if (r != GSHGEOM_OK) {
     return r;
   }
-  if (t0 >= 1.0 && k0 < last) {
-    k0++;
-    t0 = 0.0;
+  if (cb->wrap && idx + 1 == cb->total) {
+    r = locate_end(cb, cb->begin + cb->held_end, &k1, &t1);
+    return r != GSHGEOM_OK ? r : emit_run(cb, k0, t0, k1, t1, 1);
+  }
+  if (s1 > cb->end) {
+    s1 = cb->end;
   }
   if (!(s1 > s0)) {
     return dot(cb, k0, t0);
   }
-  r = locate(cb, s1, &k1, &t1);
+  r = locate_end(cb, s1, &k1, &t1);
   if (r != GSHGEOM_OK) {
     return r;
-  }
-  if (t1 <= 0.0 && k1 > f) {
-    k1--;
-    t1 = 1.0;
   }
   if (k1 < k0 || (k1 == k0 && !(t1 > t0))) {
     return dot(cb, k0, t0);
   }
-  /* the first and last spans may collapse under the cut: the dash then starts or ends at a vertex */
-  Seg first, lastp;
-  for (;;) {
-    if (piece(&segs[k0], t0, k0 == k1 ? t1 : 1.0, &first)) {
-      break;
-    }
-    if (k0 == k1) {
-      return dot(cb, k0, t0); /* nothing of the dash has extent: a dot at its start */
-    }
-    k0++;
-    t0 = 0.0;
+  return emit_run(cb, k0, t0, k1, t1, 0);
+}
+
+/** The first pass over a closed subpath: how many dashes, and the first and last. */
+typedef struct Census {
+  size_t n;
+  double first_end, last_start;
+  int first_flags, last_flags;
+} Census;
+
+static GSHGEOM_Result census(void * ctx, double a, double b, int flags) {
+  Census * k = ctx;
+  if (k->n == 0) {
+    k->first_end = b;
+    k->first_flags = flags;
   }
-  if (k1 == k0) {
-    lastp = first;
-  } else {
-    for (;;) {
-      if (piece(&segs[k1], 0.0, t1, &lastp)) {
-        break;
-      }
-      k1--;
-      t1 = 1.0;
-      if (k1 == k0) {
-        lastp = first; /* computed to the end of its segment */
-        break;
-      }
-    }
-  }
-  /* the start cap, the spans with the joins between, the end cap (SG25) */
-  Vec d0 = seg_dir(&segs[k0], t0);
-  r = gshgeom_sk_cap(c, first.p[0], gshgeom_sk_scale(-1.0, d0));
-  for (size_t k = k0; k <= k1 && r == GSHGEOM_OK; k++) {
-    if (k == k0) {
-      r = gshgeom_sk_body(c, &first);
-    } else if (k == k1) {
-      r = gshgeom_sk_body(c, &lastp);
-    } else {
-      r = gshgeom_sk_body(c, &segs[k]);
-    }
-    if (r == GSHGEOM_OK && k < k1) {
-      r = gshgeom_sk_join(c, &segs[k], &segs[k + 1]);
-    }
-  }
-  if (r == GSHGEOM_OK) {
-    r = gshgeom_sk_cap(c, lastp.p[lastp.n], seg_dir(&segs[k1], t1));
-  }
-  return r;
+  k->last_start = a;
+  k->last_flags = flags;
+  k->n++;
+  return GSHGEOM_OK;
 }
 
 GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * centerline,
@@ -653,8 +730,32 @@ GSHGEOM_Result gshgeom_sk_dash_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader *
   if (sub->seg_count == 0 && c->st.degenerate == (uint32_t)GSHGEOM_STROKE_DEGENERATE_OMIT) {
     return GSHGEOM_OK;
   }
-  Cb cb = {c, rd, i, ms.begin, ms.end};
+  Cb cb;
+  memset(&cb, 0, sizeof cb);
+  cb.c = c;
+  cb.rd = rd;
+  cb.sub = i;
+  cb.begin = ms.begin;
+  cb.end = ms.end;
+  double L = ms.end - ms.begin;
   double o = D->per_path ? gshgeom_sk_dash_phase(D->offset + ms.begin, D->period) : D->phase0;
-  return gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, ms.end - ms.begin, &D->steps, c->work_cap,
-      on_dash, &cb);
+  if (sub->closed && sub->seg_count > 0) {
+    /* SG23: a dash that crosses the start point is one dash: the last dash would go on past the end of the subpath,
+     * and the first piece began before it.  A dash that ends or begins exactly there stays two. */
+    Census k;
+    memset(&k, 0, sizeof k);
+    size_t steps = 0;
+    GSHGEOM_Result r = gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, L, &steps, c->work_cap, census, &k);
+    if (r != GSHGEOM_OK) {
+      return r;
+    }
+    if (k.n > 0 && (k.first_flags & GSHGEOM_SK_POS_BEGINS_BEFORE) && (k.last_flags & GSHGEOM_SK_POS_ENDS_AFTER)) {
+      if (k.n == 1 || !(k.first_end < k.last_start)) {
+        return gshgeom_sk_solid_sub(c, rd, i); /* the dash covers the whole subpath: its stroke, closed */
+      }
+      cb.wrap = 1;
+      cb.total = k.n;
+    }
+  }
+  return gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, L, &D->steps, c->work_cap, on_dash, &cb);
 }

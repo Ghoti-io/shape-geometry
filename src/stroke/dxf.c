@@ -31,8 +31,8 @@
  * runs are rotated to start with a pen-down run.  Two cases keep the dash
  * positions' ties out of the way: a dot first with a dash last keeps the dot apart
  * (a zero-length space between), and a pattern that begins with a space which no
- * trailing space continues cannot be expressed (the phase would stand exactly at
- * the end of the dash before it, where the positions begin with a dash of no length).
+ * trailing space continues and ends with a dot cannot be expressed (the phase would
+ * stand exactly at that dot, which the positions keep).
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
@@ -120,9 +120,10 @@ GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t co
   double off = lead;
   if (!first_down) {
     /* rotate to start with a pen-down run */
-    /* a space first with the line starting at its start (nothing merged into it): the phase would stand at the end of
-     * the dash before, where SG21's first piece is a dash of no length, a dot under a round or square cap */
-    if (lead == 0.0) {
+    /* a space first with nothing merged into it and a dot last: the phase would stand exactly at that dot, which
+     * SG21 keeps (a dash of no length exactly at the phase), a dot at the start of the line that the pattern does not
+     * have */
+    if (lead == 0.0 && dashes[k - 1] == 0.0) {
       return GSHGEOM_ERR_UNSUPPORTED;
     }
     double first = dashes[0];

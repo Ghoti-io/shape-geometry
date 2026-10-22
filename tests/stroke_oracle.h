@@ -1392,7 +1392,14 @@ inline V2 seg_tangent(const Seg & s, Real t) {
 /**
  * SVG 2's dash positions, transcribed from the text with a running position (13.5.7), in `long double`.
  */
-inline std::vector<std::pair<Real, Real>> dash_positions(const std::vector<Real> & raw, Real offset, Real length) {
+inline std::vector<std::pair<Real, Real>> dash_positions(const std::vector<Real> & raw, Real offset, Real length,
+    bool * first_before = nullptr, bool * last_after = nullptr) {
+  if (first_before) {
+    *first_before = false;
+  }
+  if (last_after) {
+    *last_after = false;
+  }
   bool solid = false, any = false;
   for (Real v : raw) {
     solid = solid || v < 0;
@@ -1425,15 +1432,27 @@ inline std::vector<std::pair<Real, Real>> dash_positions(const std::vector<Real>
   }
   Real remaining = acc - offset;
   Real dashlength = std::min(remaining, length);
-  if (index % 2 == 0) {
+  /* half open (stroke.h, SG21, F3): a positive dash the phase has used up entirely is over; the text's loop would make
+   * a dash of no length at the start.  A dash of no length exactly at the phase is kept. */
+  if (index % 2 == 0 && (remaining > 0 || d[index] == 0)) {
     out.push_back({0, dashlength});
+    if (first_before) {
+      *first_before = acc - d[index] < offset;
+    }
+    if (last_after) {
+      *last_after = remaining > length;
+    }
   }
   Real position = dashlength;
   while (position < length) {
     index = (index + 1) % d.size();
-    dashlength = std::min(d[index], length - position);
+    Real want = d[index];
+    dashlength = std::min(want, length - position);
     if (index % 2 == 0) {
       out.push_back({position, position + dashlength});
+      if (last_after) {
+        *last_after = want > length - position;
+      }
     }
     position += dashlength;
   }
@@ -1464,8 +1483,25 @@ inline std::vector<Sub> dash_subs(const std::vector<Sub> & subs, const Style & s
       total += arcs.back().total;
     }
     Real phase = st.dash_scope == 1 ? st.dash_offset + path_pos : st.dash_offset;
-    std::vector<std::pair<Real, Real>> pairs = dash_positions(st.dashes, phase, total);
+    bool first_before = false, last_after = false;
+    std::vector<std::pair<Real, Real>> pairs = dash_positions(st.dashes, phase, total, &first_before, &last_after);
     bool closed_ext = sb.closed && !sb.segs.empty();
+    /* SG23: a dash that crosses the start point of a closed subpath is one dash */
+    bool wrapped = false;
+    Real held_end = 0;
+    if (closed_ext && !pairs.empty() && first_before && last_after) {
+      if (pairs.size() == 1 || pairs.front().second >= pairs.back().first) {
+        Sub whole = sb; /* the dash covers the whole subpath: its stroke, closed */
+        whole.aligned_closed = true;
+        out.push_back(whole);
+        path_pos += total;
+        continue;
+      }
+      wrapped = true;
+      held_end = pairs.front().second;
+      pairs.erase(pairs.begin());
+      pairs.back().second = total;
+    }
     auto locate = [&](Real s, bool end_side) {
       Located l;
       if (s >= total) {
@@ -1513,25 +1549,47 @@ inline std::vector<Sub> dash_subs(const std::vector<Sub> & subs, const Style & s
         continue;
       }
       Located lb = locate(b, true);
-      if (lb.k < la.k || (lb.k == la.k && lb.t <= la.t)) {
+      if (wrapped && &pr == &pairs.back()) {
+        lb = locate(held_end, true);
+      }
+      if (!(wrapped && &pr == &pairs.back()) && (lb.k < la.k || (lb.k == la.k && lb.t <= la.t))) {
         d.dot = true;
         d.start = seg_between(sb.segs[la.k], la.t, 1).p[0];
         d.dot_dir = seg_tangent(sb.segs[la.k], la.t);
         out.push_back(d);
         continue;
       }
-      for (size_t k = la.k; k <= lb.k; k++) {
-        Real ta = k == la.k ? la.t : 0, tb = k == lb.k ? lb.t : 1;
-        if (!(tb > ta)) {
+      /* the spans: (segment, from, to) in order; a wrapped dash runs on from the last segment into the first */
+      struct Span {
+        size_t k;
+        Real ta, tb;
+      };
+      std::vector<Span> spans;
+      if (wrapped && &pr == &pairs.back()) {
+        for (size_t k = la.k; k < sb.segs.size(); k++) {
+          spans.push_back({k, k == la.k ? la.t : 0, 1});
+        }
+        for (size_t k = 0; k <= lb.k; k++) {
+          spans.push_back({k, 0, k == lb.k ? lb.t : 1});
+        }
+      } else {
+        for (size_t k = la.k; k <= lb.k; k++) {
+          spans.push_back({k, k == la.k ? la.t : 0, k == lb.k ? lb.t : 1});
+        }
+      }
+      size_t prev = (size_t)-1;
+      for (const Span & sp : spans) {
+        if (!(sp.tb > sp.ta)) {
           continue;
         }
-        Seg piece = seg_between(sb.segs[k], ta, tb);
+        Seg piece = seg_between(sb.segs[sp.k], sp.ta, sp.tb);
         if (!has_extent(piece)) {
           continue;
         }
-        if (!d.segs.empty() && k > 0) {
-          d.joins.push_back({sb.segs[k - 1], sb.segs[k]});
+        if (prev != (size_t)-1) {
+          d.joins.push_back({sb.segs[prev], sb.segs[sp.k]});
         }
+        prev = sp.k;
         d.segs.push_back(piece);
       }
       if (d.segs.empty()) {
