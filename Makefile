@@ -385,7 +385,7 @@ $(HASH_PROBE): tools/corpus-hash.c $(APP_DIR)/$(STATIC_TARGET) \
 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: run-examples
-.PHONY: check-corpus-hash check-planted
+.PHONY: check-corpus-hash check-planted check-resvg-stroke
 .PHONY: check-fp-contract check-edges check-libm check-no-x87 check-gates libver-gen
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
@@ -482,6 +482,18 @@ check-aliasing: ## Fail if -Wstrict-aliasing is not armed at level 1
 		printf 'check-aliasing: CFLAGS resolves to -Wstrict-aliasing=%s; only level 1 reports this probe.\n' "$$level" >&2; \
 	fi; \
 	exit 1
+
+# The stroke rules' behavior check (tests/unit/test_stroke_resvg.cpp, in `make test`) reads verdicts resvg rendered,
+# committed in tests/stroke_resvg.h. This re-renders them in the pinned image and fails if they changed; without a
+# container engine or the image it skips, and fails instead under GHOTI_ORACLE_REQUIRED=1.
+RESVG_IMAGE := localhost/ghoti-shape-oracle-resvg:0.45.1
+check-resvg-stroke: ## Re-render the resvg stroke verdicts in the pinned image and fail if they changed
+	@engine=$${GHOTI_CONTAINER_ENGINE:-$$(command -v podman || command -v docker)}; \
+	if [ -z "$$engine" ] || ! $$engine image inspect $(RESVG_IMAGE) >/dev/null 2>&1; then \
+		if [ "$${GHOTI_ORACLE_REQUIRED:-0}" = 1 ]; then printf 'check-resvg-stroke: FAIL: no %s (tools/resvg-stroke/fetch.sh builds it)\n' "$(RESVG_IMAGE)" >&2; exit 1; fi; \
+		printf 'check-resvg-stroke: skipped: no %s (tools/resvg-stroke/fetch.sh builds it)\n' "$(RESVG_IMAGE)"; exit 0; \
+	fi; \
+	$$engine run --rm -v "$$PWD:/w:Z" -w /w $(RESVG_IMAGE) python3 tools/resvg-stroke/gen.py --check
 
 check-stamps: ## Fail if a compile rule names no flags stamp, or a stamp omits a variable
 	@python3 tools/check-stamps.py

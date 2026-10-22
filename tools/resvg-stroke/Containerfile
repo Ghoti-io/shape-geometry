@@ -1,0 +1,19 @@
+# resvg, the behavior check of the stroke rules' reading (stroke.h; tests/unit/test_stroke_resvg.cpp).
+#
+# An external renderer supplies behavior only: tools/resvg-stroke/gen.py renders SVG strokes with it, aliased,
+# and records which sample points it covers; no part of it is read or ported.  It is a second reading of SVG 2's
+# stroke shape, so a misreading the expansion and the oracle share (both written from the same text) shows here.
+#
+# python3-minimal runs gen.py beside it, so the driver and the renderer are one pinned image.
+#
+# Everything the build reads is pinned: the base by digest (Debian 13), the package by its full version.  The
+# run-time check is the real guarantee: fetch.sh compares `resvg --version` with the pin.
+FROM docker.io/library/debian@sha256:7792b1f7702a86946cd518db72b6a407302c3e9bc1635634368b878189e8221c
+
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends resvg=0.45.1-1 python3-minimal=3.13.5-1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && resvg --version
+
+ENTRYPOINT []
+CMD ["resvg", "--version"]

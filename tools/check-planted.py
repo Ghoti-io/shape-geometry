@@ -99,6 +99,15 @@ Story 14a adds (ids start with fx- and sc-):
   sc-      the integer spelling of the rule: the flip and its argument check, the
            half, the floor of a negative number, the int32 range of the result
 
+Strokes add (ids start with sk-): the parameters, their order of refusal and
+their bounds (SG1 to SG3), the determinant (SG15), the statuses and the parts
+(SG12, SG14, SG16), the effective tangent (SG11), every join and its reversal
+limit and SG9's exact decision (SG8, SG9), the 2018 CR's arcs join (its
+fallbacks, adjustment, meeting point, clip and limit), the body's bands and fans
+(SG6), circular pieces, the emission's inflation, orientation and rounding, the
+outline's hash and dump (SG18), and the wide exact sum.  A test list may name
+``probe``: the plant is then caught by the cross-target probe's hash as well.
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 
@@ -1382,6 +1391,143 @@ PLANTS += [
 ]
 
 
+# --- strokes (stroke.h, SG1 to SG18): ids start with sk- --------------------------------------------------------
+# A test list may name "probe": the plant is then caught too when the cross-target probe no longer prints the
+# committed hash (a vertex moved by less than the oracle can see moves the probe's hash).
+SKP = "src/stroke/params.c"
+SKE = "src/stroke/expand.c"
+SKJ = "src/stroke/join.c"
+SKB = "src/stroke/body.c"
+SKA = "src/stroke/arc.c"
+SKM = "src/stroke/emit.c"
+SKO = "src/stroke/outline.c"
+SKS = "src/exact/sum.c"
+STK = ["testStroke"]
+STM = ["testStroke_matrix"]
+STO = ["testStroke", "testStroke_matrix"]
+STROKE_PLANTS = [
+    # SG1 to SG3: the parameters
+    ("sk-init-limit", "src", SKP, "  stroke->miter_limit = GSHGEOM_STROKE_MITER_LIMIT_DEFAULT;", "  stroke->miter_limit = 10.0;", STK),
+    ("sk-init-cap", "src", SKP, "  stroke->cap = GSHGEOM_STROKE_CAP_BUTT;", "  stroke->cap = GSHGEOM_STROKE_CAP_ROUND;", STK),
+    ("sk-check-null-dashes", "src", SKP, "  if (s->dash_count && !s->dashes) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!is_finite_value(s->width)",
+     "  if (!is_finite_value(s->width)", STK),
+    ("sk-check-profile-first", "src", SKP, "  if (s->dash_count && !s->dashes) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!is_finite_value(s->width)",
+     "  if (s->width_profile) {\n    return GSHGEOM_ERR_UNSUPPORTED;\n  }\n  if (s->dash_count && !s->dashes) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!is_finite_value(s->width)", STK),
+    ("sk-check-enum-range", "src", SKP, "s->join >= (uint32_t)GSHGEOM_STROKE_JOIN_COUNT", "s->join > (uint32_t)GSHGEOM_STROKE_JOIN_COUNT", STK),
+    ("sk-check-negative-width", "src", SKP, "  if (s->width < 0.0) {\n    return GSHGEOM_ERR_INVALID;", "  if (s->width < -1.0) {\n    return GSHGEOM_ERR_INVALID;", STK),
+    ("sk-check-reserved", "src", SKP, "    if (s->_reserved[i]) {", "    if (s->_reserved[i] && i < 4) {", STK),
+    ("sk-value-min-open", "src", SKP, "(m >= GSHGEOM_STROKE_VALUE_MIN && m <= GSHGEOM_STROKE_VALUE_MAX)", "(m > GSHGEOM_STROKE_VALUE_MIN && m <= GSHGEOM_STROKE_VALUE_MAX)", STK),
+    ("sk-value-max-open", "src", SKP, "(m >= GSHGEOM_STROKE_VALUE_MIN && m <= GSHGEOM_STROKE_VALUE_MAX)", "(m >= GSHGEOM_STROKE_VALUE_MIN && m < GSHGEOM_STROKE_VALUE_MAX)", STK),
+    ("sk-miter-limit-low", "src", SKP, "!(s->miter_limit >= 1.0 &&", "!(s->miter_limit > 1.0 &&", STK),
+    ("sk-dashes-max", "src", SKP, "  if (canonical_dash_count(s) > GSHGEOM_STROKE_DASHES_MAX) {", "  if (canonical_dash_count(s) > 2 * GSHGEOM_STROKE_DASHES_MAX) {", STK),
+    ("sk-odd-not-doubled", "src", SKP, "    return s->dash_count > SIZE_MAX / 2u ? SIZE_MAX : s->dash_count * 2u;", "    return s->dash_count;", STK),
+    ("sk-dashes-drawn-solid", "src", SKP, "  if (canonical_dash_count(in) != 0) {", "  if (0) {", STK),
+    ("sk-rule-reaches-output", "src", SKP, "  out->alignment_rule = in->alignment == (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_FILL_NONZERO\n                                                                                : in->alignment_rule;",
+     "  out->alignment_rule = in->alignment_rule;", STK),
+    ("sk-degenerate-reaches-butt", "src", SKP, "  out->degenerate = in->cap == (uint32_t)GSHGEOM_STROKE_CAP_BUTT ? (uint32_t)GSHGEOM_STROKE_DEGENERATE_DRAW : in->degenerate;", "  out->degenerate = in->degenerate;", STK),
+    ("sk-negative-zero-width", "src", SKP, "  out->width = in->width == 0.0 ? 0.0 : in->width;", "  out->width = in->width;", STK),
+    # SG15: the determinant
+    ("sk-det-one-product", "src", SKP, "  if (gshgeom_orient2d(o, c0, c1, &sign) != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INTERNAL;\n  }",
+     "  sign = map->m[0][0] * map->m[1][1] != 0.0;\n  (void)o;\n  (void)c0;\n  (void)c1;", STK),
+    # SG14 to SG16: statuses and parts
+    ("sk-zero-width-draws", "src", SKE, "  if (c.st.width == 0.0) {", "  if (0) {", STK),
+    ("sk-status-order", "src", SKE, "  if (!invertible) {\n    o->status", "  if (!invertible && c.st.width != 0.0) {\n    o->status", STK),
+    ("sk-aligned-at-w", "src", SKE, "    c.h = to_aligned ? 2.0 * h : h;", "    c.h = h;", STM),
+    ("sk-open-subpath-clipped", "src", SKE, "    int to_aligned = aligned && rd.subs[i].closed && rd.subs[i].seg_count;", "    int to_aligned = aligned && rd.subs[i].seg_count;", STM),
+    ("sk-complement-inverted", "src", SKE, "  o->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;", "  o->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_INSIDE;", STK),
+    ("sk-clip-rule-ignored", "src", SKE, "  o->rule = c.st.alignment_rule;", "  o->rule = GSHGEOM_FILL_NONZERO;", STK),
+    ("sk-clip-open-subpaths", "src", SKE, "    if (!s->closed || s->seg_count == 0) {\n      continue;\n    }\n    r = gshgeom_path_move_to(mp", "    if (s->seg_count == 0) {\n      continue;\n    }\n    r = gshgeom_path_move_to(mp", STK),
+    ("sk-local-built-in-device", "src", SKE, "    if (!c->local) {\n      r = gshgeom_map_apply_curve", "    if (1) {\n      r = gshgeom_map_apply_curve", STM),
+    ("sk-draw-omit-swapped", "src", SKE, "    if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_OMIT) {", "    if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_DRAW) {", STM),
+    ("sk-lone-move-draws", "src", SKE, "    if (!s->draws || c->st.degenerate", "    if (c->st.degenerate", STM),
+    ("sk-start-cap-forward", "src", SKE, "    r = gshgeom_sk_cap(c, seg[0].p[0], gshgeom_sk_scale(-1.0, d));", "    r = gshgeom_sk_cap(c, seg[0].p[0], d);", STM),
+    ("sk-closed-start-join-dropped", "src", SKE, "    } else if (r == GSHGEOM_OK && s->closed) {\n      r = gshgeom_sk_join(c, &seg[k], &seg[0]);", "    } else if (r == GSHGEOM_OK && s->closed && 0) {\n      r = gshgeom_sk_join(c, &seg[k], &seg[0]);", STM),
+    ("sk-tangent-wrong-neighbour", "src", SKE, "  for (size_t j = i; j-- > 0;) {", "  for (size_t j = 0; j > 0;) {", STM),
+    ("sk-tangent-always-x", "src", SKE, "static GSHGEOM_SK_Vec effective_tangent(const GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {\n",
+     "static GSHGEOM_SK_Vec effective_tangent(const GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i) {\n  if (rd) {\n    return gshgeom_sk_v(1.0, 0.0);\n  }\n", STM),
+    ("sk-tangent-device-under-local", "src", SKE, "  return c->local ? gshgeom_sk_v(1.0, 0.0) : gshgeom_sk_v(c->map.m[0][0], c->map.m[1][0]);",
+     "  return gshgeom_sk_v(c->map.m[0][0], c->map.m[1][0]);", STM),
+    ("sk-magnitude-rule-removed", "src", SKE, "  if (r == GSHGEOM_OK && !magnitudes_ok(&c, &rd,", "  if (r == GSHGEOM_OK && 0 && !magnitudes_ok(&c, &rd,", STK),
+    # SG8, SG9: joins
+    ("sk-turn-side-inverted", "src", SKJ, "  int outer_left = sigma > 0;", "  int outer_left = sigma < 0;", STM),
+    ("sk-smooth-gets-a-join", "src", SKJ, "  if (sigma == 0 && ds > 0) {\n    return GSHGEOM_OK; /* a smooth vertex: no join */\n  }", "  (void)ds;", STM),
+    ("sk-sg9-strict", "src", SKJ, "    return D <= 0; /* q >= 0: |P||a||b| <= L^2 q */", "    return D < 0; /* q >= 0: |P||a||b| <= L^2 q */", STO),
+    ("sk-sg9-filter-loose", "src", SKJ, "    double bound = abs * 0x1p-40;", "    double bound = abs * 0x1p-80;", STO),
+    ("sk-sg9-dot-sign", "src", SKJ, "  int qs = dot_sign(q, v, s);", "  int qs = -dot_sign(q, v, s);", STO),
+    ("sk-miter-in-device", "src", SKJ, "    if (gshgeom_sk_miter_within(q, v, s, L)) {\n      return miter_clip(c, anchor, ah, bh, oa, ob, 1);",
+     "    if (gshgeom_sk_miter_within(gshgeom_sk_lin(c, q), gshgeom_sk_lin(c, v), gshgeom_sk_lin(c, s), L)) {\n      return miter_clip(c, anchor, ah, bh, oa, ob, 1);", STK),
+    ("sk-miter-clip-at-lw", "src", SKJ, "  double la = (L * h - gshgeom_sk_dot(A, u))", "  double la = (2.0 * L * h - gshgeom_sk_dot(A, u))", STM),
+    ("sk-miter-clip-never-clips", "src", SKJ, "    return miter_clip(c, anchor, ah, bh, oa, ob, gshgeom_sk_miter_within(q, v, s, L));\n  case GSHGEOM_STROKE_JOIN_ROUND:",
+     "    return miter_clip(c, anchor, ah, bh, oa, ob, 1);\n  case GSHGEOM_STROKE_JOIN_ROUND:", STM),
+    ("sk-round-join-full-disc", "src", SKJ, "    return gshgeom_sk_sector(c, anchor, oa, ob, 0.0, 0.0);", "    return gshgeom_sk_disc(c, anchor, 0.0, 0.0);", STM),
+    ("sk-round-sector-inner", "src", SKJ, "    return gshgeom_sk_sector(c, anchor, oa, ob, 0.0, 0.0);",
+     "    return gshgeom_sk_sector(c, anchor, gshgeom_sk_scale(-1.0, oa), gshgeom_sk_scale(-1.0, ob), 0.0, 0.0);", STM),
+    ("sk-bevel-dropped", "src", SKJ, "  case GSHGEOM_STROKE_JOIN_BEVEL:\n    return poly(c, anchor, bevel, 3, 0.0);", "  case GSHGEOM_STROKE_JOIN_BEVEL:\n    return GSHGEOM_OK;", STM),
+    ("sk-reversal-round-dropped", "src", SKJ, "    case GSHGEOM_STROKE_JOIN_ROUND:\n      return half_disc(c, anchor, n, ah);", "    case GSHGEOM_STROKE_JOIN_ROUND:\n      return GSHGEOM_OK;", STM),
+    ("sk-reversal-rect-behind", "src", SKJ, "      GSHGEOM_SK_Vec hn = gshgeom_sk_scale(h, n), f = gshgeom_sk_scale(L * h, ah);", "      GSHGEOM_SK_Vec hn = gshgeom_sk_scale(h, n), f = gshgeom_sk_scale(-L * h, ah);", STM),
+    ("sk-square-cap-half", "src", SKJ, "  GSHGEOM_SK_Vec hm = gshgeom_sk_scale(h, m), hd = gshgeom_sk_scale(h, dh);\n  GSHGEOM_SK_Vec rect[4]", "  GSHGEOM_SK_Vec hm = gshgeom_sk_scale(h, m), hd = gshgeom_sk_scale(h / 2, dh);\n  GSHGEOM_SK_Vec rect[4]", STM),
+    ("sk-butt-degenerate-dot", "src", SKJ, "  if (c->st.cap == GSHGEOM_STROKE_CAP_BUTT) {\n    return GSHGEOM_OK;\n  }\n  GSHGEOM_SK_Vec anchor;\n  GSHGEOM_Result r = gshgeom_sk_anchor(c, p, &anchor);",
+     "  GSHGEOM_SK_Vec anchor;\n  GSHGEOM_Result r = gshgeom_sk_anchor(c, p, &anchor);", STM),
+    ("sk-degenerate-square-small", "src", SKJ, "  GSHGEOM_SK_Vec hm = gshgeom_sk_scale(c->h, m), hd = gshgeom_sk_scale(c->h, dh);", "  GSHGEOM_SK_Vec hm = gshgeom_sk_scale(c->h, m), hd = gshgeom_sk_scale(c->h / 2, dh);", STM),
+    ("sk-miter-tip-error-ignored", "src", SKJ, "  *err = 0x1p-49 * ratio * ratio * len * c->norm * (1.0 + 0x1p-40);", "  *err = 0.0 * ratio * len;", ["testStroke_matrix", "testStroke"]),
+    # the arcs join (SG8, the 2018 CR)
+    ("sk-arcs-round-at-ge", "src", SKA, "  return gshgeom_exact_sum_sign(&s) > 0;", "  return gshgeom_exact_sum_sign(&s) >= 0;", STM),
+    ("sk-arcs-round-threshold-halved", "src", SKA, "  double nm1 = (double)(n - 1), nn = (double)n;", "  double nm1 = (double)(n - 1) * 2.0, nn = (double)n;", STM),
+    ("sk-arcs-miter-clip-fallback-dropped", "src", SKJ, "    if (r == GSHGEOM_OK && mc) {", "    if (0) {", STM),
+    ("sk-arcs-enclosing-as-apart", "src", SKA, "      int enclosing = dz < diff;", "      int enclosing = 0 * (int)dz;", STM),
+    ("sk-arcs-clip-at-lw", "src", SKA, "  double dn = gshgeom_sk_norm(X), Lh = L * h;", "  double dn = gshgeom_sk_norm(X), Lh = 2.0 * L * h;", STM),
+    ("sk-arcs-limit-along-chord", "src", SKA, "      if (2.0 * beta * rho > Lh) {", "      if (dn > Lh + 0.0 * beta * rho) {", STM),
+    ("sk-arcs-reversal-one-side", "src", SKJ, "        r = gshgeom_sk_arcs_join(c, in, out, 0, 1, &mc);", "        r = GSHGEOM_OK;", STM),
+    ("sk-arcs-sign-of-curvature", "src", SKA, "  e.kappa = inner_positive ? k : -k;", "  e.kappa = inner_positive ? -k : k;", STM),
+    ("sk-arcs-grow-direction", "src", SKA, "    ea.nu = rr > 0.0 ? gshgeom_sk_scale(-1.0, oa) : oa;", "    ea.nu = rr > 0.0 ? oa : gshgeom_sk_scale(-1.0, oa);", STM),
+    ("sk-arcs-fan-from-vertex", "src", SKA, "  size_t n = b->n;\n  GSHGEOM_Result res = GSHGEOM_OK;\n  double * ys = NULL;",
+     "  size_t n = b->n;\n  GSHGEOM_Result res = GSHGEOM_OK;\n  for (size_t fi = 0; fi < n && res == GSHGEOM_OK; fi++) {\n    GSHGEOM_SK_Vec tri[3] = {gshgeom_sk_v(0.0, 0.0), b->e[fi].p, b->e[fi].q};\n    res = gshgeom_sk_emit(c, anchor, tri, 3, dd, dd);\n  }\n  if (n) {\n    return res;\n  }\n  double * ys = NULL;", STM),
+    ("sk-arcs-crossings-not-heights", "src", SKA, "      if (t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0) {", "      if (0 && t < u) {", STM),
+    ("sk-arcs-ray-ignored", "src", SKA, "    int ok0 = gshgeom_sk_dot(gshgeom_sk_sub(cand[0], le->a), le->dir) >= 0.0;\n    int ok1 = gshgeom_sk_dot(gshgeom_sk_sub(cand[1], le->a), le->dir) >= 0.0;", "    int ok0 = 1;\n    int ok1 = 1;\n    (void)le;", STM),
+    ("sk-arcs-grow-behind", "src", SKA, "            if (gshgeom_sk_dot(gshgeom_sk_sub(foot, le->a), le->dir) >= 0.0) {", "            if (1 || foot.x == 0.0) {", STM),
+    ("sk-arcs-positive-winding-only", "src", SKA, "      if (before == 0 && w != 0) {\n        start = i;\n      } else if (before != 0 && w == 0) {", "      if (before <= 0 && w > 0) {\n        start = i;\n      } else if (before > 0 && w <= 0) {", STM),
+    ("sk-arcs-closer-the-other-way", "src", SKA, "      pick = side > 0.0 ? 1 : 0;", "      pick = side > 0.0 ? 0 : 1;", STM),
+    ("sk-arcs-reversal-tie-last", "src", SKA, "      if (along_key(&ea, cand[1]) < along_key(&ea, cand[0])) {", "      if (along_key(&ea, cand[1]) > along_key(&ea, cand[0])) {", STM),
+    ("sk-arcs-arc-not-clipped", "src", SKA, "          if (clip_f(b, m) > 0.0) {", "          if (clip_f(b, m) > 1e300) {", STM),
+    ("sk-arcs-chords-uncancelled", "src", SKA, "    for (int rep = 0; rep < (net < 0 ? -net : net); rep++) {", "    net = net != 0 ? (net > 0 ? 1 : -1) : 0;\n    for (int rep = 0; rep < (net < 0 ? -net : net); rep++) {", STM),
+    ("sk-arcs-polyline-unbounded", "src", SKA, "  bd.allowed = room * 0.999 - eps;", "  bd.allowed = room * 4.0;", STM),
+    ("sk-body-coincident-end-ignored", "src", SKB, "  p.zn = s->p[s->n].x == s->p[s->n - 1].x && s->p[s->n].y == s->p[s->n - 1].y && s->w[s->n] == s->w[s->n - 1];", "  p.zn = 0;", STM),
+    ("sk-body-coincident-start-ignored", "src", SKB, "  p.z0 = s->p[1].x == s->p[0].x && s->p[1].y == s->p[0].y && s->w[1] == s->w[0];", "  p.z0 = 0;", STM + ["probe"]),
+    # SG6: the body
+    ("sk-band-fold-test", "src", SKB, "  if (!(kappa * c->h < cosb)) {", "  if (!(kappa * c->h < 4.0 * cosb)) {", STM + ["probe"]),
+    ("sk-band-delta-halved", "src", SKB, "  double delta = 0.5 * lambda * sind * UP;", "  double delta = 0.01 * lambda * sind * UP;", STM),
+    ("sk-cusp-disc-dropped", "src", SKB, "  if (gshgeom_sk_dot(t0, t1) < 0.0) {", "  if (0) {", STM),
+    ("sk-fan-overshoot-ignored", "src", SKB, "        double extra = (dm + c->h_dev * over) * UP;", "        double extra = (dm + 0.0 * over) * UP;", STM),
+    ("sk-fan-sector-one-side", "src", SKB, "          *r = gshgeom_sk_sector(c, centre, gshgeom_sk_scale(-1.0, na), gshgeom_sk_scale(-1.0, nb), d_in, extra);", "          *r = GSHGEOM_OK;", STM),
+    ("sk-depth-cap-accepts", "src", SKB, "    return GSHGEOM_ERR_LIMIT; /* a forced piece is refused, never drawn coarser */", "    return GSHGEOM_OK; /* a forced piece is refused, never drawn coarser */", STK),
+    ("sk-line-normal-right", "src", SKB, "    GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h, gshgeom_sk_left(gshgeom_sk_unit(a)));", "    GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h / 2, gshgeom_sk_left(gshgeom_sk_unit(a)));", STM),
+    ("sk-split-error-dropped", "src", SKB, "      en[i] = SPLIT_C * en[i] + SPLIT * en[i + 1] + 3.0 * U * (SPLIT_C * ma + SPLIT * mb);", "      en[i] = 0.0 * (ma + mb);", ["testStroke_matrix", "probe"]),
+    # arcs (circular pieces) and emission
+    ("sk-arc-norm-ignored", "src", SKA, "    double d = (cpq > -0.5) ? r * c->norm * (gmath_sqrt(2.0 / (1.0 + cpq)) - 1.0) * UP : -1.0;", "    double d = (cpq > -0.5) ? r * (gmath_sqrt(2.0 / (1.0 + cpq)) - 1.0) * UP : -1.0;", STM),
+    ("sk-arc-inscribed", "src", SKA, "      double k = r / (1.0 + cpq);", "      double k = r / 2.0;", STM + ["probe"]),
+    ("sk-norm-unscaled", "src", SKM, "  double x = ax / m, y = ay / m;\n  return m * gmath_sqrt(x * x + y * y);", "  return gmath_sqrt(a.x * a.x + a.y * a.y);", STK),
+    ("sk-build-min-dropped", "src", SKE, "        if (dm != 0.0 && dm < GSHGEOM_SK_BUILD_MIN) {\n          return 0;\n        }", "        (void)dm;", STK),
+    ("sk-inflation-dropped", "src", SKM, "  double rc = (d_in + c->rho) * 1.0824;", "  double rc = d_in * 1.0824;", ["testStroke"]),
+    ("sk-ring-wound-backwards", "src", SKM, "    if (whole) {\n      r = write_ring(c->part, v, h);",
+     "    if (whole) {\n      for (size_t i = 0; i < h / 2; i++) {\n        GSHGEOM_Device_Point tmp = v[i];\n        v[i] = v[h - 1 - i];\n        v[h - 1 - i] = tmp;\n      }\n      r = write_ring(c->part, v, h);", STM),
+    ("sk-truncate-not-round", "src", SKM, "    r = gshgeom_round_26_6(hull[i].x, &v[i].x);\n    if (r == GSHGEOM_OK) {\n      r = gshgeom_round_26_6(hull[i].y, &v[i].y);\n    }",
+     "    v[i].x = (int32_t)(int64_t)(hull[i].x * 64.0);\n    v[i].y = (int32_t)(int64_t)(hull[i].y * 64.0);", ["testStroke", "probe"]),
+    ("sk-fits-ignores-octagon", "src", SKM, "  return d_out + GSHGEOM_SK_OCT * (d_in + c->rho) + c->rho <= c->budget;", "  return d_out <= c->budget * 4.0;", STM),
+    # SG18: the hash
+    ("sk-hash-kind", "src", SKO, "#define OUTLINE_KIND 0x4b525453u", "#define OUTLINE_KIND 0x4b525454u", STK),
+    ("sk-hash-parts-swapped", "src", SKO, "  gshgeom_hash_u64(&h, gshgeom_flat_path_hash(o->body));\n  gshgeom_hash_u64(&h, gshgeom_flat_path_hash(o->aligned));",
+     "  gshgeom_hash_u64(&h, gshgeom_flat_path_hash(o->aligned));\n  gshgeom_hash_u64(&h, gshgeom_flat_path_hash(o->body));", STK),
+    ("sk-hash-status-dropped", "src", SKO, "  gshgeom_hash_u8(&h, (uint8_t)o->status);\n", "", STK),
+    ("sk-hash-complement-dropped", "src", SKO, "  gshgeom_hash_u8(&h, (uint8_t)(o->complement ? 1 : 0));\n", "", STK),
+    ("sk-dump-absent-part", "src", SKO, '    return fprintf(out, "part %s -\\n", name) < 0 ? GSHGEOM_ERR_IO : GSHGEOM_OK;', '    return fprintf(out, "part %s\\n", name) < 0 ? GSHGEOM_ERR_IO : GSHGEOM_OK;', STK),
+    ("sk-dump-flush", "src", SKO, "  return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}", "  (void)fflush(out);\n  return GSHGEOM_OK;\n}", STK),
+    # the wide exact sum
+    ("sk-sum-base", "src", SKS, "#define SUM_BASE 12888L", "#define SUM_BASE 12000L", STK),
+    ("sk-sum-borrow", "src", SKS, "      borrow = (cur >> 63) & 1u;\n    }\n    for (i = q + len + 1;", "      borrow = 0;\n    }\n    for (i = q + len + 1;", STK),
+]
+
+PLANTS += STROKE_PLANTS
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
@@ -1496,6 +1642,11 @@ def do_plant(plant, control_objs):
         objs = compile_all(d / "obj", srcs, pre=["-I" + str(d / "include")])
     caught_by = []
     for test in tests:
+        if test == "probe":
+            rc, msg = probe_hash(objs, d)
+            if rc != 0:
+                caught_by.append(("probe", [msg.splitlines()[-1] if msg else "hash differs"]))
+            continue
         exe = d / test
         link_test(test, objs, exe)
         rc, failing = run_test(exe)
