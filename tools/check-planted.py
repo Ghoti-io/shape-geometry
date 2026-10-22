@@ -1562,8 +1562,6 @@ STROKE_PLANTS = [
     ('sk-dxf-dot-merged', "src", SKX, '  if (first_down && dashes[0] == 0.0 && last_down) {\n', '  if (0) {\n', STD),
     ('sk-dxf-dot-not-pen-down', "src", SKX, '    if (v >= 0.0) {\n      any_down = 1;\n', '    if (v > 0.0) {\n      any_down = 1;\n', STD),
     ('sk-dxf-scale-ignored', "src", SKX, '    double v = elements[i] * scale;\n    if (!finite(v)', '    double v = elements[i];\n    if (!finite(v)', STD),
-    ('sk-dxf-unsupported-dropped', "src", SKX, '    if (lead == 0.0 && dashes[k - 1] == 0.0) {\n      return GSHGEOM_ERR_UNSUPPORTED;', '    if (0) {\n      return GSHGEOM_ERR_UNSUPPORTED;', STD),
-    ('sk-dxf-unsupported-too-wide', "src", SKX, '    if (lead == 0.0 && dashes[k - 1] == 0.0) {', '    if (lead == 0.0) {', STD),
     ('sk-dxf-solid-kept-dashed', "src", SKX, '  if (!any_up) {\n', '  if (0) {\n', STD),
     ('sk-dxf-capacity-unchecked', "src", SKX, '  if (need > capacity || need > GSHGEOM_STROKE_DASHES_MAX) {\n', '  if (need > GSHGEOM_STROKE_DASHES_MAX) {\n', STD),
     ('sk-dxf-rotation-skipped', "src", SKX, '  if (!first_down) {\n    /* rotate', '  if (0) {\n    /* rotate', STD),
@@ -1577,6 +1575,11 @@ STROKE_PLANTS = [
     ('sk-dash-wrap-end-at-length', "src", SKD, 'flags = GSHGEOM_SK_POS_ENDS_AFTER;\n      }\n      GSHGEOM_Result r = fn(', 'flags = GSHGEOM_SK_POS_ENDS_AFTER;\n      }\n      flags = GSHGEOM_SK_POS_ENDS_AFTER;\n      GSHGEOM_Result r = fn(', STO),
     ('sk-dash-wrap-no-join', "src", SKD, '      r = gshgeom_sk_join(c, &segs[k], &segs[f + (r0 + j0 + jj + 1) % N]);', '      r = jj + 1 == m && m > 0 && wrap && jj + 1 > 0 && k == f + N - 1 ? GSHGEOM_OK : gshgeom_sk_join(c, &segs[k], &segs[f + (r0 + j0 + jj + 1) % N]);', STO),
     ('sk-dash-wrap-held-first-dropped', "src", SKD, '    cb->held_end = b; /* the first piece goes with the last dash */\n    return GSHGEOM_OK;\n', '    cb->held_end = 0.0;\n    return GSHGEOM_OK;\n', STO),
+    ('sk-dxf-no-nudge', "src", SKX, '        off = next_above(at);', '        off = at;', STD),
+    ('sk-dxf-nudge-down', "src", SKX, '  bits++;\n', '  bits--;\n', STD),
+    ('sk-dxf-nudge-sum-short', "src", SKX, '  for (size_t i = 0; i + 2 < k; i++) {\n        at += dashes[i];', '  for (size_t i = 0; i + 3 < k; i++) {\n        at += dashes[i];', STD),
+    ('sk-dxf-nudge-always', "src", SKX, '    int dot_last = lead == 0.0 && dashes[k - 1] == 0.0;', '    int dot_last = lead == 0.0;', STD),
+    ('sk-dxf-lone-dot-no-offset', "src", SKX, '        off = period * 0x1p-52; /* the only dot', '        off = period * 0x1p-60; /* the only dot', STD),
 ]
 
 PLANTS += STROKE_PLANTS

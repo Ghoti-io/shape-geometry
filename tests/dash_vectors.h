@@ -3839,7 +3839,7 @@ static const size_t positions_count = 1274;
 
 struct Dxf {
   const char * name; const double * elements; size_t count; double scale;
-  const double * dashes; size_t dash_count; double offset; int kind; /* 0 lowered, 1 solid, 2 unsupported */
+  const double * dashes; size_t dash_count; double offset; int kind; /* 0 lowered, 1 solid */
 };
 static const double xe0[2] = {0x0.0p+0, -0x1.0000000000000p-2};
 static const double xd0[2] = {0x0.0p+0, 0x1.0000000000000p-2};
@@ -3876,13 +3876,17 @@ static const double xd15[2] = {0x1.0000000000000p+1, 0x1.0000000000000p+0};
 static const double xe16[2] = {0x1.8000000000000p+1, 0x1.0000000000000p+0};
 static const double xd16[1] = {0.0};
 static const double xe17[4] = {-0x1.0000000000000p+0, 0x1.0000000000000p+1, -0x1.8000000000000p+1, 0x0.0p+0};
-static const double xd17[1] = {0.0};
+static const double xd17[4] = {0x1.0000000000000p+1, 0x1.8000000000000p+1, 0x0.0p+0, 0x1.0000000000000p+0};
 static const double xe18[3] = {-0x1.0000000000000p+0, 0x1.0000000000000p+1, 0x1.0000000000000p+0};
 static const double xd18[2] = {0x1.8000000000000p+1, 0x1.0000000000000p+0};
 static const double xe19[5] = {-0x1.0000000000000p+0, 0x1.0000000000000p+1, -0x1.8000000000000p+1, 0x0.0p+0, -0x1.0000000000000p+1};
 static const double xd19[4] = {0x1.0000000000000p+1, 0x1.8000000000000p+1, 0x0.0p+0, 0x1.8000000000000p+1};
-static const double xe20[4] = {0x0.0p+0, -0x1.0000000000000p+1, 0x0.0p+0, -0x1.0000000000000p+2};
-static const double xd20[4] = {0x0.0p+0, 0x1.0000000000000p+1, 0x0.0p+0, 0x1.0000000000000p+2};
+static const double xe20[2] = {-0x1.0000000000000p+0, 0x0.0p+0};
+static const double xd20[2] = {0x0.0p+0, 0x1.0000000000000p+0};
+static const double xe21[4] = {-0x1.0000000000000p+1, 0x1.8000000000000p+1, -0x1.0000000000000p+0, 0x0.0p+0};
+static const double xd21[4] = {0x1.8000000000000p+1, 0x1.0000000000000p+0, 0x0.0p+0, 0x1.0000000000000p+1};
+static const double xe22[4] = {0x0.0p+0, -0x1.0000000000000p+1, 0x0.0p+0, -0x1.0000000000000p+2};
+static const double xd22[4] = {0x0.0p+0, 0x1.0000000000000p+1, 0x0.0p+0, 0x1.0000000000000p+2};
 static const Dxf dxf[] = {
   {"dotted", xe0, 2, 0x1.0000000000000p+0, xd0, 2, 0x0.0p+0, 0},
   {"dotted_double", xe1, 2, 0x1.0000000000000p+0, xd1, 2, 0x0.0p+0, 0},
@@ -3901,12 +3905,14 @@ static const Dxf dxf[] = {
   {"space_space", xe14, 5, 0x1.0000000000000p+0, xd14, 4, 0x0.0p+0, 0},
   {"dot_dash", xe15, 3, 0x1.0000000000000p+0, xd15, 2, 0x0.0p+0, 0},
   {"solid", xe16, 2, 0x1.0000000000000p+0, xd16, 0, 0x0.0p+0, 1},
-  {"space_first_dot_last", xe17, 4, 0x1.0000000000000p+0, xd17, 0, 0x0.0p+0, 2},
+  {"space_first_dot_last", xe17, 4, 0x1.0000000000000p+0, xd17, 4, 0x1.4000000000001p+2, 0},
   {"space_first_dash_last", xe18, 3, 0x1.0000000000000p+0, xd18, 2, 0x1.8000000000000p+1, 0},
   {"spaces_merge_dot_last", xe19, 5, 0x1.0000000000000p+0, xd19, 4, 0x1.c000000000000p+2, 0},
-  {"dots_only_spaced", xe20, 4, 0x1.0000000000000p+0, xd20, 4, 0x0.0p+0, 0},
+  {"space_dot", xe20, 2, 0x1.0000000000000p+0, xd20, 2, 0x1.0000000000000p-52, 0},
+  {"space_dash_space_dot", xe21, 4, 0x1.0000000000000p+0, xd21, 4, 0x1.0000000000001p+2, 0},
+  {"dots_only_spaced", xe22, 4, 0x1.0000000000000p+0, xd22, 4, 0x0.0p+0, 0},
 };
-static const size_t dxf_count = 21;
+static const size_t dxf_count = 23;
 
 } // namespace dash_vectors
 

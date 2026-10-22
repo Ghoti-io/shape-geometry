@@ -209,10 +209,6 @@ TEST(DashDxf, EveryVector) {
     size_t n = 99;
     double off = -1;
     GSHGEOM_Result r = gshgeom_stroke_dashes_from_dxf(v.elements, v.count, v.scale, out.data(), out.size(), &n, &off);
-    if (v.kind == 2) {
-      EXPECT_EQ(r, GSHGEOM_ERR_UNSUPPORTED) << v.name;
-      continue;
-    }
     ASSERT_EQ(r, GSHGEOM_OK) << v.name;
     if (v.kind == 1) {
       EXPECT_EQ(n, 0u) << v.name;
@@ -243,6 +239,53 @@ TEST(DashDxf, TheKnownPatterns) {
   ASSERT_EQ(n, 2u);
   EXPECT_EQ(out[0], 1.0);
   EXPECT_EQ(out[1], 0.5);
+}
+
+TEST(DashDxf, ALineThatStartsJustAfterADot) {
+  /* a space, a dash, a space and a dot, repeated: the line starts with the space, and the dot comes at the end of each
+   * period, never at the start.  The positions of the lowered array must show no dot at 0 and the first dot at the
+   * period (within the unit in the last place the lowering moves the start by) */
+  const double el[4] = {-2, 3, -1, 0};
+  double out[8];
+  size_t n = 0;
+  double off = 0;
+  ASSERT_EQ(gshgeom_stroke_dashes_from_dxf(el, 4, 1.0, out, 8, &n, &off), GSHGEOM_OK);
+  std::vector<double> d(out, out + n);
+  std::vector<Pair> p = positions(d, off, 14);
+  ASSERT_GE(p.size(), 3u);
+  EXPECT_GT(p[0].a, 0.0); /* the first thing on the line is the dash, 2 in */
+  EXPECT_NEAR(p[0].a, 2.0, 1e-9);
+  EXPECT_NEAR(p[0].b, 5.0, 1e-9);
+  EXPECT_NEAR(p[1].a, 6.0, 1e-9); /* the dot at the end of the period: 2 + 3 + 1 */
+  EXPECT_NEAR(p[1].b, 6.0, 1e-9);
+  EXPECT_EQ(p[1].a, p[1].b);
+  EXPECT_NEAR(p[2].a, 8.0, 1e-9);
+  /* the start is the next double above the dot's position, not the position itself */
+  double at = 0;
+  for (size_t i = 0; i + 2 < n; i++) {
+    at += d[i];
+  }
+  EXPECT_EQ(off, std::nextafter(at, 1e300));
+  /* the dotted line that starts with a dot is not touched: a dot first keeps it */
+  const double dotted[2] = {0, -2};
+  ASSERT_EQ(gshgeom_stroke_dashes_from_dxf(dotted, 2, 1.0, out, 8, &n, &off), GSHGEOM_OK);
+  std::vector<double> dd(out, out + n);
+  std::vector<Pair> q = positions(dd, off, 5);
+  ASSERT_GE(q.size(), 1u);
+  EXPECT_EQ(q[0].a, 0.0);
+  EXPECT_EQ(q[0].b, 0.0);
+  /* and one with a space first and a lone dot: no dot at 0, a dot at the period */
+  const double lone[2] = {-1, 0};
+  ASSERT_EQ(gshgeom_stroke_dashes_from_dxf(lone, 2, 1.0, out, 8, &n, &off), GSHGEOM_OK);
+  std::vector<double> ld(out, out + n);
+  std::vector<Pair> l = positions(ld, off, 3.5);
+  ASSERT_EQ(l.size(), 3u);
+  EXPECT_NEAR(l[0].a, 1.0, 1e-9);
+  EXPECT_EQ(l[0].a, l[0].b);
+  EXPECT_NEAR(l[2].a, 3.0, 1e-9);
+  /* a pattern too small for the offset band to place the start after its lone dot */
+  const double tiny[2] = {-0x1p-64, 0};
+  EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(tiny, 2, 1.0, out, 8, &n, &off), GSHGEOM_ERR_LIMIT);
 }
 
 TEST(DashDxf, Errors) {

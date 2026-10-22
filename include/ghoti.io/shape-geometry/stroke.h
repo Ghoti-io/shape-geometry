@@ -320,10 +320,12 @@
  * one run when they are of one kind (the pattern repeats, and the offset places
  * the line's start inside it); the runs are rotated to start with a pen-down
  * run.  A dot first with a dash last keeps the dot apart (a zero-length space
- * between).  No pen-down element draws nothing (::GSHGEOM_ERR_INVALID), no space
- * is solid, and a pattern that begins with a space which no trailing space
- * continues and ends with a dot cannot be expressed (::GSHGEOM_ERR_UNSUPPORTED:
- * the line would start exactly at that dot, which SG21 keeps).
+ * between).  A pattern that begins with a space which no trailing space continues
+ * and ends with a dot starts the line just after that dot: its offset is the next
+ * double above the dot's position in the array, the limit of the phases after it
+ * (one unit in the last place of that position, inside SG26's allowance), so that
+ * the dot SG21 keeps at the phase is behind the start.  No pen-down element draws
+ * nothing (::GSHGEOM_ERR_INVALID), no space is solid.
  *
  * ## The hash and the dump (format 1)
  *
@@ -535,7 +537,7 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_dash_each(const double * dashes, size_
  * @param dash_count Receives the count; 0 means solid.
  * @param offset    Receives the offset (SG21's phase at the start of the line).
  * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID (NULL, a non-finite value, no pen-down element, a zero total);
- *   ::GSHGEOM_ERR_LIMIT (SG2's bounds, the capacity); ::GSHGEOM_ERR_UNSUPPORTED (a space first and a dot last).
+ *   ::GSHGEOM_ERR_LIMIT (SG2's bounds, the capacity, a pattern too small for the offset band).
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t count, double scale,
     double * dashes, size_t capacity, size_t * dash_count, double * offset);

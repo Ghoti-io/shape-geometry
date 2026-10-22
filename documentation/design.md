@@ -438,9 +438,16 @@ documented one for linetype definitions (for example the ezdxf linetype tutorial
 dot or space length"). The pattern repeats from the start of the line, so the last
 run and the first are one run when they are of one kind, and the line starts inside
 it: that is the offset. A pattern that begins with a space is lowered with the line
-starting at the end of the dash before it (the half-open tie above); only one that
-begins with a space and ends with a dot cannot be (the dot would stand at the start
-of the line, where SG21 keeps a dash of no length). Complex linetypes (embedded
+starting at the end of the dash before it (the half-open tie above). One that begins
+with a space and ends with a dot has the dot of each period exactly where the line
+starts, and the positions keep a dash of no length at the phase (the ordinary dotted
+line, `[0, 10]` at offset 0, needs it), so its offset is the limit of the phases after
+the dot instead: the next double above the dot's position in the array (for a lone dot,
+the period times `2^-52`). That moves the start of the line by one unit in the last place
+of that position, far inside the cut error the expansion already allows (SG26), and puts
+the dot behind it; the pattern is otherwise exact, and no style field is needed. A
+rule keyed to the array's first element, or to how the offset was reached, would draw
+one periodic pattern differently depending on where the array was cut. Complex linetypes (embedded
 shapes or text) are not lowered. The vectors are hand-built patterns that cover
 every case of the merge and the rotation (dotted, dashed, dash-dot, divide, center,
 phantom and border shapes, a space first, a dash last, a dot first, spaces and dots

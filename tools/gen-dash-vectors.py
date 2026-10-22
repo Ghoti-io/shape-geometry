@@ -26,6 +26,7 @@ standard library:
     python3 tools/gen-dash-vectors.py > tests/dash_vectors.h
 """
 from fractions import Fraction as F
+import math
 import sys
 
 
@@ -130,6 +131,8 @@ DXF = [
     ("space_first_dot_last", [F(-1), F(2), F(-3), F(0)], F(1)),
     ("space_first_dash_last", [F(-1), F(2), F(1)], F(1)),
     ("spaces_merge_dot_last", [F(-1), F(2), F(-3), F(0), F(-2)], F(1)),
+    ("space_dot", [F(-1), F(0)], F(1)),
+    ("space_dash_space_dot", [F(-2), F(3), F(-1), F(0)], F(1)),
     ("dots_only_spaced", [F(0), F(-2), F(0), F(-4)], F(1)),
 ]
 
@@ -146,9 +149,14 @@ def normalize(intervals, span):
     return out
 
 
+def next_above(x):
+    return F(math.nextafter(float(x), math.inf))
+
+
 def lower(vals):
-    """The lowering (stroke.h SG30), in Fractions: (dash list, offset), None for solid, "unsupported" for a pattern
-    that begins with a space no trailing space continues and ends with a dot."""
+    """The lowering (stroke.h SG30), in Fractions: (dash list, offset, nudged), None for solid.  A pattern that begins
+    with a space nothing continues and ends with a dot starts the line just after that dot: the offset is the next
+    double above the dot's position (nudged), or, for the only dot, the period times 2^-52."""
     down = [v >= 0 for v in vals]
     if all(down):
         return None
@@ -166,16 +174,20 @@ def lower(vals):
         runs[0][1] += last[1]
         start_off = last[1]
     offset = start_off
+    nudged = False
     if not runs[0][0]:
-        if start_off == 0 and runs[-1][1] == 0:
-            return "unsupported"  # the phase would stand exactly at the dot that ends the period (SG21 keeps it)
+        dot_last = start_off == 0 and runs[-1][1] == 0
         first = runs.pop(0)
         runs.append(first)
         period = sum(r[1] for r in runs)
         offset = start_off - first[1]
         if offset < 0:
             offset += period
-    return [r[1] for r in runs], offset
+        if dot_last:
+            at = sum(r[1] for r in runs[:-2])
+            offset = next_above(at) if at > 0 else max(period * F(1, 2**52), F(1, 2**64))
+            nudged = True
+    return [r[1] for r in runs], offset, nudged
 
 
 def dxf_cases():
@@ -193,19 +205,23 @@ def dxf_cases():
                     raw.append((x, x + v))
                 x += abs(v)
         want = normalize(raw, span)
-        if res == "unsupported":
-            cases.append((name, elements, scale, "unsupported", F(0)))
-            continue
         if res is None:
             got = [(F(0), span)]
             # a solid pattern has no spaces: every interval touches the next
             assert len(want) == 1 and want[0][0] == 0 and want[0][1] >= span - 0, name
             cases.append((name, elements, scale, None, F(0)))
             continue
-        dashes, offset = res
+        dashes, offset, nudged = res
         got = normalize(positions(dashes, offset, span), span)
         # the raw pattern's last interval may run past span: compare clipped
-        assert got == want, (name, got, want)
+        if nudged:
+            # the line starts one unit in the last place after the dot: every end is that much earlier
+            tol = 4 * (offset - sum(dashes[:-2]) if len(dashes) > 2 else offset)
+            assert len(got) == len(want), (name, got, want)
+            assert all(abs(a - c) <= tol and abs(b - d) <= tol for (a, b), (c, d) in zip(got, want)), (name, got, want)
+            assert all(a > 0 or b > 0 for a, b in got[:1]), name  # no dot at the start of the line
+        else:
+            assert got == want, (name, got, want)
         cases.append((name, elements, scale, dashes, offset))
     return cases
 
@@ -247,7 +263,7 @@ def main():
     out.append("")
     out.append("struct Dxf {")
     out.append("  const char * name; const double * elements; size_t count; double scale;")
-    out.append("  const double * dashes; size_t dash_count; double offset; int kind; /* 0 lowered, 1 solid, 2 unsupported */")
+    out.append("  const double * dashes; size_t dash_count; double offset; int kind; /* 0 lowered, 1 solid */")
     out.append("};")
     dc = dxf_cases()
     for i, (name, elements, scale, dashes, offset) in enumerate(dc):
@@ -255,7 +271,7 @@ def main():
         out.append(arr("xd%d" % i, dashes if isinstance(dashes, list) else []))
     out.append("static const Dxf dxf[] = {")
     for i, (name, elements, scale, dashes, offset) in enumerate(dc):
-        kind = 2 if dashes == "unsupported" else (1 if dashes is None else 0)
+        kind = 1 if dashes is None else 0
         out.append('  {"%s", xe%d, %d, %s, xd%d, %d, %s, %d},' % (
             name, i, len(elements), hexd(scale), i, len(dashes) if kind == 0 else 0, hexd(offset), kind))
     out.append("};")

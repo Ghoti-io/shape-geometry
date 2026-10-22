@@ -31,13 +31,26 @@
  * runs are rotated to start with a pen-down run.  Two cases keep the dash
  * positions' ties out of the way: a dot first with a dash last keeps the dot apart
  * (a zero-length space between), and a pattern that begins with a space which no
- * trailing space continues and ends with a dot cannot be expressed (the phase would
- * stand exactly at that dot, which the positions keep).
+ * trailing space continues and ends with a dot starts the line just after that dot,
+ * so its offset is the next double above the dot's position (the limit of the phases
+ * after it).
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
 
 #include "stroke_internal.h"
+
+#include <stdint.h>
+#include <string.h>
+
+/** The next double above a positive finite x (bit pattern plus one). */
+static double next_above(double x) {
+  uint64_t bits;
+  memcpy(&bits, &x, sizeof bits);
+  bits++;
+  memcpy(&x, &bits, sizeof x);
+  return x;
+}
 
 static int finite(double x) {
   return x - x == 0.0;
@@ -120,12 +133,7 @@ GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t co
   double off = lead;
   if (!first_down) {
     /* rotate to start with a pen-down run */
-    /* a space first with nothing merged into it and a dot last: the phase would stand exactly at that dot, which
-     * SG21 keeps (a dash of no length exactly at the phase), a dot at the start of the line that the pattern does not
-     * have */
-    if (lead == 0.0 && dashes[k - 1] == 0.0) {
-      return GSHGEOM_ERR_UNSUPPORTED;
-    }
+    int dot_last = lead == 0.0 && dashes[k - 1] == 0.0;
     double first = dashes[0];
     for (size_t i = 1; i < k; i++) {
       dashes[i - 1] = dashes[i];
@@ -138,6 +146,28 @@ GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t co
     off = lead - first;
     if (off < 0.0) {
       off += period;
+    }
+    if (dot_last) {
+      /* The line starts just after the dot that ends each period (a space first, nothing before it, a dot last):
+       * the phase is the dot's own position, where SG21 keeps a dash of no length, and the pattern has no dot at the
+       * start of the line.  The phase of a line that starts just after the dot is the limit from above: the next
+       * double above the dot's position, which moves every dash by one unit in the last place of that position (far
+       * inside SG26's cut error allowance) and leaves the dot behind the start. */
+      double at = 0.0;
+      for (size_t i = 0; i + 2 < k; i++) {
+        at += dashes[i];
+      }
+      if (at > 0.0) {
+        off = next_above(at);
+      } else {
+        off = period * 0x1p-52; /* the only dot: its position is 0, where no double is nearer than this */
+        if (off < GSHGEOM_STROKE_VALUE_MIN) {
+          off = GSHGEOM_STROKE_VALUE_MIN;
+        }
+        if (!(off < dashes[k - 1])) {
+          return GSHGEOM_ERR_LIMIT; /* a pattern too small for the offset band to place the start after its dot */
+        }
+      }
     }
   }
   for (size_t i = 0; i < k; i++) {
