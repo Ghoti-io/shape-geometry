@@ -491,6 +491,31 @@ TEST(StrokeMatrix, DashesAcrossTheStartOfAClosedSubpath) {
   }
 }
 
+TEST(StrokeMatrix, ASmoothClosedCurveUnderADeviceMapHasNoArcsJoinAtItsSmoothVertices) {
+  /* A lens whose two cubics meet smoothly at both ends (the tangents are (-8, 0) and (-8, 0) at (12, 16), (8, 0) and
+   * (8, 0) at (12, 4)).  Under a rotation by 0.9/0.4 the mapped control points no longer line up exactly, the vertex is
+   * a turn of a few ulps on the doubles, and under device width the arcs join was built from it (a filled disc where the
+   * region is a ring).  SG8 gives a smooth vertex no join: the region must not depend on rounding of the mapped doubles. */
+  Ops lens = {{'M', {12, 4}}, {'C', {20, 4, 20, 16, 12, 16}}, {'C', {4, 16, 4, 4, 12, 4}}, {'Z', {}}};
+  for (const GSHGEOM_Map & m : {map_of(0.9, -0.4, 0.4, 0.9, 1.3125, 0.6875), map_of(0.9, 0.4, -0.4, 0.9, 1.3125, 0.6875),
+           map_of(0.95, 0.2, -0.2, 0.95, 0.375, 0.5), map_id()}) {
+    for (int join : {ARCS, MITER, ROUND, BEVEL, MCLIP}) {
+      for (uint32_t space : {1u, 0u}) {
+        GSHGEOM_Stroke st = style(3, join, 4, BUTT);
+        st.width_space = space;
+        run({"lens, a smooth closed curve under a map", lens, st, m, GSHGEOM_FLATTEN_TOLERANCE});
+        GSHGEOM_Path * path = sm::build(lens);
+        GSHGEOM_Stroke_Outline * o = nullptr;
+        ASSERT_EQ(gshgeom_stroke_expand(path, &st, &m, nullptr, nullptr, &o), GSHGEOM_OK);
+        /* every join of the same case is about 3000 points; the defect made 7647 */
+        EXPECT_LT(gshgeom_flat_path_point_count(gshgeom_stroke_outline_body(o)), (size_t)4500) << "join " << join << " space " << space;
+        gshgeom_stroke_outline_destroy(o);
+        gshgeom_path_destroy(path);
+      }
+    }
+  }
+}
+
 TEST(StrokeMatrix, DashesOnCurves) {
   std::vector<std::pair<std::string, Ops>> curves = {
       {"quadratic", {{'M', {0, 0}}, {'Q', {10, 18, 20, 0}}}},

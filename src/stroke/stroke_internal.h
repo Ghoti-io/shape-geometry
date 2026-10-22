@@ -61,6 +61,9 @@ typedef struct GSHGEOM_SK_Seg {
   GSHGEOM_SK_Vec p[4];   ///< Control points, build space.
   double w[4];           ///< Weights (1 for a polynomial kind).
   size_t elem;           ///< The index of the path element it was read from.
+  GSHGEOM_SK_Vec model_p[4]; ///< The control points before the map (what the vertex class is decided on).
+  int vtx_valid;         ///< Nonzero when `vtx_class` was decided from the model points.
+  int vtx_class;         ///< The vertex at this segment's start, against the segment before it: 0 a turn, 1 smooth, 2 a reversal.
 } GSHGEOM_SK_Seg;
 
 /** One subpath as SG5 reads it (expand.c). */
@@ -281,6 +284,14 @@ int gshgeom_sk_start_dir(const GSHGEOM_SK_Seg * s, GSHGEOM_SK_Vec * dir);
 
 /** SG5's end direction and the index of the control point that defines it; -1 for no extent. */
 int gshgeom_sk_end_dir(const GSHGEOM_SK_Seg * s, GSHGEOM_SK_Vec * dir);
+
+/**
+ * Whether the vertex of three points is a turn (0), smooth (1: `orient2d` zero and `a . b > 0`) or a reversal (2),
+ * decided exactly on the given points.  An invertible linear map keeps this class, so under device width it is decided
+ * on the points before the map: the mapped doubles are rounded and a vertex smooth in the model can be a turn of a few
+ * ulps there (SG8, SG10).
+ */
+int gshgeom_sk_vertex_class(GSHGEOM_SK_Vec q, GSHGEOM_SK_Vec v, GSHGEOM_SK_Vec s);
 
 /** The join at the vertex between @p in and @p out (SG8, SG9). */
 GSHGEOM_Result gshgeom_sk_join(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * in, const GSHGEOM_SK_Seg * out);

@@ -248,6 +248,15 @@ static GSHGEOM_Result half_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHGE
   return r;
 }
 
+int gshgeom_sk_vertex_class(GSHGEOM_SK_Vec q, GSHGEOM_SK_Vec v, GSHGEOM_SK_Vec s) {
+  GSHGEOM_Point pq = {q.x, q.y, 0.0}, pv = {v.x, v.y, 0.0}, ps = {s.x, s.y, 0.0};
+  int sigma = 0;
+  if (gshgeom_orient2d(pq, pv, ps, &sigma) != GSHGEOM_OK || sigma != 0) {
+    return 0;
+  }
+  return dot_sign(q, v, s) > 0 ? 1 : 2;
+}
+
 GSHGEOM_Result gshgeom_sk_join(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * in, const GSHGEOM_SK_Seg * out) {
   GSHGEOM_SK_Vec a, b;
   int qi = gshgeom_sk_end_dir(in, &a);
@@ -262,6 +271,17 @@ GSHGEOM_Result gshgeom_sk_join(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * in, co
     return GSHGEOM_ERR_INTERNAL;
   }
   int ds = dot_sign(q, v, s);
+  if (out->vtx_valid) {
+    /* the class decided before the map (see gshgeom_sk_vertex_class): the mapped doubles can show a turn of a few ulps
+     * at a vertex that is smooth, or miss one that is not */
+    if (out->vtx_class == 1) {
+      return GSHGEOM_OK;
+    }
+    if (out->vtx_class == 2) {
+      sigma = 0;
+      ds = -1;
+    }
+  }
   if (sigma == 0 && ds > 0) {
     return GSHGEOM_OK; /* a smooth vertex: no join */
   }

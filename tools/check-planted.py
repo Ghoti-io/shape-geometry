@@ -1593,6 +1593,10 @@ STROKE_PLANTS = [
     ('sg31-linear-part-dropped', 'src', SKP, '  GSHGEOM_Map out = *map;', '  GSHGEOM_Map out = *map;\n  out.m[0][1] = 0.0;', ["testStroke_canonical"]),
     ('sg31-3d-accepted', 'src', SKP, 'gshgeom_map_check(map) != GSHGEOM_OK || map->dim != 2) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double limit', 'gshgeom_map_check(map) != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double limit', ["testStroke_canonical"]),
     ('sg31-kind-stale', 'src', SKP, '  out.kind = frac[0] != 0.0 || frac[1] != 0.0 ?', '  out.kind = 1 ?', ["testStroke_canonical"]),
+    ('sk-join-class-ignored', "src", SKJ, '    if (out->vtx_class == 1) {\n', '    if (0) {\n', STM),
+    ('sk-join-class-on-mapped-points', "src", SKE, '    pm.p[k] = pm.model_p[k];\n', '    pm.p[k] = pm.p[k];\n', STM),
+    ('sk-join-class-next-mapped', "src", SKE, '    nm.p[k] = nm.model_p[k];\n', '    nm.p[k] = nm.p[k];\n', STM),
+    ('sk-join-class-wrap-dropped', "src", SKE, '    if (s->closed && s->seg_count > 0) {\n      classify(', '    if (0) {\n      classify(', STM),
 ]
 
 PLANTS += STROKE_PLANTS

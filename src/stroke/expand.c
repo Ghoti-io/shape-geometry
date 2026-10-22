@@ -114,6 +114,7 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
     s.n = gshgeom_curve_point_count(cv.kind) - 1;
     s.rational = gshgeom_curve_is_rational(cv.kind);
     for (int k = 0; k <= s.n; k++) {
+      s.model_p[k] = gshgeom_sk_v(el.curve.p[k].x, el.curve.p[k].y);
       s.p[k] = gshgeom_sk_v(cv.p[k].x, cv.p[k].y);
       s.w[k] = s.rational ? cv.w[k] : 1.0;
     }
@@ -133,6 +134,36 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
     }
   }
   return GSHGEOM_OK;
+}
+
+/** The class of the vertex at the start of segment @p next, against @p prev, on the points before the map (SG8, SG10). */
+static void classify(const GSHGEOM_SK_Seg * prev, GSHGEOM_SK_Seg * next) {
+  GSHGEOM_SK_Seg pm = *prev, nm = *next;
+  for (int k = 0; k <= pm.n; k++) {
+    pm.p[k] = pm.model_p[k];
+  }
+  for (int k = 0; k <= nm.n; k++) {
+    nm.p[k] = nm.model_p[k];
+  }
+  GSHGEOM_SK_Vec a, b;
+  int qi = gshgeom_sk_end_dir(&pm, &a), si = gshgeom_sk_start_dir(&nm, &b);
+  if (qi < 0 || si < 0) {
+    return;
+  }
+  next->vtx_class = gshgeom_sk_vertex_class(pm.p[qi], pm.p[pm.n], nm.p[si]);
+  next->vtx_valid = 1;
+}
+
+static void classify_all(Reader * rd) {
+  for (size_t i = 0; i < rd->sub_n; i++) {
+    const Sub * s = &rd->subs[i];
+    for (size_t k = 1; k < s->seg_count; k++) {
+      classify(&rd->segs[s->first_seg + k - 1], &rd->segs[s->first_seg + k]);
+    }
+    if (s->closed && s->seg_count > 0) {
+      classify(&rd->segs[s->first_seg + s->seg_count - 1], &rd->segs[s->first_seg]);
+    }
+  }
 }
 
 static double fabs_(double x) {
@@ -395,6 +426,9 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
   Reader rd;
   memset(&rd, 0, sizeof rd);
   r = read_centerline(&c, centerline, &rd);
+  if (r == GSHGEOM_OK) {
+    classify_all(&rd);
+  }
   int aligned = c.st.alignment != GSHGEOM_STROKE_ALIGN_CENTER;
   int any_closed = 0;
   for (size_t i = 0; i < rd.sub_n; i++) {
