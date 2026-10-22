@@ -74,12 +74,15 @@ TEST(DashPositions, ChosenCasesByHand) {
   p = positions({0, 10}, 0, 30);
   ASSERT_EQ(p.size(), 3u);
   EXPECT_EQ(p[2].a, 20); EXPECT_EQ(p[2].b, 20);
-  /* a negative offset counts back from the period's end: -3 on [5,3] is 5 into the period, the end of the dash, so
-   * the gap runs 0-3 and the next dash begins at 3 */
+  /* a negative offset counts back from the period's end: -3 on [5,3] is 5 into the period, exactly the end of the
+   * dash, which the text's rule leaves as a dash of no length at the start; the gap runs 0-3 and the next dash
+   * begins at 3 */
   p = positions({5, 3}, -3, 8);
-  ASSERT_GE(p.size(), 1u);
-  EXPECT_EQ(p[0].a, 3);
-  EXPECT_EQ(p[0].b, 8);
+  ASSERT_EQ(p.size(), 2u);
+  EXPECT_EQ(p[0].a, 0);
+  EXPECT_EQ(p[0].b, 0);
+  EXPECT_EQ(p[1].a, 3);
+  EXPECT_EQ(p[1].b, 8);
   /* all zero, a negative length, an empty array: solid */
   for (std::vector<double> d : {std::vector<double>{0, 0}, std::vector<double>{1, -1}, std::vector<double>{}}) {
     p = positions(d, 3, 9);
@@ -90,18 +93,27 @@ TEST(DashPositions, ChosenCasesByHand) {
 }
 
 TEST(DashPositions, ThePhaseAtTheEndOfADash) {
-  /* [5,3], phase 5: the positive dash is used up, so no zero-length dash at the start; the gap runs 0-3 */
+  /* SVG 2's rule, read literally: the least index whose prefix sum reaches the phase, so a phase exactly at the end of a
+   * dash is in that dash, with nothing left of it: a dash of no length at the start, then the gap 0-3 and the next
+   * dash 3-8 */
   auto p = positions({5, 3}, 5, 20);
-  ASSERT_GE(p.size(), 1u);
-  EXPECT_EQ(p[0].a, 3);
-  EXPECT_EQ(p[0].b, 8);
-  /* a zero-length dash exactly at the phase is kept: [0,10] phase 0 starts with a dot */
+  ASSERT_GE(p.size(), 2u);
+  EXPECT_EQ(p[0].a, 0);
+  EXPECT_EQ(p[0].b, 0);
+  EXPECT_EQ(p[1].a, 3);
+  EXPECT_EQ(p[1].b, 8);
+  /* a dotted line starts with a dot */
   p = positions({0, 10}, 0, 5);
   ASSERT_EQ(p.size(), 1u);
   EXPECT_EQ(p[0].a, 0);
   EXPECT_EQ(p[0].b, 0);
-  /* the phase at the start of a gap: nothing at 0 */
-  p = positions({1, 10}, 1, 5);
+  /* the phase at the end of a gap is the start of the next dash: no dash of no length */
+  p = positions({5, 3}, 8, 5);
+  ASSERT_EQ(p.size(), 1u);
+  EXPECT_EQ(p[0].a, 0);
+  EXPECT_EQ(p[0].b, 5);
+  /* inside a gap */
+  p = positions({5, 3}, 6, 1);
   EXPECT_EQ(p.size(), 0u);
   /* a length of zero: the first piece only, when the pattern is on at the phase */
   p = positions({5, 3}, 0, 0);
@@ -109,6 +121,10 @@ TEST(DashPositions, ThePhaseAtTheEndOfADash) {
   EXPECT_EQ(p[0].b, 0);
   p = positions({5, 3}, 6, 0);
   EXPECT_EQ(p.size(), 0u);
+  /* a dash that would begin exactly at the end of the subpath is not made (while position < pathlength) */
+  p = positions({5, 5}, 0, 10);
+  ASSERT_EQ(p.size(), 1u);
+  EXPECT_EQ(p[0].b, 5);
 }
 
 TEST(DashPositions, TheReductionIsExact) {

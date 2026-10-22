@@ -240,13 +240,11 @@
  * path, cut at the subpath's ends), reduced to `[0, P)` by the floored modulo.
  * With the prefix sums `S_i = d_0 + ... + d_i`, `index` is the least `i` with
  * `S_i >= o`.  The first piece is `<0, min(S_index - o, L)>`, a dash when `index`
- * is even, except that a positive dash the phase has used up entirely is over
- * and makes no zero-length dash at the start (the text's loop would; a
- * zero-length dash exactly at the phase is kept; this is the one place the rule
- * differs from the text's loop, and it is what makes a pattern that begins with
- * a space expressible).  Each following entry in turn, wrapping to entry 0 after
- * the last, starts at `position` and has length `min(d_i, L - position)`, its
- * pair `<position, position + length>` a dash when `i` is even, and the
+ * is even (the text's rule, read literally: a phase exactly at the end of a dash
+ * is in that dash with nothing left of it, a dash of no length at the start).
+ * Each following entry in turn, wrapping to entry 0 after the last, starts at
+ * `position` and has length `min(d_i, L - position)`, its pair
+ * `<position, position + length>` a dash when `i` is even, and the
  * sequence stops at the first entry that starts at or after `L`: a dash that
  * would begin exactly at the end of the subpath is not made.  For `L = 0` the
  * first piece only.
@@ -312,10 +310,12 @@
  * (a dot adding zero), consecutive spaces one run; the first and last runs are
  * one run when they are of one kind (the pattern repeats, and the offset places
  * the line's start inside it); the runs are rotated to start with a pen-down
- * run.  No pen-down element draws nothing (::GSHGEOM_ERR_INVALID), no space is
- * solid, a pattern that begins with a space and ends with a dot cannot be
- * expressed (::GSHGEOM_ERR_UNSUPPORTED: the dot at the period's end would stand
- * at the line's start too).
+ * run.  A dot first with a dash last keeps the dot apart (a zero-length space
+ * between).  No pen-down element draws nothing (::GSHGEOM_ERR_INVALID), no space
+ * is solid, and a pattern that begins with a space which no trailing space
+ * continues cannot be expressed (::GSHGEOM_ERR_UNSUPPORTED: the line would start
+ * exactly at the end of the dash before it, where SG21 begins with a dash of no
+ * length).
  *
  * ## The hash and the dump (format 1)
  *
@@ -485,11 +485,12 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand(const GSHGEOM_Path * centerline
  * @return ::GSHGEOM_OK (a not-invertible map and width 0 included);
  *   ::GSHGEOM_ERR_INVALID for NULL, an invalid map, a 3D map or a tolerance
  *   below the minimum, and as SG2; ::GSHGEOM_ERR_UNSUPPORTED for a 3D
- *   centerline, a width profile or a non-solid dash array; ::GSHGEOM_ERR_LIMIT
+ *   centerline or a width profile; ::GSHGEOM_ERR_LIMIT
  *   as SG2, for an outline vertex outside the 26.6 range, a part past
  *   `max_points`, a magnitude past the expansion's arithmetic bound
- *   (documentation/design.md, "The expansion's arithmetic"), or a piece the
- *   depth cap would force; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.
+ *   (documentation/design.md, "The expansion's arithmetic"), a piece the
+ *   depth cap would force, more dash steps than the work cap (`4 max_points +
+ *   4096`) or a cut position's error past SG26's gate; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand_with_tolerance(
     const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,

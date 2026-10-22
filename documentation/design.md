@@ -5,7 +5,8 @@ bounds and the hash spelling; maps, the orientation rules, the exact
 predicates and the route predicate; the 26.6 device path and the integer
 flattener (revision 2); along-path parametrization; the fill rules; strokes:
 the definition of the covered region and the expansion (construction revision
-1), solid strokes only (dashes are refused until they are defined).
+1), solid and dashed (SG19 to SG30), and a DXF simple linetype lowered to a dash
+array.
 
 Paths, transforms and flattening for the shape family, bit-identical on every host.
 
@@ -362,6 +363,192 @@ conservative stroke box plus the tolerance, and records the deviation profile.
 `tests/unit/test_stroke.cpp` covers the parameters, statuses, parts, hash, dump,
 limits and allocation failure.
 
+### Dashes
+
+A dash array cuts the centerline before the body is built (`stroke.h`, SG19 to
+SG30). Each dash is an open piece of the centerline and is stroked by the rules
+of the solid stroke (SG5 to SG10), so a dashed stroke is the same union of
+positively wound pieces and keeps the same tolerance proof; only the ends of
+each piece and the vertices inside it are new. `src/stroke/dash.c` does it.
+
+**The distance and the cut.** Lengths are measured with `along.h` at its finest
+tolerance (`2^-46`), in the width space: the model path under local width, the
+mapped path under device width (the expansion rebuilds the centerline element for
+element under the map and measures that). A dash end at a distance becomes a
+segment and a parameter through the measured table (a boundary is the later
+segment's, the end of a subpath the last segment's); the piece of a segment
+between two parameters is cut by de Casteljau in homogeneous coordinates, the
+outer end points copied bit for bit, so a piece that keeps an end of its segment
+keeps that vertex exactly. The join at a vertex strictly inside a dash is decided
+from the two original segments that meet there (SG22), never from the cut
+pieces, whose computed control points would show a smooth vertex as a tiny turn;
+a cap's direction at a cut is the hodograph of the original segment at the
+parameter (`N'D - ND'` for a rational kind), or SG5's exact end direction when the
+cut is an end of the segment. A dot (SG24) takes the same direction.
+
+**The positions** (SG21) are SVG 2's "dash positions", read literally, with a running
+position replaced by `(q P + S) - o` so that the error of an end does not grow with the
+dashes before it, and the phase reduced by exact long division (no quotient in doubles).
+The text takes the least index whose prefix sum is at least the phase, so a phase exactly
+at the end of a positive dash leaves a dash of no length at the start of the path, which
+the round and square caps draw as a dot; renderers draw nothing there. The text is
+followed. Its consequence for a DXF linetype is that a pattern which begins with a space
+that no trailing space continues cannot be lowered (the line would start exactly at the
+end of the dash before it). Treating a positive dash that the phase has used up entirely as
+over is the other reading (renderers do, and the pattern would become expressible); it
+differs from the text, so it is not taken.
+
+| Point | Reading |
+|---|---|
+| The body's half width | The CR's stroke-shape algorithm says "within distance stroke-width" of the centerline, where its caps and joins use half the width: half the width (SG6), the erratum read as every renderer reads it. |
+| A cusp inside a segment | The literal union of normals sweeps nothing at an exact cusp; every nearby curve's normals sweep a half turn there. SG6 adds the disc, which keeps the region continuous in the control points. |
+| Miter-clip's clip distance | The CR's property text: half the miter limit times the width from the join point. One sentence of its miter-clip description says "half the value of miter length"; read as the same distance. |
+| A reversal (`phi = pi`) | Each join's limit as the turn approaches a half turn: nothing for bevel and miter, the half disc ahead for round, the rectangle of length `L h` for miter-clip. Arcs' two one-sided limits differ (each pairs a different segment's curvature with a side), so it is their union. |
+| Arcs: the curvature of an end | The CR gives it for quadratic and cubic Beziers and elliptical arcs; SG8 uses the curvature of the segment at that end for every kind (for a rational kind with the weights' factor `w_0 w_2 / w_1^2`), which is what the CR's formulas are. |
+| Arcs: "curvature greater than 2 / stroke-width" | The path's curvature magnitude, `|kappa| > 1 / h`, strict, decided exactly: the radius at which an offset edge degenerates, and the reading that does not depend on the direction of travel. |
+| Arcs: a vanishing first difference | The CR says the curvature is infinite and a line is used: a line, whose curvature counts as zero for the fallbacks. |
+| Arcs: which meeting point | The closest to the vertex that is on both extensions. An extension that is a line is a ray (forward from the incoming edge's end along its direction, backward from the outgoing edge's start), so a meeting point behind its start is not on it; a circle is all of itself. Of two candidates the closer is the one on the vertex's side of the line of centres (a circle and a line: nearer the vertex's foot along the line), a comparison that needs no distances; they tie exactly when the vertex is on that line, which is a reversal of two curved segments, and the tie goes to the one reached first along the incoming edge's extension. |
+| Arcs: the radius adjustment | The least positive amount that makes the circles touch; a circle and a line: the circle alone grows (the limit of both circle cases as one radius tends to infinity); where nothing can touch (parallel tangents), the CR's rectangle. |
+| Arcs: the region | The bevel together with what the closed boundary V, A, the first extension to the meeting point, the second extension back to B, V encloses by nonzero winding: the region the CR's lines and arcs enclose, read literally. Where the extensions curl past the vertex (a reversal of two curved segments) that region is not star-shaped from the vertex, and a union of segments from the vertex would cover a far larger area than the CR's boundary encloses. |
+| Arcs: the clip | The clip is applied to the boundary: its parts in the half plane, closed along the clip line, enclose exactly the region cut by the half plane (a closed curve and its clipping wind the same about every point of the half plane). `Gamma` is the circle tangent to the bisector at the vertex through the meeting point (a line when the point is on the bisector); the clip line is perpendicular to `Gamma` at arc length `L h`, keeping the vertex's side. A meeting point behind the vertex on the bisector takes the straight clip. |
+| Arcs under device width | The curvatures of the mapped curve: the CR's non-scaling-stroke clause computes the whole outline in host space. |
+| A degenerate square's direction | SVG 2's effective tangent, read literally across subpaths: the end direction of the last segment with extent before it in the path, else the start direction of the first after it, else local `+x`. |
+| Canvas | One-point subpaths are dropped and zero-length segments pruned: a canvas front-end lowers to "omit". |
+
+### The construction (revision 1)
+
+The region is a union of pieces: the body of a stretch of a segment, a join, a
+cap, a degenerate shape. Each piece is emitted as the convex hull of a few core
+points it computes, inflated by an octagon and rounded to 26.6, as positively
+wound polygons (src/stroke/emit.c). A piece states two bounds: how far the
+region can be outside its core hull (`d_in`) and how far the core hull can be
+outside the region (`d_out`). The inflation is `d_in` plus the rounding's reach,
+so after the rounding the polygon still contains its piece; the outward reach is
+`d_out + 1.0826 (d_in + rho) + rho`, `rho` the rounding and arithmetic allowance,
+and a piece is emitted only when that is within `tau - 1/4` units. The outline
+therefore contains the region and lies within `tau - 1/4` units of it, and no
+polygon winds negatively, so overlaps never cancel (SG13).
+
+Lines, joins, caps and degenerate shapes are polygons of their own corners, or
+circular sectors drawn as the control polygons of halved rational quadratic arcs
+(no angle is formed). A curve segment is split by de Casteljau at the parameter
+7/16 until each piece is a **band** (both cones of its hodograph narrower than a
+quarter turn, its curvature bound times `h` below the cosine of the cone's width,
+so no two normals meet and each rail is a graph over its chord within
+`(lambda / 2) sin(alpha)`) or a **fan** (a short piece: the double sector of its
+normal cone about its start, or a disc when its end normals are nearly opposite,
+which is how a cusp gets its disc). Errors of the doubles are carried with every
+coefficient. A piece still refused after 64 splits is `ERR_LIMIT`, never drawn
+coarser. The arcs join is built from its boundary: the straight edges and the
+circumscribed polylines of the extensions' quarter-turn sub-arcs (each within
+the allowed distance of its arc), cut by the clip's half plane (the boundary's
+parts inside it, with the gaps closed along the clip line, where chords that run
+both ways over the same stretch cancel), then cut into slabs at every height an
+edge ends or two edges cross, and each stretch of nonzero winding between
+neighbouring edges is one trapezoid. Every piece is positively wound; the
+boundary may have at most 2048 edges, past which the join is `ERR_LIMIT`. The
+arcs join's clip is the one place `math`'s trigonometry is used.
+
+The proof is above the code: emit.c (the theorem and the rounding), body.c (bands
+and fans), join.c (SG9's exact decision and the miter tip's error), arc.c (arcs
+and the arcs join). Its arithmetic bound assumes every magnitude is within
+`2^30` pixels (anchors, the mapped control points' offsets, the half width and
+the miter tip); a larger one is `ERR_LIMIT`.
+
+### What checks it
+
+`tests/stroke_oracle.h` decides membership from the rules alone, in
+`long double`, sharing no code with the expansion, and samples a superset of the
+region's boundary at 1/256 pixel. `tests/unit/test_stroke_oracle.cpp` checks it
+first where the region is the set of points within `h` of the centerline (round
+joins and caps), sees it fail with a sector on the inner side, and checks it
+against the exact verdicts of `tools/gen-stroke-vectors.py` (an independent model
+in mpmath, run in the pinned oracle image). `tests/unit/test_stroke_matrix.cpp`
+compares the outline with the oracle at every decided point over the case matrix,
+checks that no polygon winds negatively and every vertex is inside the
+conservative stroke box plus the tolerance, and records the deviation profile.
+`tests/unit/test_stroke.cpp` covers the parameters, statuses, parts, hash, dump,
+limits and allocation failure.
+
+### Dashes
+
+A dash array cuts the centerline before the body is built (`stroke.h`, SG19 to
+SG30). Each dash is an open piece of the centerline and is stroked by the rules
+of the solid stroke (SG5 to SG10), so a dashed stroke is the same union of
+positively wound pieces and keeps the same tolerance proof; only the ends of
+each piece and the vertices inside it are new. `src/stroke/dash.c` does it.
+
+**The distance and the cut.** Lengths are measured with `along.h` at its finest
+tolerance (`2^-46`), in the width space: the model path under local width, the
+mapped path under device width (the expansion rebuilds the centerline element for
+element under the map and measures that). A dash end at a distance becomes a
+segment and a parameter through the measured table (a boundary is the later
+segment's, the end of a subpath the last segment's); the piece of a segment
+between two parameters is cut by de Casteljau in homogeneous coordinates, the
+outer end points copied bit for bit, so a piece that keeps an end of its segment
+keeps that vertex exactly. The join at a vertex strictly inside a dash is decided
+from the two original segments that meet there (SG22), never from the cut
+pieces, whose computed control points would show a smooth vertex as a tiny turn;
+a cap's direction at a cut is the hodograph of the original segment at the
+parameter (`N'D - ND'` for a rational kind), or SG5's exact end direction when the
+cut is an end of the segment. A dot (SG24) takes the same direction.
+
+**The positions** (SG21) are SVG 2's "dash positions" with a running position
+replaced by `(q P + S) - o`, so that the error of an end does not grow with the
+dashes before it, and the phase reduced by exact long division (no quotient in
+doubles). One tie differs from the text's loop and is the only difference: the
+text takes the least index whose prefix sum is at least the phase, so a phase
+exactly at the end of a positive dash leaves a zero-length dash at the start of
+the path, which the round and square caps draw as a dot; a renderer draws nothing
+there, and a pattern that begins with a space (a DXF linetype that does) could not
+be written without the dot. a zero-length dash exactly at the phase is kept, and a dash
+that would begin exactly at the end of a subpath is not made (the text's `while
+position < pathlength`), so the convention is half open at both ends.
+
+| Point | Reading |
+|---|---|
+| A closed subpath | The text defines each dash as a pair of distances within the subpath, with its own caps and the joins between its ends only, and no join at the start of a closed subpath. The last dash and the first piece are therefore separate dashes with a cap each at the start point, even when one ends where the other begins. Skia and the browsers join the two; SVG 2 does not, and SG23 follows SVG 2. |
+| A zero-length dash | Two caps back to back (the text's start cap and end cap at one position; Canvas's "two caps placed back-to-back"): a disc, a square along the tangent, nothing for butt. It is drawn whatever `degenerate` says (Canvas omits zero-length subpaths and draws dotted lines). |
+| The tangent of a dot | The right-hand limit, as along.h's boundary rule: the segment that begins at the point; at the end of the subpath the last segment's end direction. |
+| One pattern for the path | The pattern runs over the path distance and is cut at the end of each subpath (a dash does not cross the jump of a move); the phase at a subpath is the offset plus the distance before it. |
+| A degenerate subpath | The first piece of SG21 for a length of zero: a dot at its point when the pattern is on there, with SG11's effective tangent; omitted when `degenerate` says omit. |
+| Alignment | The clip region is of the undashed closed subpaths; the aligned region is the dashed centered region at twice the width. |
+
+**The cut position's error** (SG26). The error of a distance is `along.h`'s
+contract (its estimate of a segment's error is at most the tolerance times the
+control polygon's length; the running sum adds `rows 2^-53` of itself; the solve
+inside a panel stops at `2^-52` of its length) plus the pattern's arithmetic; the
+call refuses (`ERR_LIMIT`) unless that, times the map's norm, is at most `2^-20`
+pixel. A dash end that moves by `delta` along the centerline moves every boundary
+point of its end by at most `(1 + h kappa) delta`, so the cut costs at most
+`(1 + h kappa) 2^-20` pixel of the outline's error, inside the reserve the
+construction keeps of the tolerance wherever `h kappa <= 2^12`. The measurer's bound
+is an estimate and not a proof; the tests compare the cuts with an independent
+quadrature (1024 panels of 8-point Gauss-Legendre, long double) and the circle's
+closed form.
+
+**What checks it.** `tests/stroke_oracle.h` defines a dashed stroke from the text
+alone (its own quadrature, the positions transcribed with a running position, cut
+segments, dots) and the matrix of `tests/unit/test_stroke_matrix.cpp` compares the
+outline with it on lines, every curve kind, closed and open subpaths, every join and
+cap, both scopes, both width spaces and alignment. `tools/gen-dash-vectors.py`
+states the positions and the DXF lowering in exact rationals; `test_dash.cpp`
+compares them bit for bit.
+
+**DXF simple linetypes** (SG30, `gshgeom_stroke_dashes_from_dxf`). A pattern is a
+list of elements (DXF group 49): a positive value is a dash with the pen down for
+that length, a negative value a space, zero a dot. The sign convention is the
+documented one for linetype definitions (for example the ezdxf linetype tutorial:
+`> 0` a line, `< 0` a gap, `0` a dot; Autodesk's reference calls group 49 a "dash,
+dot or space length"). The pattern repeats from the start of the line, so the last
+run and the first are one run when they are of one kind, and the line starts inside
+it: that is the offset. Complex linetypes (embedded shapes or text) are not
+lowered. The vectors are hand-built patterns that cover every case of the merge and the
+rotation (dotted, dashed, dash-dot, divide, center, phantom and border shapes, a space
+first, a dash last, a dot first, spaces and dots only, a scale); the lowering is also
+checked by its definition (the pen-down intervals of the raw pattern equal those of the
+lowered array under the positions).
+
 ### The revision
 
 `GSHGEOM_STROKE_REVISION` and `gshgeom_stroke_revision()` number the
@@ -370,7 +557,7 @@ there is no selector for an older revision.
 
 | Revision | What it was |
 |---|---|
-| 1 | The pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. |
+| 1 | The pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. Dashes (SG19 to SG30) were added to this revision: no solid outline changed. |
 
 ## Tests and gates
 

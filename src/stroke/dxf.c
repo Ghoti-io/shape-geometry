@@ -30,8 +30,9 @@
  * `lead` into it, where `lead` is the length of the last run: the offset.  The
  * runs are rotated to start with a pen-down run.  Two cases keep the dash
  * positions' ties out of the way: a dot first with a dash last keeps the dot apart
- * (a zero-length space between), and a space first with a dot last cannot be
- * expressed (the dot of the period's end would stand at the start of the line).
+ * (a zero-length space between), and a pattern that begins with a space which no
+ * trailing space continues cannot be expressed (the phase would stand exactly at
+ * the end of the dash before it, where the positions begin with a dash of no length).
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
@@ -119,9 +120,10 @@ GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t co
   double off = lead;
   if (!first_down) {
     /* rotate to start with a pen-down run */
-    /* the run before the first, in the cyclic order, is the last: a pen-down run when the runs alternate */
-    if (dashes[k - 1] == 0.0) {
-      return GSHGEOM_ERR_UNSUPPORTED; /* a space first and a dot last */
+    /* a space first with the line starting at its start (nothing merged into it): the phase would stand at the end of
+     * the dash before, where SG21's first piece is a dash of no length, a dot under a round or square cap */
+    if (lead == 0.0) {
+      return GSHGEOM_ERR_UNSUPPORTED;
     }
     double first = dashes[0];
     for (size_t i = 1; i < k; i++) {

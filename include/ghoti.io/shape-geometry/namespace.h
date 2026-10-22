@@ -30,7 +30,8 @@
  *
  * `make check-symbols` fails if an exported symbol is missing from this list.
  *
- * See CONVENTIONS.md section 4.
+ * Every name is wrapped in GHOTIIO_SHAPE_GEOMETRY(), which adds the version token (libver.h), so that
+ * two major versions can be loaded into one process.
  */
 
 #ifndef GHOTI_IO_GSHGEOM_NAMESPACE_H

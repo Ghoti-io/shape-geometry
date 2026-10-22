@@ -24,7 +24,7 @@
  * The dash positions (stroke.h, SG21 and SG29) on a raw dash array.
  *
  * The positions are SVG 2's ("dash positions", 13.5.7 of the 2018 Candidate
- * Recommendation) with one named difference at a tie (stroke.h, SG21).  The text
+ * Recommendation), read literally (stroke.h, SG21).  The text
  * keeps a running position, adding each dash length to it, so the error of a
  * boundary grows with the number of dashes before it.  Here a boundary is
  * `(q P + S) - o`: the period count `q` (an integer, exact in a double) times
@@ -134,10 +134,10 @@ GSHGEOM_Result gshgeom_sk_dash_positions(const double * dashes, size_t count, si
     }
     s_ex = s_in;
   }
-  double d_index = entry(dashes, count, index);
   double remaining = s_in - o;
-  /* the first piece: a dash when the index is even (SG21: not when the phase has used a positive dash up) */
-  if ((index % 2u) == 0 && (remaining > 0.0 || d_index == 0.0)) {
+  /* the first piece: a dash when the index is even (SG21, the text's rule: a phase exactly at the end of a dash
+   * leaves a dash of no length at the start) */
+  if ((index % 2u) == 0) {
     double e = remaining < length ? remaining : length;
     GSHGEOM_Result r = fn(ctx, 0.0, e);
     if (r != GSHGEOM_OK) {

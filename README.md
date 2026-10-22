@@ -23,13 +23,14 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
 - The fill rules (`fill.h`: nonzero 0, even-odd 1, pinned), which `shape-cpu`
   fills under and `font`'s `GFNT_FillRule` is the type of.
 - Strokes (`stroke.h`): the region a stroke covers, stated once as rules SG1 to
-  SG18 after SVG 2 and the WHATWG canvas text (joins miter, round, bevel,
+  SG30 after SVG 2 and the WHATWG canvas text (joins miter, round, bevel,
   miter-clip and arcs, caps, the miter limit decided exactly, local and device
   width, degenerate subpaths, inside and outside alignment as separate parts),
   and `gshgeom_stroke_expand`, which turns a centerline, the parameters and a map
   into 26.6 polygons whose nonzero fill contains that region and lies within the
   tolerance of it (proved; checked against an independent geometric oracle).
-  Dashes are refused until they are defined. `examples/stroke.c` shows one.
+  Dashes cut the centerline first (SVG 2's dash positions, measured with the along-path
+  parametrization), a DXF simple linetype lowers to a dash array, and `examples/stroke.c` shows a stroke.
 - `_dump` and `_hash` for each (FNV-1a 64 over little-endian fields, the same
   value on every target).
 

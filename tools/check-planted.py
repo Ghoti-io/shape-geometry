@@ -1402,6 +1402,9 @@ SKA = "src/stroke/arc.c"
 SKM = "src/stroke/emit.c"
 SKO = "src/stroke/outline.c"
 SKS = "src/exact/sum.c"
+SKD = "src/stroke/dash.c"
+SKX = "src/stroke/dxf.c"
+STD = ["testDash"]
 STK = ["testStroke"]
 STM = ["testStroke_matrix"]
 STO = ["testStroke", "testStroke_matrix"]
@@ -1421,7 +1424,6 @@ STROKE_PLANTS = [
     ("sk-miter-limit-low", "src", SKP, "!(s->miter_limit >= 1.0 &&", "!(s->miter_limit > 1.0 &&", STK),
     ("sk-dashes-max", "src", SKP, "  if (canonical_dash_count(s) > GSHGEOM_STROKE_DASHES_MAX) {", "  if (canonical_dash_count(s) > 2 * GSHGEOM_STROKE_DASHES_MAX) {", STK),
     ("sk-odd-not-doubled", "src", SKP, "    return s->dash_count > SIZE_MAX / 2u ? SIZE_MAX : s->dash_count * 2u;", "    return s->dash_count;", STK),
-    ("sk-dashes-drawn-solid", "src", SKP, "  if (canonical_dash_count(in) != 0) {", "  if (0) {", STK),
     ("sk-rule-reaches-output", "src", SKP, "  out->alignment_rule = in->alignment == (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_FILL_NONZERO\n                                                                                : in->alignment_rule;",
      "  out->alignment_rule = in->alignment_rule;", STK),
     ("sk-degenerate-reaches-butt", "src", SKP, "  out->degenerate = in->cap == (uint32_t)GSHGEOM_STROKE_CAP_BUTT ? (uint32_t)GSHGEOM_STROKE_DEGENERATE_DRAW : in->degenerate;", "  out->degenerate = in->degenerate;", STK),
@@ -1524,6 +1526,47 @@ STROKE_PLANTS = [
     # the wide exact sum
     ("sk-sum-base", "src", SKS, "#define SUM_BASE 12888L", "#define SUM_BASE 12000L", STK),
     ("sk-sum-borrow", "src", SKS, "      borrow = (cur >> 63) & 1u;\n    }\n    for (i = q + len + 1;", "      borrow = 0;\n    }\n    for (i = q + len + 1;", STK),
+    # SG19 to SG30: dashes and DXF linetypes
+    ('sk-dash-refused-again', "src", SKP, '  size_t dash_count = canonical_dash_count(in);\n', '  size_t dash_count = canonical_dash_count(in);\n  if (dash_count) {\n    return GSHGEOM_ERR_UNSUPPORTED;\n  }\n', STK),
+    ('sk-dash-ignored', "src", SKP, '  out->dash_count = dash_count;\n', '  out->dash_count = 0;\n', STO),
+    ('sk-dash-offset-ignored', "src", SKP, '  out->dash_offset = dash_count && in->dash_offset != 0.0 ? in->dash_offset : 0.0;\n', '  out->dash_offset = 0.0;\n', STO),
+    ('sk-dash-scope-ignored', "src", SKP, '  out->dash_scope = dash_count ? in->dash_scope : (uint32_t)GSHGEOM_STROKE_DASH_PER_SUBPATH;\n', '  out->dash_scope = (uint32_t)GSHGEOM_STROKE_DASH_PER_SUBPATH;\n', STO),
+    ('sk-dash-negative-offset', "src", SKD, '    r = q == 0.0 ? 0.0 : s - q;\n', '    r = q;\n', STD),
+    ('sk-dash-phase-strict', "src", SKD, '    if (s_in >= o) {\n', '    if (s_in > o) {\n', STD),
+    ('sk-dash-first-piece-needs-length', "src", SKD, '  if ((index % 2u) == 0) {\n    double e', '  if ((index % 2u) == 0 && remaining > 0.0) {\n    double e', STD),
+    ('sk-dash-stop-inclusive', "src", SKD, '      if (!(start < length)) {\n', '      if (!(start <= length)) {\n', STD),
+    ('sk-dash-last-not-clipped', "src", SKD, '      if (end > length) {\n        end = length;\n      }\n', '', STD),
+    ('sk-dash-period-step', "src", SKD, '      q += 1.0;\n', '      q += 2.0;\n', STD),
+    ('sk-dash-odd-not-repeated', "src", SKD, '  return (count % 2u) ? count * 2u : count;\n', '  return count;\n', STD),
+    ('sk-dash-negative-kept', "src", SKD, '    if (dashes[i] < 0.0) {\n      return 0;\n    }\n', '', STD),
+    ('sk-dash-zero-kept', "src", SKD, '  if (!any) {\n    return 0;\n  }\n  return (count', '  return (count', STD),
+    ('sk-dash-first-piece-unclipped', "src", SKD, '    double e = remaining < length ? remaining : length;\n', '    double e = remaining;\n', STD),
+    ('sk-dash-steps-uncounted', "src", SKD, '    if (++*steps > max_steps) {\n', '    if (*steps > max_steps) {\n', STD),
+    ('sk-dash-bound-offset', "src", SKD, '  if (!in_band(offset)) {\n    return GSHGEOM_ERR_LIMIT;\n  }\n', '', STD),
+    ('sk-dash-scope-swapped', "src", SKD, '  D->per_path = c->st.dash_scope == (uint32_t)GSHGEOM_STROKE_DASH_PATH;\n', '  D->per_path = c->st.dash_scope != (uint32_t)GSHGEOM_STROKE_DASH_PATH;\n', STM),
+    ('sk-dash-path-phase', "src", SKD, 'gshgeom_sk_dash_phase(D->offset + ms.begin, D->period)', 'gshgeom_sk_dash_phase(D->offset, D->period)', STM),
+    ('sk-dash-device-in-model-units', "src", SKD, '  if (!c->local) {\n    /* the mapped centerline', '  if (0) {\n    /* the mapped centerline', STM),
+    ('sk-dash-join-dropped', "src", SKD, '    if (r == GSHGEOM_OK && k < k1) {\n', '    if (0) {\n', STM),
+    ('sk-dash-start-cap-forward', "src", SKD, '  r = gshgeom_sk_cap(c, first.p[0], gshgeom_sk_scale(-1.0, d0));\n', '  r = gshgeom_sk_cap(c, first.p[0], d0);\n', STM),
+    ('sk-dash-end-cap-backward', "src", SKD, '    r = gshgeom_sk_cap(c, lastp.p[lastp.n], seg_dir(&segs[k1], t1));\n', '    r = gshgeom_sk_cap(c, lastp.p[lastp.n], gshgeom_sk_scale(-1.0, seg_dir(&segs[k1], t1)));\n', STM),
+    ('sk-dash-dot-dropped-under-omit', "src", SKD, '  return gshgeom_sk_degenerate(cb->c, seg_point(s, t), seg_dir(s, t));\n', '  if (cb->c->st.degenerate == (uint32_t)GSHGEOM_STROKE_DEGENERATE_OMIT) {\n    return GSHGEOM_OK;\n  }\n  return gshgeom_sk_degenerate(cb->c, seg_point(s, t), seg_dir(s, t));\n', STM),
+    ('sk-dash-degenerate-ignores-omit', "src", SKD, '  if (sub->seg_count == 0 && c->st.degenerate == (uint32_t)GSHGEOM_STROKE_DEGENERATE_OMIT) {\n    return GSHGEOM_OK;\n  }\n', '', STM),
+    ('sk-dash-dir-end-at-start', "src", SKD, '  if (t <= 0.0) {\n    (void)gshgeom_sk_start_dir(s, &d);\n    return d;\n  }\n  if (t >= 1.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n', '  if (t <= 0.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n  if (t >= 1.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n', STM),
+    ('sk-dash-split-weights', "src", SKD, '        W[i] = u * W[i] + t * W[i + 1];\n', '        W[i] = W[i];\n', STM),
+    ('sk-dash-cut-at-half', "src", SKD, '    double u = a > 0.0 ? (b - a) / (1.0 - a) : b;\n', '    double u = b;\n', STM),
+    ('sk-dash-gate-removed', "src", SKD, '  if (!(eps * c->norm <= 0x1p-20)) {\n', '  if (0) {\n', STM),
+    ('sk-dash-gate-measurer-term', "src", SKD, 'double eps = (0x1p-46 * poly', 'double eps = (0x1p-60 * poly', STM),
+    ('sk-dash-measure-loose', "src", SKD, 'GSHGEOM_MEASURE_TOLERANCE_MIN, &D->m', 'GSHGEOM_MEASURE_TOLERANCE_MAX, &D->m', STM),
+    ('sk-dxf-no-cyclic-merge', "src", SKX, '  } else if (k > 1 && first_down == last_down) {\n', '  } else if (0) {\n', STD),
+    ('sk-dxf-offset-lost', "src", SKX, '  double off = lead;\n', '  double off = 0.0;\n', STD),
+    ('sk-dxf-rotation-offset', "src", SKX, '    off = lead - first;\n', '    off = lead;\n', STD),
+    ('sk-dxf-dot-merged', "src", SKX, '  if (first_down && dashes[0] == 0.0 && last_down) {\n', '  if (0) {\n', STD),
+    ('sk-dxf-dot-not-pen-down', "src", SKX, '    if (v >= 0.0) {\n      any_down = 1;\n', '    if (v > 0.0) {\n      any_down = 1;\n', STD),
+    ('sk-dxf-scale-ignored', "src", SKX, '    double v = elements[i] * scale;\n    if (!finite(v)', '    double v = elements[i];\n    if (!finite(v)', STD),
+    ('sk-dxf-unsupported-dropped', "src", SKX, '    if (lead == 0.0) {\n      return GSHGEOM_ERR_UNSUPPORTED;', '    if (0) {\n      return GSHGEOM_ERR_UNSUPPORTED;', STD),
+    ('sk-dxf-solid-kept-dashed', "src", SKX, '  if (!any_up) {\n', '  if (0) {\n', STD),
+    ('sk-dxf-capacity-unchecked', "src", SKX, '  if (need > capacity || need > GSHGEOM_STROKE_DASHES_MAX) {\n', '  if (need > GSHGEOM_STROKE_DASHES_MAX) {\n', STD),
+    ('sk-dxf-rotation-skipped', "src", SKX, '  if (!first_down) {\n    /* rotate', '  if (0) {\n    /* rotate', STD),
 ]
 
 PLANTS += STROKE_PLANTS

@@ -1390,8 +1390,7 @@ inline V2 seg_tangent(const Seg & s, Real t) {
 }
 
 /**
- * SVG 2's dash positions, transcribed from the text with a running position (13.5.7), in `long double`.  The one
- * difference (stroke.h, SG21): a positive dash the phase has used up entirely makes no zero-length dash at the start.
+ * SVG 2's dash positions, transcribed from the text with a running position (13.5.7), in `long double`.
  */
 inline std::vector<std::pair<Real, Real>> dash_positions(const std::vector<Real> & raw, Real offset, Real length) {
   bool solid = false, any = false;
@@ -1426,7 +1425,7 @@ inline std::vector<std::pair<Real, Real>> dash_positions(const std::vector<Real>
   }
   Real remaining = acc - offset;
   Real dashlength = std::min(remaining, length);
-  if (index % 2 == 0 && (remaining > 0 || d[index] == 0)) {
+  if (index % 2 == 0) {
     out.push_back({0, dashlength});
   }
   Real position = dashlength;
