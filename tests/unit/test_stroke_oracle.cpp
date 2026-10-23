@@ -36,6 +36,7 @@
 
 #include "../test_helpers.h"
 
+#include "../stroke_matrix.h"
 #include "../stroke_oracle.h"
 #include "../stroke_vectors.h"
 
@@ -259,6 +260,29 @@ so::Affine skew_map() {
 }
 
 } // namespace
+
+TEST(OracleSelfCheck, ADashThatStartsOrEndsAtACornerHasNoPieceOnTheOtherSide) {
+  /* L-shaped path of two segments of 12; dashes cut at exactly the corner.  Segment lengths are summed in long double,
+   * so on a wide one the corner is at 12 - 1e-33 and bisecting that gives a parameter of 1e-25: a piece of that length
+   * is kept in 128 bits and collapses in 80, which put a join (or a dash piece) at the corner on some targets only. */
+  GSHGEOM_Path * path = stroke_matrix::build({{'M', {0, 0}}, {'L', {12, 0}}, {'L', {12, 12}}});
+  ASSERT_NE(path, nullptr);
+  so::Centerline cl = so::read_centerline(path);
+  for (std::vector<so::Real> dashes : {std::vector<so::Real>{12, 4}, std::vector<so::Real>{8, 4}}) {
+    so::Style st;
+    st.width = 3;
+    st.dashes = dashes;
+    std::vector<so::V2> tangents(cl.subs.size(), so::V2{1, 0});
+    std::vector<so::Sub> subs = so::dash_subs(cl.subs, st, tangents);
+    ASSERT_FALSE(subs.empty());
+    for (const so::Sub & d : subs) {
+      EXPECT_FALSE(d.dot) << dashes[0];
+      EXPECT_EQ(d.segs.size(), 1u) << "a dash with a piece on each side of the corner is not one the corner starts or ends";
+      EXPECT_TRUE(d.joins.empty()) << dashes[0];
+    }
+  }
+  gshgeom_path_destroy(path);
+}
 
 TEST(OracleSelfCheck, ABernsteinRootIsFoundWhenTheIntervalStartsAtAnotherRoot) {
   /* p(t) = t^2 - 0.7 t: a root at 0 and one at 0.7.  The front coefficient is exactly zero (on a wide long double a

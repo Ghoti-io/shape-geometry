@@ -1332,6 +1332,16 @@ inline Arc make_arc(const Seg & s) {
     a.cum[(size_t)i + 1] = a.cum[(size_t)i] + gl8(a.p, (Real)i / panels, (Real)(i + 1) / panels);
   }
   a.total = a.cum[panels];
+  if (s.n == 1 && s.w[0] == s.w[1]) {
+    /* A straight segment's length is the distance of its ends, exactly where the ends are whole numbers.  The panels
+     * sum it to within the rounding of a long double, which is a different amount at each width of one, and a dash
+     * that ends at the end of such a segment is then cut short of the end on some targets and past it on others. */
+    Real len = norm(s.p[1] - s.p[0]);
+    for (int i = 0; i <= panels; i++) {
+      a.cum[(size_t)i] = len * (Real)i / panels;
+    }
+    a.total = len;
+  }
   return a;
 }
 
@@ -1539,7 +1549,24 @@ inline std::vector<Sub> dash_subs(const std::vector<Sub> & subs, const Style & s
       }
       Real local = s - start[k];
       l.k = k;
-      l.t = local <= 0 ? 0 : arc_param(arcs[k], local);
+      /* A cut within rounding of a segment's end is at that end: the lengths are sums of 8-point panels, off by the
+       * rounding of the long double they are computed in, and bisecting a length of 1e-19 (or 1e-33) yields a tiny
+       * positive parameter whose piece survives in a wide long double and collapses in a narrow one.  A dash that
+       * starts or ends exactly at a corner is then the same dash at every width of long double. */
+      Real tol = 1e-15L * std::max<Real>(total, 1);
+      if (local <= tol) {
+        l.t = 0;
+      } else if (arcs[k].total - local <= tol) {
+        if (!end_side && k + 1 < sb.segs.size()) {
+          l.k = k + 1;
+          l.t = 0;
+        } else {
+          l.t = 1;
+        }
+        return l;
+      } else {
+        l.t = arc_param(arcs[k], local);
+      }
       if (end_side && l.t <= 0 && k > 0) {
         l.k = k - 1;
         l.t = 1;
