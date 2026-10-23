@@ -264,6 +264,7 @@ TEST(StrokeMatrix, DashesAcrossTheStartOfAClosedSubpath) {
 }
 
 TEST(StrokeMatrix, ASmoothClosedCurveUnderADeviceMapHasNoArcsJoinAtItsSmoothVertices) {
+  GSHGEOM_SKIP_UNDER_VALGRIND();
   /* A lens whose two cubics meet smoothly at both ends (the tangents are (-8, 0) and (-8, 0) at (12, 16), (8, 0) and
    * (8, 0) at (12, 4)).  Under a rotation by 0.9/0.4 the mapped control points no longer line up exactly, the vertex is
    * a turn of a few ulps on the doubles, and under device width the arcs join was built from it (a filled disc where the

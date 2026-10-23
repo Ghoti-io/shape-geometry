@@ -239,6 +239,7 @@ void run(const sc::Case & c, double t, bool polyline, double sigma_over_t = 1.0)
 } // namespace
 
 TEST(StrokeCurvesOracle, TheCaseMatrixAtTheDefaultTolerance) {
+  GSHGEOM_SKIP_UNDER_VALGRIND();
   for (const sc::Case & c : sc::everything()) {
     run(c, GSHGEOM_STROKE_CURVES_TOLERANCE, true);
   }

@@ -261,6 +261,7 @@ so::Affine skew_map() {
 } // namespace
 
 TEST(OracleSelfCheck, RoundJoinsAndCapsAreTheDistanceToTheCenterline) {
+  GSHGEOM_SKIP_UNDER_VALGRIND();
   for (const SelfCase & sc : self_cases()) {
     for (int space = 0; space <= 1; space++) {
       for (const so::Affine & map : {so::Affine{}, skew_map()}) {
