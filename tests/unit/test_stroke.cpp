@@ -381,24 +381,32 @@ TEST(StrokeStatus, ADashedSubpathOfNoLengthIsADotOrNothingAsTheStyleSays) {
   gshgeom_path_destroy(p);
 }
 
-TEST(StrokeDashGate, ALinePastTheCutPositionsErrorBoundIsTheLimitAndAShorterOneIsDrawn) {
-  // SG26: the position of a cut is known to within a bound that grows with the length of the path; where that bound is
-  // past 2^-20 of a pixel (times the map's norm) the call refuses rather than place a dash by a guess.  Two long
-  // dashes, so that the work is nothing and only the bound decides.
+TEST(StrokeDashGate, APathPastTheCutPositionsErrorBoundIsTheLimitAndAShorterOneIsDrawn) {
+  // SG26: the position of a cut is known to within a bound that grows with the total length of the path; where that
+  // bound is past 2^-20 of a pixel (times the map's norm) the call refuses rather than place a dash by a guess.  Each
+  // side is within the magnitude every segment may have, so it is the total that decides, and two long dashes make
+  // the work nothing.
   GSHGEOM_Map m = identity();
   GSHGEOM_Stroke s = plain();
   s.width = 2.0;
-  for (double length : {0x1p24, 0x1p28}) {
-    GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {length, 0}}});
-    const double dashes[2] = {length / 4.0, length / 4.0};
+  for (int sides : {2, 8}) {
+    const double side = sides == 2 ? 0x1p20 : 0x1p24;
+    GSHGEOM_Path * p = nullptr;
+    ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &p), GSHGEOM_OK);
+    gshgeom_path_move_to(p, GSHGEOM_Point{0, 0, 0});
+    for (int i = 1; i <= sides; i++) {
+      gshgeom_path_line_to(p, GSHGEOM_Point{(i % 2) ? side : 0.0, (double)(i % 3), 0});
+    }
+    const double total = side * sides;
+    const double dashes[2] = {total / 4.0, total / 4.0};
     s.dashes = dashes;
     s.dash_count = 2;
     GSHGEOM_Stroke_Outline * o = nullptr;
     const GSHGEOM_Result r = gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &o);
-    if (length < 0x1p27) {
-      EXPECT_EQ(r, GSHGEOM_OK) << length;
+    if (sides == 2) {
+      EXPECT_EQ(r, GSHGEOM_OK) << "a total of about 2^21";
     } else {
-      EXPECT_EQ(r, GSHGEOM_ERR_LIMIT) << length;
+      EXPECT_EQ(r, GSHGEOM_ERR_LIMIT) << "a total of 2^27";
     }
     gshgeom_stroke_outline_destroy(o);
     gshgeom_path_destroy(p);
