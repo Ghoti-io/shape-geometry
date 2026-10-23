@@ -1718,7 +1718,7 @@ def _limiter(seconds):
 def run_test(exe):
     environment = dict(os.environ)
     environment["LD_LIBRARY_PATH"] = LD_PATH
-    seconds = SLOW_TESTS.get(Path(str(exe)).name, 120)
+    seconds = max([v for k, v in SLOW_TESTS.items() if k in Path(str(exe)).name] or [120])
     try:
         r = subprocess.run([str(exe), "--gtest_brief=1"], capture_output=True, text=True,
                            env=environment, cwd=ROOT, timeout=seconds + 60, preexec_fn=_limiter(seconds))
