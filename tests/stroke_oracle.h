@@ -328,7 +328,16 @@ inline void bern_roots_rec(const Bern & a, Real lo, Real hi, int depth, std::vec
   if (v == 1) {
     /* exactly one root: bisect the polynomial itself */
     Real l = 0, h = 1;
+    /* The sign just inside the interval is that of the first coefficient beyond the noise: the front one can be a root
+     * of the polynomial (a split exactly at a root leaves a coefficient of rounding noise, or exactly zero), and its
+     * sign would then send the bisection to the wrong end. */
     Real fl = a.front();
+    for (Real v : a) {
+      if (std::fabs(v) > eps) {
+        fl = v;
+        break;
+      }
+    }
     for (int it = 0; it < 90; it++) {
       Real m = (l + h) / 2;
       Real fm = bern_eval(a, m);

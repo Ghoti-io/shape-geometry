@@ -260,6 +260,33 @@ so::Affine skew_map() {
 
 } // namespace
 
+TEST(OracleSelfCheck, ABernsteinRootIsFoundWhenTheIntervalStartsAtAnotherRoot) {
+  /* p(t) = t^2 - 0.7 t: a root at 0 and one at 0.7.  The front coefficient is exactly zero (on a wide long double a
+   * split at a root leaves such a coefficient, and on a narrow one its noise), so the bisection must take its sign from
+   * the first coefficient beyond the noise. */
+  stroke_oracle::Bern p = {0.0L, -0.35L, 0.3L};
+  std::vector<stroke_oracle::Real> roots;
+  bool ambiguous = false;
+  stroke_oracle::bern_roots_rec(p, 0, 1, 0, roots, &ambiguous);
+  EXPECT_FALSE(ambiguous);
+  bool found = false;
+  for (stroke_oracle::Real r : roots) {
+    found = found || std::fabs(r - 0.7L) < 1e-15L;
+  }
+  EXPECT_TRUE(found) << "roots found: " << roots.size();
+  /* and the same polynomial with noise of either sign in the front coefficient */
+  for (stroke_oracle::Real noise : {1e-36L, -1e-36L}) {
+    stroke_oracle::Bern q = {noise, -0.35L, 0.3L};
+    roots.clear();
+    stroke_oracle::bern_roots_rec(q, 0, 1, 0, roots, &ambiguous);
+    found = false;
+    for (stroke_oracle::Real r : roots) {
+      found = found || std::fabs(r - 0.7L) < 1e-15L;
+    }
+    EXPECT_TRUE(found) << noise;
+  }
+}
+
 TEST(OracleSelfCheck, RoundJoinsAndCapsAreTheDistanceToTheCenterline) {
   GSHGEOM_SKIP_UNDER_VALGRIND();
   for (const SelfCase & sc : self_cases()) {
