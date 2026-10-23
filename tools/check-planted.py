@@ -1552,7 +1552,7 @@ STROKE_PLANTS = [
     ('sk-dash-dir-end-at-start', "src", SKD, '  if (t <= 0.0) {\n    (void)gshgeom_sk_start_dir(s, &d);\n    return d;\n  }\n  if (t >= 1.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n', '  if (t <= 0.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n  if (t >= 1.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n', STM),
     ('sk-dash-split-weights', "src", SKD, '        W[i] = u * W[i] + t * W[i + 1];\n', '        W[i] = W[i];\n', STM),
     ('sk-dash-cut-at-half', "src", SKD, '    double u = a > 0.0 ? (b - a) / (1.0 - a) : b;\n', '    double u = b;\n', STM),
-    ('sk-dash-gate-removed', "src", SKD, '  if (!(eps * c->norm <= 0x1p-20)) {\n', '  if (0) {\n', STM),
+    ('sk-dash-gate-removed', "src", SKD, '  if (!(eps * c->norm <= 0x1p-20)) {\n', '  (void)eps;\n  if (0) {\n', STM),
     ('sk-dash-gate-measurer-term', "src", SKD, 'double eps = (0x1p-46 * poly', 'double eps = (0x1p-60 * poly', STM),
     ('sk-dash-measure-loose', "src", SKD, 'GSHGEOM_MEASURE_TOLERANCE_MIN, &D->m', 'GSHGEOM_MEASURE_TOLERANCE_MAX, &D->m', STM),
     ('sk-dxf-no-cyclic-merge', "src", SKX, '  } else if (k > 1 && first_down == last_down) {\n', '  } else if (0) {\n', STD),
@@ -1561,11 +1561,11 @@ STROKE_PLANTS = [
     ('sk-dxf-dot-merged', "src", SKX, '  if (first_down && dashes[0] == 0.0 && last_down) {\n', '  if (0) {\n', STD),
     ('sk-dxf-dot-not-pen-down', "src", SKX, '    if (v >= 0.0) {\n      any_down = 1;\n', '    if (v > 0.0) {\n      any_down = 1;\n', STD),
     ('sk-dxf-scale-ignored', "src", SKX, '    double v = elements[i] * scale;\n    if (!dxf_finite(v)', '    double v = elements[i];\n    if (!dxf_finite(v)', STD),
-    ('sk-dxf-solid-kept-dashed', "src", SKX, '  if (!any_up) {\n', '  if (0) {\n', STD),
-    ('sk-dxf-capacity-unchecked', "src", SKX, '  if (need > capacity || need > GSHGEOM_STROKE_DASHES_MAX) {\n', '  if (need > GSHGEOM_STROKE_DASHES_MAX) {\n', STD),
+    ('sk-dxf-solid-kept-dashed', "src", SKX, '  if (!any_up) {\n', '  if (0 && any_up) {\n', STD),
+    ('sk-dxf-capacity-unchecked', "src", SKX, '  if (need > capacity || need > GSHGEOM_STROKE_DASHES_MAX) {\n', '  (void)capacity;\n  if (need > GSHGEOM_STROKE_DASHES_MAX) {\n', STD),
     ('sk-dxf-rotation-skipped', "src", SKX, '  if (!first_down) {\n    /* rotate', '  if (0) {\n    /* rotate', STD),
-    ('sk-dash-spent-dash-kept', "src", SKD, '(remaining > 0.0 || d_index == 0.0)', '(1)', STD),
-    ('sk-dash-dot-at-phase-dropped', "src", SKD, '(remaining > 0.0 || d_index == 0.0)', '(remaining > 0.0)', STD),
+    ('sk-dash-spent-dash-kept', "src", SKD, '(remaining > 0.0 || d_index == 0.0)', '(1 || d_index == 0.0)', STD),
+    ('sk-dash-dot-at-phase-dropped', "src", SKD, '(remaining > 0.0 || d_index == 0.0)', '(remaining > 0.0 && (d_index == 0.0 || 1))', STD),
     ('sk-dash-wrap-never', "src", SKD, '(k.first_flags & GSHGEOM_SK_POS_BEGINS_BEFORE) && (k.last_flags & GSHGEOM_SK_POS_ENDS_AFTER)', '0', STM),
     ('sk-dash-wrap-needs-only-last', "src", SKD, '(k.first_flags & GSHGEOM_SK_POS_BEGINS_BEFORE) && (k.last_flags & GSHGEOM_SK_POS_ENDS_AFTER)', '(k.last_flags & GSHGEOM_SK_POS_ENDS_AFTER)', STO),
     ('sk-dash-wrap-needs-only-first', "src", SKD, '(k.first_flags & GSHGEOM_SK_POS_BEGINS_BEFORE) && (k.last_flags & GSHGEOM_SK_POS_ENDS_AFTER)', '(k.first_flags & GSHGEOM_SK_POS_BEGINS_BEFORE)', STO),
@@ -1611,15 +1611,15 @@ TCB = ["testStroke_curves", "testStroke_curves_oracle"]
 CURVE_PLANTS = [
     # SG40: the lowering
     ('cv-lower-handle-short', "src", SCL, '4.0 * w / (3.0 * (1.0 + w))', '2.0 * w / (3.0 * (1.0 + w))', TCL),
-    ('cv-lower-never-bisects', "src", SCL, '  if (bound <= tol) {\n    if (w < 1.0) {', '  if (1) {\n    if (w < 1.0) {', TCL),
+    ('cv-lower-never-bisects', "src", SCL, '  if (bound <= tol) {\n    if (w < 1.0) {', '  if (1 || bound <= tol) {\n    if (w < 1.0) {', TCL),
     ('cv-lower-half-weight', "src", SCL, '  double wh = gmath_sqrt((1.0 + w) / 2.0);', '  double wh = w;', TCL),
     ('cv-lower-quadratic-inexact', "src", SCL, '    return cubic(out, lerp(p0, p1, 2.0 / 3.0), lerp(p2, p1, 2.0 / 3.0), p2);\n  }\n  double bound;', '    return cubic(out, lerp(p0, p1, 0.5), lerp(p2, p1, 0.5), p2);\n  }\n  double bound;', TCL),
     ('cv-lower-weight-not-standardized', "src", SCL, '      double ws = w[1] / gmath_sqrt(w[0] * w[2]);', '      double ws = w[1];', TCL),
     ('cv-lower-error-too-loose', "src", SCL, '    double e = (1.0 - w) * (1.0 - w) * (1.0 - w) / (54.0 * (1.0 + w));', '    double e = (1.0 - w) * (1.0 - w) * (1.0 - w) / (5400.0 * (1.0 + w));', TCL),
-    ('cv-lower-ellipse-sag-dropped', "src", SCL, 'sag * sag * w * w / (s2 * s2)', '0.0', TCL),
+    ('cv-lower-ellipse-sag-dropped', "src", SCL, 'sag * sag * w * w / (s2 * s2)', '(0.0 * sag)', TCL),
     ('cv-lower-general-spread-dropped', "src", SCL, '  double bound = (wmax - wmin) / wmin * d * UPL;', '  double bound = (wmax - wmin) / wmax * d * UPL * 0.001;', TCL),
     # SG37: the exact pieces
-    ('cv-arc-as-chord', "src", SCC, '  return gshgeom_skc_conic(c, p0, p1, p2, gmath_sqrt((1.0 + cpq) / 2.0));', '  return gshgeom_skc_line(c, p0, p2);', TCB),
+    ('cv-arc-as-chord', "src", SCC, '  return gshgeom_skc_conic(c, p0, p1, p2, gmath_sqrt((1.0 + cpq) / 2.0));', '  (void)p1;\n  return gshgeom_skc_line(c, p0, p2);', TCB),
     ('cv-arc-weight-wrong', "src", SCC, 'gshgeom_skc_conic(c, p0, p1, p2, gmath_sqrt((1.0 + cpq) / 2.0))', 'gshgeom_skc_conic(c, p0, p1, p2, gmath_sqrt((1.0 + cpq) / 3.0))', TCB),
     ('cv-arc-control-point-at-chord', "src", SCC, 'dev(c, centre, h / (1.0 + cpq), gshgeom_sk_add(p, q))', 'dev(c, centre, h / 2.0, gshgeom_sk_add(p, q))', TCB),
     ('cv-arc-no-quarter-split', "src", SCC, '  if (cpq < 0.0) {\n    GSHGEOM_SK_Vec m;', '  if (0) {\n    GSHGEOM_SK_Vec m;', TCB),
@@ -1641,11 +1641,11 @@ CURVE_PLANTS = [
     ('cv-fit-error-bound-too-small', "src", SKB, '  double eps = o4 / 384.0 * UP;', '  double eps = o4 / 384.0e6 * UP;', TCO),
     ('cv-fit-error-fourth-derivative-dropped', "src", SKB, '  return (G[4] + h * F[4]) * UP;', '  return (h * F[4]) * UP * 1e-6;', TCO),
     ('cv-chord-bound-too-small', "src", SKB, '  double d2 = second_bound(G, m, h) / 8.0 * UP;\n', '  double d2 = second_bound(G, m, h) / 8.0e6 * UP;\n', TCO),
-    ('cv-chord-lobes-dropped', "src", SKB, '  if (s1 * s2 < 0 && s3 * s4 < 0) {', '  if (0) {', TCO),
+    ('cv-chord-lobes-dropped', "src", SKB, '  if (s1 * s2 < 0 && s3 * s4 < 0) {', '  if (0 && s1 * s2 < 0 && s3 * s4 < 0) {', TCO),
     ('cv-chord-wrong-diagonal', "src", SKB, '  if (a1 * a2 > 0 || (a1 == 0 && a2 == 0)) {', '  if (a1 * a2 <= 0) {', TCO),
     ('cv-rail-start-moved', "src", SKB, '    GSHGEOM_SK_Vec b0 = gshgeom_sk_add(P0, gshgeom_sk_scale(sgn * h, gshgeom_sk_left(t0)));', '    GSHGEOM_SK_Vec b0 = gshgeom_sk_add(P0, gshgeom_sk_scale(sgn * h * 1.05, gshgeom_sk_left(t0)));', TCO),
     ('cv-rail-handle-sign', "src", SKB, '    rail[side][1] = gshgeom_sk_add(b0, gshgeom_sk_scale(1.0 / 3.0, o0));', '    rail[side][1] = gshgeom_sk_sub(b0, gshgeom_sk_scale(1.0 / 3.0, o0));', TCO),
-    ('cv-tangent-turning-dropped', "src", SKB, '    GSHGEOM_SK_Vec o0 = gshgeom_sk_add(c1s, gshgeom_sk_scale(sgn * h, gshgeom_sk_left(tp0)));', '    GSHGEOM_SK_Vec o0 = c1s;', TCO),
+    ('cv-tangent-turning-dropped', "src", SKB, '    GSHGEOM_SK_Vec o0 = gshgeom_sk_add(c1s, gshgeom_sk_scale(sgn * h, gshgeom_sk_left(tp0)));', '    (void)tp0;\n    GSHGEOM_SK_Vec o0 = c1s;', TCO),
     ('cv-shared-tangent-from-one-side', "src", SKB, '      l->dir1 = r->dir0 = dv;', '      l->dir1 = dv;\n      r->dir0 = gshgeom_sk_v(dv.x, dv.y + 1e-3 * dv.x);', TCO),
     ('cv-arcs-join-monotone-unchecked', "src", SCC, '  if (!side_monotone(&ea, sigma, A, B) || !side_monotone(&eb, sigma, A, B)) {', '  if (0) {', TCO),
     ('cv-arcs-join-orientation-ignored', "src", SCC, '  if (sigma < 0.0) {\n    reverse_elements(c->cv);\n  }', '', TCO),
@@ -1660,7 +1660,7 @@ CURVE_PLANTS = [
     ('cv-clip-complement-ignored', "src", SKE, '    cu->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;', '    cu->complement = 0;', TCC),
     ('cv-cubic-form-at-the-wrong-budget', "src", SKE, 'gshgeom_stroke_curves_lower_cubic(*parts[k], cr->t / 4.0, &c.alloc, &c.limits, &low);', 'gshgeom_stroke_curves_lower_cubic(*parts[k], cr->t / 2.0, &c.alloc, &c.limits, &low);', TCB),
     ('cv-cubic-form-not-lowered', "src", SKE, '  if (r == GSHGEOM_OK && cr && cr->form == GSHGEOM_STROKE_CURVES_CUBIC) {', '  if (r == GSHGEOM_OK && cr && cr->form == (GSHGEOM_Stroke_Curves_Form)99) {', TCC),
-    ('cv-magnitude-bound-removed', "src", SKE, '    c.mag_limit = lim < GSHGEOM_SK_MAG_LIMIT ? lim : GSHGEOM_SK_MAG_LIMIT;', '    c.mag_limit = GSHGEOM_SK_MAG_LIMIT;', TCC),
+    ('cv-magnitude-bound-removed', "src", SKE, '    c.mag_limit = lim < GSHGEOM_SK_MAG_LIMIT ? lim : GSHGEOM_SK_MAG_LIMIT;', '    (void)lim;\n    c.mag_limit = GSHGEOM_SK_MAG_LIMIT;', TCC),
     ('cv-budget-widened', "src", SKE, '    cvs.budget = cr->t / 2.0;', '    cvs.budget = cr->t * 40.0;', TCO),
     ('cv-tolerance-range-open-below', "src", SKE, '  if (!(tolerance >= GSHGEOM_STROKE_CURVES_MIN_TOLERANCE) ||', '  if (!(tolerance >= 0.0) ||', TCC),
     ('cv-tolerance-range-open-above', "src", SKE, '!(tolerance <= GSHGEOM_STROKE_CURVES_MAX_TOLERANCE) ||', '!(tolerance <= 1e30) ||', TCC),
@@ -1809,6 +1809,16 @@ def do_plant(plant, control_objs):
         rc, failing = run_test(exe)
         if rc != 0:
             caught_by.append((test, failing[:1]))
+    if not caught_by and os.environ.get("PLANT_ALL_TESTS"):
+        # PLANT_ALL_TESTS=1: a plant its own tests do not see is tried against every other test of the library
+        # before it is called a survivor; the test that sees it is named, and the plant's list is the one to correct.
+        for test in [t for t in TESTS if t not in tests]:
+            exe = d / test
+            link_test(test, objs, exe)
+            rc, failing = run_test(exe)
+            if rc != 0:
+                caught_by.append((test + " [not in its list]", failing[:1]))
+                break
     return pid, caught_by
 
 
