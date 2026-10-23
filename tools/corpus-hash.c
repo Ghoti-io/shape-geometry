@@ -856,6 +856,94 @@ int main(void) {
     }
   }
 
+  /* Curve outlines (stroke_curves.h, SG41), appended after the dashed strokes so that every earlier result is
+   * unchanged: random paths of every kind, solid and under three dash patterns, in both forms, at two tolerances, every
+   * join and cap, both width spaces and every alignment, under the same unequal map: each outline's hash covers every
+   * control point and weight of every part.  The offsets are Hermite fits from certified bounds, the arcs are
+   * square roots, the lowering of the cubic form bisection: all sums of products in a fixed order, so a fused
+   * multiply-add or an excess of precision moves a control point and with it the hash. */
+  {
+    static const double pat0[2] = {2.5, 1.5}, pat1[3] = {1.0, 2.0, 3.0}, pat2[2] = {0.0, 1.75};
+    static const double * const pats[3] = {pat0, pat1, pat2};
+    static const size_t counts[3] = {2, 3, 2};
+    GSHGEOM_Map rot, sc, m;
+    if (gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 17.0, &rot) != GSHGEOM_OK ||
+        gshgeom_map_scale(2, 6.0, 4.5, 1.0, &sc) != GSHGEOM_OK || gshgeom_map_compose(&rot, &sc, &m) != GSHGEOM_OK) {
+      return fail("curve map");
+    }
+    for (int i = 0; i < 60; i++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("path create failed");
+      }
+      GSHGEOM_Result r = gshgeom_path_move_to(path, random_point(2));
+      int steps = 1 + (int)(next() % 4);
+      for (int k = 0; k < steps && r == GSHGEOM_OK; k++) {
+        double w3[3], w4[4];
+        for (int j = 0; j < 3; j++) {
+          w3[j] = weight();
+        }
+        for (int j = 0; j < 4; j++) {
+          w4[j] = weight();
+        }
+        GSHGEOM_Point q1 = random_point(2);
+        GSHGEOM_Point q2 = random_point(2);
+        GSHGEOM_Point q3 = random_point(2);
+        switch (next() % 6) {
+        case 0:
+          r = gshgeom_path_line_to(path, q1);
+          break;
+        case 1:
+          r = gshgeom_path_quadratic_to(path, q1, q2);
+          break;
+        case 2:
+          r = gshgeom_path_cubic_to(path, q1, q2, q3);
+          break;
+        case 3:
+          r = gshgeom_path_rational_quadratic_to(path, q1, q2, w3);
+          break;
+        case 4:
+          r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4);
+          break;
+        default:
+          r = gshgeom_path_close(path);
+          break;
+        }
+      }
+      if (r != GSHGEOM_OK) {
+        return fail("a curve outline path step was refused");
+      }
+      GSHGEOM_Stroke s;
+      gshgeom_stroke_init(&s);
+      s.width = 0.25 + (double)(next() % 64) / 32.0;
+      s.join = (uint32_t)(i % 5);
+      s.cap = (uint32_t)((i / 5) % 3);
+      s.width_space = (uint32_t)((i / 15) % 2);
+      s.alignment = (uint32_t)((i / 30) % 3);
+      s.miter_limit = 1.0 + (double)(next() % 16) / 2.0;
+      if (s.width_space == GSHGEOM_STROKE_WIDTH_DEVICE) {
+        s.width = s.width * 4.0;
+      }
+      if (i % 3 != 0) {
+        s.dashes = pats[(i % 3) - 1 + (i / 3) % 2];
+        s.dash_count = counts[(i % 3) - 1 + (i / 3) % 2];
+        s.dash_offset = (double)((int)(next() % 9) - 3) * 0.75;
+        s.dash_scope = (uint32_t)((i / 5) % 2);
+      }
+      GSHGEOM_Stroke_Curves * o = NULL;
+      r = gshgeom_stroke_curves_expand(path, &s, &m, (i % 4 == 3) ? 0x1p-8 : GSHGEOM_STROKE_CURVES_TOLERANCE,
+          (i / 2) % 2 ? GSHGEOM_STROKE_CURVES_CUBIC : GSHGEOM_STROKE_CURVES_RATIONAL, NULL, NULL, &o);
+      feed_int((int)r);
+      count++;
+      if (r == GSHGEOM_OK) {
+        gshgeom_hash_u64(&total, gshgeom_stroke_curves_hash(o));
+        feed_int((int)gshgeom_path_element_count(gshgeom_stroke_curves_body(o)));
+      }
+      gshgeom_stroke_curves_destroy(o);
+      gshgeom_path_destroy(path);
+    }
+  }
+
   printf("shape-geometry.hash %016" PRIx64 "\n", gshgeom_hash_value(&total));
   printf("shape-geometry.count %lu\n", count);
   return 0;
