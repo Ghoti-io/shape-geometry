@@ -1583,7 +1583,7 @@ STROKE_PLANTS = [
     ('sg31-floor-ceiling', 'src', SKP, '    double f = gmath_floor(map->t[i]);', '    double f = -gmath_floor(-map->t[i]);', ["testStroke_canonical"]),
     ('sg31-fraction-unrounded', 'src', SKP, '    if (d >= 1.0) {\n      f += 1.0;\n      d = 0.0;\n    }', '', ["testStroke_canonical"]),
     ('sg31-fraction-not-reset', 'src', SKP, '      d = 0.0;\n', '      d = d;\n', ["testStroke_canonical"]),
-    ('sg31-negative-zero', 'src', SKP, '    frac[i] = d + 0.0; /* -0 is +0 */', '    frac[i] = d;', ["testStroke_canonical"]),
+    # Removed, sg31-negative-zero: equivalent: `d` is `t - floor(t)`, which is `+0` for every `t` that floor leaves as it is (a subtraction of equal finite numbers is `+0`, `-0` included), so `d + 0.0` never changes a bit.
     ('sg31-one-axis', 'src', SKP, '  out.t[1] = frac[1];\n', '  out.t[1] = map->t[1];\n', ["testStroke_canonical"]),
     ('sg31-shift-x-sign', 'src', SKP, '  *shift_x = whole_to_i64(whole[0]);', '  *shift_x = -whole_to_i64(whole[0]);', ["testStroke_canonical"]),
     ('sg31-shift-y-swapped', 'src', SKP, '  *shift_y = whole_to_i64(whole[1]);', '  *shift_y = whole_to_i64(whole[0]);', ["testStroke_canonical"]),
