@@ -236,6 +236,7 @@
 #define gshgeom_skc_half_disc GHOTIIO_SHAPE_GEOMETRY(gshgeom_skc_half_disc)
 #define gshgeom_skc_disc GHOTIIO_SHAPE_GEOMETRY(gshgeom_skc_disc)
 #define gshgeom_skc_fan_sector GHOTIIO_SHAPE_GEOMETRY(gshgeom_skc_fan_sector)
+#define gshgeom_skc_arcs_join GHOTIIO_SHAPE_GEOMETRY(gshgeom_skc_arcs_join)
 #define gshgeom_skc_flush_run GHOTIIO_SHAPE_GEOMETRY(gshgeom_skc_flush_run)
 #define gshgeom_skc_add_band GHOTIIO_SHAPE_GEOMETRY(gshgeom_skc_add_band)
 #define gshgeom_flat_path_new GHOTIIO_SHAPE_GEOMETRY(gshgeom_flat_path_new)

@@ -493,7 +493,7 @@ static double deriv_bound(int n, int k, const double * vx, const double * vy, co
   }
   double best = 0.0;
   for (int i = 0; i + k <= n; i++) {
-    best = max2(best, mag(x[i], y[i]) * 1.5);
+    best = max2(best, gshgeom_sk_norm(gshgeom_sk_v(x[i], y[i])));
   }
   /* the error of each control value, k differences deep: 2^k of them */
   double ek = emax * (double)(1 << k) * 1.5;
@@ -523,7 +523,7 @@ static int bounds_g(const Piece * p, int n, const BandInfo * bi, double * G, dou
   }
   double g0 = 0.0;
   for (int i = 0; i <= n; i++) {
-    g0 = max2(g0, mag(bi->P[i].x, bi->P[i].y) * 1.5);
+    g0 = max2(g0, gshgeom_sk_norm(bi->P[i]));
   }
   G[0] = g0 + bi->ep;
   for (int j = 1; j <= 5; j++) {

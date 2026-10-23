@@ -244,6 +244,59 @@ TEST(StrokeCurvesOracle, TheCaseMatrixAtTheDefaultTolerance) {
   }
 }
 
+TEST(StrokeCurvesOracle, TheArcsJoinsOfTheExactVectors) {
+  /* the exact vectors' arcs cases, through the curve outline, at the default and a coarse tolerance */
+  for (size_t i = 0; i < stroke_vectors::case_count; i++) {
+    const stroke_vectors::Case & vc = stroke_vectors::cases[i];
+    if (vc.join != sc::ARCS) {
+      continue;
+    }
+    sc::Ops ops;
+    for (size_t k = 0; k < vc.op_count; k++) {
+      ops.push_back({vc.ops[k].verb, std::vector<double>(vc.ops[k].v, vc.ops[k].v + vc.ops[k].n)});
+    }
+    GSHGEOM_Stroke st = sc::style(vc.width, vc.join, vc.limit, vc.cap);
+    st.width_space = (uint32_t)vc.space;
+    for (double t : {GSHGEOM_STROKE_CURVES_TOLERANCE, 0.0625}) {
+      run({vc.name, ops, st, sc::map_of(vc.map[0], vc.map[1], vc.map[2], vc.map[3], vc.map[4], vc.map[5]), 4}, t, false);
+    }
+  }
+}
+
+TEST(StrokeCurvesOracle, TheExactVectorsThroughTheCurveOutline) {
+  /* every exact verdict, through the outline's nonzero fill */
+  size_t checked = 0;
+  for (size_t i = 0; i < stroke_vectors::case_count; i++) {
+    const stroke_vectors::Case & vc = stroke_vectors::cases[i];
+    sc::Ops ops;
+    for (size_t k = 0; k < vc.op_count; k++) {
+      ops.push_back({vc.ops[k].verb, std::vector<double>(vc.ops[k].v, vc.ops[k].v + vc.ops[k].n)});
+    }
+    GSHGEOM_Stroke st = sc::style(vc.width, vc.join, vc.limit, vc.cap);
+    st.width_space = (uint32_t)vc.space;
+    st.degenerate = (uint32_t)vc.degenerate;
+    st.alignment = (uint32_t)vc.alignment;
+    GSHGEOM_Map m = sc::map_of(vc.map[0], vc.map[1], vc.map[2], vc.map[3], vc.map[4], vc.map[5]);
+    GSHGEOM_Path * path = sm::build(ops);
+    ASSERT_NE(path, nullptr);
+    GSHGEOM_Stroke_Curves * o = nullptr;
+    ASSERT_EQ(gshgeom_stroke_curves_expand(path, &st, &m, GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL,
+                  nullptr, nullptr, &o), GSHGEOM_OK) << vc.name;
+    ce::Winding body, aligned;
+    body.build(gshgeom_stroke_curves_body(o), 1e-5L);
+    aligned.build(gshgeom_stroke_curves_aligned(o), 1e-5L);
+    for (size_t k = 0; k < vc.point_count; k++) {
+      const stroke_vectors::Point & pt = vc.points[k];
+      int w = (pt.part == 0 ? body : aligned).at({pt.x, pt.y});
+      EXPECT_EQ(w != 0, pt.inside != 0) << vc.name << " point " << k << " (" << pt.x << ", " << pt.y << ")";
+      checked++;
+    }
+    gshgeom_stroke_curves_destroy(o);
+    gshgeom_path_destroy(path);
+  }
+  EXPECT_GT(checked, (size_t)1000);
+}
+
 TEST(StrokeCurvesOracle, EveryToleranceOfTheRange) {
   sc::Ops p = {{'M', {0, 0}}, {'C', {8, 12, 14, -6, 20, 4}}, {'L', {12, 10}}};
   for (double t : {GSHGEOM_STROKE_CURVES_MIN_TOLERANCE, 0x1p-12, 0x1p-8, 0.125, 1.0, GSHGEOM_STROKE_CURVES_MAX_TOLERANCE}) {

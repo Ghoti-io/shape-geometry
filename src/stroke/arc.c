@@ -1083,6 +1083,20 @@ GSHGEOM_Result gshgeom_sk_arcs_join(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * i
       }
     }
   }
+  if (c->cv && !reversal && !cl.on) {
+    /* curve mode: where the boundary is a polar graph about V (the usual case) it is the join's region exactly, as lines
+     * and arcs (stroke_curves.h, SG37); the bevel is added, as the region is its union with the boundary's */
+    int done = 0;
+    GSHGEOM_SK_Vec tri[3] = {gshgeom_sk_v(0.0, 0.0), A, B};
+    r = gshgeom_skc_arcs_join(c, anchor, A, B, X, ea.line, ea.z, ea.r, ext_sense(&ea), eb.line, eb.z, eb.r,
+        -ext_sense(&eb), &done);
+    if (r == GSHGEOM_OK && done) {
+      return gshgeom_sk_emit(c, anchor, tri, 3, 0.0, 0.0);
+    }
+    if (r != GSHGEOM_OK) {
+      return r;
+    }
+  }
   /* The region (SG8): the bevel, together with what the closed boundary V, A, A's extension to X, B's extension back
    * to B, V encloses by nonzero winding, the whole cut by the clip's half plane.  The clip is applied to the
    * boundary itself (the parts of it in the half plane, closed along the clip line), which cuts the winding region

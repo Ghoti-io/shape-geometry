@@ -596,13 +596,21 @@ curve on the same control points differs from it by at most that).
 
 ### The arcs join, and what is not exact
 
-The arcs join is built as the polygon expansion builds it: the boundary of its
-region as straight edges and circumscribed polylines of its sub-arcs of at most a
-quarter turn, cut into convex trapezoids by the heights where an edge ends or two
-edges cross; the polylines are within the offset budget, so the join is
-polygonal in the file where its boundary is made of arcs. The region is exact
-only to `t / 2`, not to the double arithmetic, and a join whose boundary needs more
-than 2048 edges (a very large circle at a fine tolerance) is `GSHGEOM_ERR_LIMIT`.
+The arcs join's closed boundary (the vertex, the first extension to the meeting
+point, the second extension back, the vertex) is written as exact lines and arcs
+when it is a polar graph about the vertex and the miter limit does not clip it: its
+polar angle then runs one way along every side (a line has `cross(P, dP)` constant;
+a circle `(z, r)` traversed in the sense `s` has `cross(P, dP) = s r (z . u + r)` at
+`z + r u`, a cosine and a constant, extreme at the ends of a quarter arc or in the
+direction of `z`), every point lies in the wedge between `A` and `B`, and a closed
+curve that is a polar graph with its two radial sides is simple, of the orientation
+of `cross(A, B)`. The bevel is added, since the region is its union with the
+boundary's. Where the boundary curls (a reversal of two curved segments) or the clip
+cuts it, the join is built as the polygon expansion builds it: straight edges and
+circumscribed polylines of its sub-arcs of at most a quarter turn, cut into convex
+trapezoids by the heights where an edge ends or two edges cross, within the offset
+budget, and a join whose boundary needs more than 2048 edges (a very large circle
+at a fine tolerance) is `GSHGEOM_ERR_LIMIT`.
 
 A tight bend of a wide stroke is written as polygons in its fold, within `t / 2` of
 the region and second order in the pieces' extent. The cost of a fold grows as the
@@ -627,7 +635,7 @@ agrees, no ring winds negatively, the outline lies in the stroke's box, and the
 worst deviation measured is a recorded property (0.50 of `t` with boundary samples
 `t` apart, 0.06 of `t` with samples `t / 8` apart). Flattened at the polygon
 expansion's tolerance `tau`, the curves and the polygon agree within `2 tau + t`
-(the triangle inequality), and the worst measured disagreement, recorded, is 0.67
+(the triangle inequality), and the worst measured disagreement, recorded, is 0.70
 `tau`, within the `2 tau` that bound would have to be for a plain doubling. The
 lowering is compared with `tests/curves_vectors.h`, an exact model in decimal
 arithmetic. `tools/stroke-curves-svg.c` and `tools/resvg-stroke/zoom.py` render

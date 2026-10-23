@@ -399,6 +399,14 @@ GSHGEOM_Result gshgeom_skc_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, doubl
  */
 GSHGEOM_Result gshgeom_skc_fan_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q,
     double r);
+/**
+ * The arcs join's closed boundary V, A, the first extension to X, the second extension back to B, V as exact lines and
+ * arcs (curve mode), when its polar angle about V runs one way along it (a polar graph, so a simple closed curve of the
+ * orientation of cross(A, B)); `*done` says whether it was written.  All points are build-space offsets from V.
+ */
+GSHGEOM_Result gshgeom_skc_arcs_join(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHGEOM_SK_Vec A, GSHGEOM_SK_Vec B,
+    GSHGEOM_SK_Vec X, int line_a, GSHGEOM_SK_Vec za, double ra, double sa, int line_b, GSHGEOM_SK_Vec zb, double rb,
+    double sb, int * done);
 /** Write the run of band pieces as one contour and empty the run. */
 GSHGEOM_Result gshgeom_skc_flush_run(GSHGEOM_SK_Ctx * c);
 /** Add a band piece to the run. */

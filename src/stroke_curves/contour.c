@@ -323,3 +323,163 @@ GSHGEOM_Result gshgeom_skc_flush_run(GSHGEOM_SK_Ctx * c) {
   }
   return r != GSHGEOM_OK ? r : gshgeom_skc_finish(c);
 }
+
+/* --- the arcs join, exactly where its boundary is a polar graph --------------------------------------------- */
+
+/** One side of the arcs join's boundary (build space, offsets from the vertex): a line, or a circle (z, r) traversed in sense s. */
+typedef struct Side {
+  int line;
+  GSHGEOM_SK_Vec from, to;
+  GSHGEOM_SK_Vec z;
+  double r, s;
+} Side;
+
+/** The unit vector from the circle's centre to a point. */
+static GSHGEOM_SK_Vec toward(const Side * e, GSHGEOM_SK_Vec p) {
+  return gshgeom_sk_unit(gshgeom_sk_sub(p, e->z));
+}
+
+/** The quarter-turn boundaries between two units in the sense s: ends[0] = p, ..., ends[n-1] = q (n at most 6). */
+static int quarter_ends(GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q, double s, GSHGEOM_SK_Vec * ends) {
+  int n = 0;
+  ends[n++] = p;
+  GSHGEOM_SK_Vec cur = p;
+  for (int k = 0; k < 4; k++) {
+    if (s * gshgeom_sk_cross(cur, q) >= 0.0 && gshgeom_sk_dot(cur, q) >= 0.0) {
+      break;
+    }
+    cur = s > 0 ? gshgeom_sk_right(cur) : gshgeom_sk_left(cur);
+    ends[n++] = cur;
+  }
+  ends[n++] = q;
+  return n;
+}
+
+/** Whether the unit d lies on the arc from p to q (at most a quarter turn) in the sense s. */
+static int inside_arc(GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q, double s, GSHGEOM_SK_Vec d) {
+  return s * gshgeom_sk_cross(p, d) >= 0.0 && s * gshgeom_sk_cross(d, q) >= 0.0;
+}
+
+/**
+ * Whether the loop's polar angle about the vertex runs one way, strictly, along one side, in the sense @p sigma (the
+ * sign of cross(A, B)), and every point stays in the wedge between A and B.  For a line cross(P, dP) is constant; for
+ * a circle (z, r) in the sense s it is s r (w . u + r) at the point z + r u (w = z), and w . u + r is a cosine plus a
+ * constant, extreme at the ends of a quarter arc or at the direction of w.
+ */
+static int side_monotone(const Side * e, double sigma, GSHGEOM_SK_Vec A, GSHGEOM_SK_Vec B) {
+  GSHGEOM_SK_Vec pts[8];
+  int np = 0;
+  if (e->line) {
+    double cr = gshgeom_sk_cross(e->from, gshgeom_sk_sub(e->to, e->from));
+    if (!(sigma * cr > 0.0)) {
+      return 0;
+    }
+    pts[np++] = e->from;
+    pts[np++] = e->to;
+  } else {
+    GSHGEOM_SK_Vec ends[8];
+    int ne = quarter_ends(toward(e, e->from), toward(e, e->to), e->s, ends);
+    double wl = gshgeom_sk_norm(e->z);
+    GSHGEOM_SK_Vec wh = wl > 0.0 ? gshgeom_sk_scale(1.0 / wl, e->z) : gshgeom_sk_v(0.0, 0.0);
+    for (int k = 0; k + 1 < ne; k++) {
+      GSHGEOM_SK_Vec p = ends[k], q = ends[k + 1];
+      double fp = gshgeom_sk_dot(e->z, p) + e->r, fq = gshgeom_sk_dot(e->z, q) + e->r;
+      double lo = fp < fq ? fp : fq, hi = fp < fq ? fq : fp;
+      if (wl > 0.0 && inside_arc(p, q, e->s, gshgeom_sk_scale(-1.0, wh))) {
+        lo = e->r - wl < lo ? e->r - wl : lo;
+      }
+      if (wl > 0.0 && inside_arc(p, q, e->s, wh)) {
+        hi = e->r + wl > hi ? e->r + wl : hi;
+      }
+      double margin = 0x1p-30 * e->r;
+      if (e->s * sigma > 0.0 ? !(lo > margin) : !(hi < -margin)) {
+        return 0;
+      }
+      pts[np++] = gshgeom_sk_add(e->z, gshgeom_sk_scale(e->r, p));
+    }
+    pts[np++] = e->to;
+  }
+  for (int k = 0; k < np; k++) {
+    if (!(sigma * gshgeom_sk_cross(A, pts[k]) >= 0.0) || !(sigma * gshgeom_sk_cross(pts[k], B) >= 0.0) ||
+        !(gshgeom_sk_dot(pts[k], pts[k]) > 0.0)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void reverse_elements(GSHGEOM_SK_Curves * cv) {
+  size_t n = cv->el_n;
+  for (size_t i = 0; i < n / 2; i++) {
+    GSHGEOM_SK_CElem t = cv->el[i];
+    cv->el[i] = cv->el[n - 1 - i];
+    cv->el[n - 1 - i] = t;
+  }
+  for (size_t i = 0; i < n; i++) {
+    GSHGEOM_SK_CElem * e = &cv->el[i];
+    for (int k = 0; k < (e->deg + 1) / 2; k++) {
+      GSHGEOM_SK_Vec t = e->p[k];
+      e->p[k] = e->p[e->deg - k];
+      e->p[e->deg - k] = t;
+    }
+  }
+}
+
+static GSHGEOM_Result side_elements(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const Side * e) {
+  if (e->line) {
+    return gshgeom_skc_line(c, dev(c, anchor, 1.0, e->from), dev(c, anchor, 1.0, e->to));
+  }
+  GSHGEOM_SK_Vec ends[8];
+  int ne = quarter_ends(toward(e, e->from), toward(e, e->to), e->s, ends);
+  GSHGEOM_Result r = GSHGEOM_OK;
+  for (int k = 0; k + 1 < ne && r == GSHGEOM_OK; k++) {
+    GSHGEOM_SK_Vec p = ends[k], q = ends[k + 1];
+    double cpq = gshgeom_sk_dot(p, q);
+    GSHGEOM_SK_Vec p0 = k == 0 ? e->from : gshgeom_sk_add(e->z, gshgeom_sk_scale(e->r, p));
+    GSHGEOM_SK_Vec p2 = k + 2 == ne ? e->to : gshgeom_sk_add(e->z, gshgeom_sk_scale(e->r, q));
+    GSHGEOM_SK_Vec p1 = gshgeom_sk_add(e->z, gshgeom_sk_scale(e->r / (1.0 + cpq), gshgeom_sk_add(p, q)));
+    r = gshgeom_skc_conic(c, dev(c, anchor, 1.0, p0), dev(c, anchor, 1.0, p1), dev(c, anchor, 1.0, p2),
+        gmath_sqrt((1.0 + cpq) / 2.0));
+  }
+  return r;
+}
+
+GSHGEOM_Result gshgeom_skc_arcs_join(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHGEOM_SK_Vec A, GSHGEOM_SK_Vec B,
+    GSHGEOM_SK_Vec X, int line_a, GSHGEOM_SK_Vec za, double ra, double sa, int line_b, GSHGEOM_SK_Vec zb, double rb,
+    double sb, int * done) {
+  *done = 0;
+  double sigma = gshgeom_sk_cross(A, B) > 0.0 ? 1.0 : (gshgeom_sk_cross(A, B) < 0.0 ? -1.0 : 0.0);
+  if (sigma == 0.0) {
+    return GSHGEOM_OK;
+  }
+  GSHGEOM_SK_Vec zero = gshgeom_sk_v(0.0, 0.0);
+  Side ea = {line_a, A, X, za, ra, sa}, eb = {line_b, X, B, zb, rb, sb};
+  Side va = {1, zero, A, zero, 0.0, 0.0}, vb = {1, B, zero, zero, 0.0, 0.0};
+  (void)va;
+  (void)vb;
+  if (!side_monotone(&ea, sigma, A, B) || !side_monotone(&eb, sigma, A, B)) {
+    return GSHGEOM_OK;
+  }
+  gshgeom_skc_begin(c);
+  GSHGEOM_Result r = gshgeom_skc_line(c, dev(c, anchor, 1.0, zero), dev(c, anchor, 1.0, A));
+  if (r == GSHGEOM_OK) {
+    r = side_elements(c, anchor, &ea);
+  }
+  if (r == GSHGEOM_OK) {
+    r = side_elements(c, anchor, &eb);
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_skc_line(c, dev(c, anchor, 1.0, B), dev(c, anchor, 1.0, zero));
+  }
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if (sigma < 0.0) {
+    reverse_elements(c->cv);
+  }
+  r = gshgeom_skc_finish(c);
+  if (r == GSHGEOM_OK) {
+    *done = 1;
+  }
+  return r;
+}

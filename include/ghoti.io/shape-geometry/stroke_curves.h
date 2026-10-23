@@ -103,11 +103,15 @@
  * offsets `c(u) +- h n(u)` at the piece's ends) and the two end normals, and
  * consecutive pieces of a segment are written as one contour whose shared
  * normals do not appear.  A piece the certificate refuses is split; a zone where
- * the band is not simple (the offset folds, or a cusp) is covered, down to the
- * budget's extent, by the fans of stroke.h (a double sector, or a disc at a
- * cusp), whose arcs are exact.  The arcs join (stroke.h, SG8) is built as the
- * boundary of its region decomposed into convex trapezoids, its sub-arcs
- * circumscribed polylines within the budget.
+ * the band is not simple only because the offset folds is the quadrilateral
+ * of its end normals (or two lobes when they cross), within a certified bound
+ * second order in its extent; a cusp is covered, down to the budget's extent, by
+ * the fans of stroke.h (a double sector, or a disc), which contain the piece and
+ * whose arcs are exact.  The arcs join (stroke.h, SG8) is exact (lines and
+ * rational-quadratic arcs, the bevel added) where its closed boundary is a polar
+ * graph about the vertex and the miter limit does not clip it; elsewhere (the
+ * boundary curls, or the clip cuts it) it is the boundary decomposed into convex
+ * trapezoids, its sub-arcs circumscribed polylines within the budget.
  *
  * **SG38 The certified bound for an offset fit.**  The cubic Hermite
  * interpolant `C` of the offset `O(u) = c(u) + s h n(u)` (`s = +1` or `-1`, `n`

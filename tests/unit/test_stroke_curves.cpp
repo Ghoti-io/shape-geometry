@@ -317,6 +317,25 @@ TEST(StrokeCurvesElements, ACurvedSegmentGivesCubicOffsetsAndEveryRingIsClosed) 
   gshgeom_path_destroy(p);
 }
 
+TEST(StrokeCurvesElements, AnArcsJoinWhoseBoundaryIsAPolarGraphIsExactArcs) {
+  /* two curved segments turning at a vertex with butt caps: the only rational quadratics are the join's extensions,
+   * circles of curvature written as arcs, not as the polylines a polygon expansion needs */
+  GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'Q', {6, 0, 8, 5}}, {'Q', {14, 6, 16, 12}}});
+  GSHGEOM_Map m = identity();
+  GSHGEOM_Stroke s = plain();
+  s.width = 1.0;
+  s.join = GSHGEOM_STROKE_JOIN_ARCS;
+  s.miter_limit = 10.0;
+  GSHGEOM_Stroke_Curves * o = nullptr;
+  ASSERT_EQ(expand(p, s, m, GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL, &o), GSHGEOM_OK);
+  auto v = verbs(gshgeom_stroke_curves_body(o));
+  EXPECT_GE(v[GSHGEOM_VERB_RATIONAL_QUADRATIC], 1);
+  /* a polyline boundary would need dozens of lines */
+  EXPECT_LE(v[GSHGEOM_VERB_LINE], 24);
+  gshgeom_stroke_curves_destroy(o);
+  gshgeom_path_destroy(p);
+}
+
 TEST(StrokeCurvesElements, AnEllipticPenKeepsTheWeightsOfTheCircularOne) {
   /* local width under scale(8, 1): the round cap's arcs are ellipse arcs with the circle's weights (SG36) */
   GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {10, 0}}});
