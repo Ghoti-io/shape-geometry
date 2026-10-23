@@ -371,6 +371,26 @@ TEST(StrokeCurvesElements, AMirroringMapKeepsEveryRingPositive) {
   gshgeom_path_destroy(p);
 }
 
+TEST(StrokeCurvesElements, TheBudgetIsDividedByTheMapsNormUnderLocalWidth) {
+  /* the same model curve under a map sixteen times larger: its offsets are sixteen times larger in target units, the
+   * tolerance is the same, so the build space (the model) must be fitted sixteen times finer, and the count of pieces,
+   * which falls as the fourth root of the budget, doubles (SG36, E5) */
+  GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'C', {3, 5, 7, -5, 10, 0}}});
+  GSHGEOM_Stroke s = plain();
+  s.width = 1.0;
+  int count[2] = {0, 0};
+  for (int k = 0; k < 2; k++) {
+    GSHGEOM_Map m = k == 0 ? identity() : scale(16.0, 16.0);
+    GSHGEOM_Stroke_Curves * o = nullptr;
+    ASSERT_EQ(expand(p, s, m, GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL, &o), GSHGEOM_OK);
+    count[k] = verbs(gshgeom_stroke_curves_body(o))[GSHGEOM_VERB_CUBIC];
+    gshgeom_stroke_curves_destroy(o);
+  }
+  EXPECT_GT(count[0], 2);
+  EXPECT_GE(count[1], count[0] * 3 / 2) << count[0] << " against " << count[1];
+  gshgeom_path_destroy(p);
+}
+
 /* --- SG32: the parts, and the clip as the map applied --------------------------------- */
 
 TEST(StrokeCurvesParts, AlignmentGivesBodyAlignedAndTheClipIsTheMapApplied) {

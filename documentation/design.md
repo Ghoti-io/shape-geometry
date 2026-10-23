@@ -476,6 +476,178 @@ there is no selector for an older revision.
 |---|---|
 | 1 | The pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. Dashes (SG19 to SG30) were added to this revision: no solid outline changed. |
 
+## Stroke curves
+
+`stroke_curves.h` returns the region of `stroke.h` (SG6 to SG13) as a path of
+lines, cubics and rational quadratics in target units, with a tolerance `t` stated
+in those units (rules SG32 to SG43). The 26.6 polygon of `gshgeom_stroke_expand`
+is what a rasterizer wants, its accuracy a sixteenth of the pixel of the map it
+was given; a writer that meets a style field its format cannot express (inside and
+outside alignment, a join or a dash scope the format lacks) must expand the stroke
+and write the region as a fill, and a polygon accurate to the size it was expanded
+for shows its facets when a viewer zooms. This outline is exact to a constant `t`
+of the file's own unit, so a viewer at zoom `z` sees at most `t z`.
+
+### What is exact and what is approximated
+
+Lines offset to lines, circular arcs to concentric arcs, and every join and cap is
+lines and circular arcs; an affine map takes a line to a line, a cubic to a cubic
+and a rational quadratic to a rational quadratic with the same weights. So the
+body of a line segment, a bevel, a miter, a miter-clip pentagon, a square cap and
+a reversal's rectangle are polygons of lines, and a round join (the sector), a
+round cap (the half disc), a degenerate disc and a reversal's half disc are lines
+and rational-quadratic arcs of at most a quarter turn (middle weight
+`cos(psi / 2) = sqrt((1 + p . q) / 2)`, the one square root of the construction;
+an angle past a quarter turn is cut at the bisector). Under local width the pieces
+are built in the centerline's space and mapped control point by control point, so
+the elliptical pen of a non-uniform map is exact. Only the offsets of curved
+segments are approximated.
+
+### The offsets of a curved segment
+
+A segment is split by de Casteljau at 7/16 (as the polygon expansion does) until
+each piece is a **band**, a **fold** or a **fan**:
+
+- A **band** is a piece whose normals do not meet within `h` (the hodograph's cone
+  is a quarter turn and `kappa h < cos alpha`, exactly the polygon expansion's test).
+  Its boundary is the two offset cubics, the cubic Hermite interpolants of
+  `c(u) +- h n(u)` at the piece's ends, and the end normals. The interpolation
+  remainder bounds the fit: `|O - C| <= (d^4 / 384) sup |O''''|` over a parameter
+  interval of length `d` (the piece's own parameter, so `d = 1`). The supremum is
+  certified: `G[j]` bounds `sup |c^(j)|` for `j <= 5` from the Bernstein form
+  (`D c = N` gives `D c^(k) = N^(k) - sum_{i<k} C(k,i) D^(k-i) c^(i)` for a rational
+  piece), `m` bounds `|c'|` from below (the cone's least projection over the largest
+  weight squared), and with `s = |c'|`, `g = c'`, `T = c' / s`: from `s T = g`,
+  `s T^(k) = g^(k) - sum_{i<k} C(k,i) s^(k-i) T^(i)`, and from `s^2 = g . g`,
+  `2 s s^(k) = sum_{i<=k} C(k,i) g^(i) . g^(k-i) - sum_{0<i<k} C(k,i) s^(i) s^(k-i)`,
+  so `|s^(k)| <= S[k]` and `|T^(k)| <= F[k]` term by term (`S[1] = |g'|`, since
+  `|s'| = |g . g'| / |g|`; `F[1] = |g'| / m`, since `T' = g'_perp / s`), and
+  `sup |O''''| <= G[4] + h F[4]`. Every bound is a sum of products of nonnegative
+  numbers, raised by `1 + 2^-40` at each step for the rounding of its own
+  computation. A piece is accepted when the fit is within the offset budget in
+  target units (the model-space error times an upper bound of the map's norm), at
+  most a quarter of `h`, the two fitted rails run forward along both end tangents
+  at every control vector (so each is injective and never returns to an end
+  normal's line), and their control hulls are apart (so they never meet): the loop
+  is then a simple closed curve, and its orientation is the band's, since a move of
+  at most `h / 4` along a boundary of length at most `4 length(c)` cannot change the
+  sign of the band's area `2 h length(c)`.
+- Consecutive bands of a segment are written as one contour: the left rails
+  forward, the last end normal, the right rails backward, the first end normal.
+  Their shared end normals cancel and are not written, and the point and tangent
+  where two pieces meet are computed once, where the piece was split, and used by
+  both.
+- A **fold** is a piece whose band is not simple only because the curvature bound
+  refuses (the offset folds, or comes within `h` of folding). The normals' sweep is
+  the image of `F(u, lambda) = c(u) + lambda n(u)` over the piece times `[-h, h]`; the
+  bilinear patch through the four ends of the two end normals is within
+  `sup |F_uu| / 8 = (G[2] + h F[2]) / 8` of it, point for point, and that patch is
+  the quadrilateral of the end normals, or two lobes (the triangles at the point
+  where they cross) when they cross. It is written as positively wound triangles, so
+  the nonzero fill is their union. The error is second order in the piece's
+  extent however the offset folds, which is what keeps a tight bend of a wide stroke
+  from costing the first power of the tolerance.
+- A **fan** covers what no certificate reaches (a cusp, a stopped end), as the
+  polygon expansion does: the sector of radius `h` over the cone of normals and
+  its opposite, or the disc, down to the budget's extent. In curve mode it is
+  inflated by its own displacement (`dm`, the distance of the piece's points from
+  its start, in build space), the half planes of its sides moved out by `dm` with
+  the circle of radius `h + dm` and a line `dm` behind the apex, so that it contains
+  the piece and neighbouring fans overlap. Without that the fans abut and a crack
+  of width `dm` opens between them.
+
+### The tolerance and its budget
+
+`t` is in `[2^-14, 2^4]` target units. The part's deviation from the region is at
+most `t`: `t / 2` for offsets, folds, fans and the arcs join's polylines, `t / 4`
+for the lowering of arcs to cubics (form `CUBIC` only), and a reserve of `t / 4`
+for the double arithmetic (at most `t / 8`), the dash cut (SG26's gate keeps it
+within `2^-20` target units, which is `t / 64` at the finest tolerance) and the
+rest. The offsets get `t / 2` in **both** forms, so that form `CUBIC` is exactly
+form `RATIONAL` passed through `gshgeom_stroke_curves_lower_cubic` at `t / 4`, bit
+for bit. The arithmetic's reach is `2^-43` of the largest magnitude the
+construction touches (a few hundred correctly rounded operations on quantities
+under that magnitude), and it must be within `t / 8`: coordinates up to `t 2^40`
+(and at most `2^30`), so up to `2^30` at the default tolerance and `2^26` at the
+finest; a larger input is `GSHGEOM_ERR_LIMIT`, never a coarser curve.
+
+### The lowering to cubics
+
+A quadratic is raised exactly. A rational quadratic with ends of weight 1 and
+middle weight `w < 1` (any rational quadratic has this form after a reparametrization,
+`w = w_1 / sqrt(w_0 w_2)`) is an ellipse arc, the affine image `A` of the circular arc
+of angle `psi = 2 acos w`. The cubic with the same ends and end tangents whose
+handles are the fraction `4 w / (3 (1 + w))` of the control legs is, on the unit
+circle with the arc centred on the x axis and handle `k = (4/3) tan(psi / 4)`:
+`|Q(t)|^2 - 1` is a polynomial of degree 6 with a double root at `t = 0`, `1/2` and
+`1` (the ends and the midpoint are on the circle with the circle's tangent), so
+`|Q(t)|^2 - 1 = (3 k cos(psi/2) - 2 sin(psi/2))^2 t^2 (1-t)^2 (1-2t)^2`, whose
+maximum is `1/108` of the square: the cubic stays outside the circle by
+`e = sqrt(1 + (1-w)^3 / (27 (1+w))) - 1 <= (1-w)^3 / (54 (1+w))`, and being monotone
+in angle it is within the same of the arc in the Hausdorff sense. Under an affine map
+the bound is `|A| r` times that, with `|A|_F^2 r^2 = |P_2 - P_0|^2 / (4 s^2) + |P_1 - M|^2 w^2 / s^4`
+from the control triangle (`s^2 = 1 - w^2`, `M` the chord's midpoint). Exact
+bisection of the conic (a half has middle weight `sqrt((1 + w) / 2)`) cuts `e` by
+about 64. The radial error of a quarter turn is `2.7e-4 r`, of 60 degrees `2.4e-5 r`,
+of 45 degrees `4.2e-6 r`, of 30 degrees `3.7e-7 r`; it falls as `psi^6`. Any other
+rational curve is bisected, in homogeneous coordinates, until `(w_max - w_min) / w_min`
+times the diameter of its control polygon is within the tolerance (the polynomial
+curve on the same control points differs from it by at most that).
+
+### The arcs join, and what is not exact
+
+The arcs join is built as the polygon expansion builds it: the boundary of its
+region as straight edges and circumscribed polylines of its sub-arcs of at most a
+quarter turn, cut into convex trapezoids by the heights where an edge ends or two
+edges cross; the polylines are within the offset budget, so the join is
+polygonal in the file where its boundary is made of arcs. The region is exact
+only to `t / 2`, not to the double arithmetic, and a join whose boundary needs more
+than 2048 edges (a very large circle at a fine tolerance) is `GSHGEOM_ERR_LIMIT`.
+
+A tight bend of a wide stroke is written as polygons in its fold, within `t / 2` of
+the region and second order in the pieces' extent. The cost of a fold grows as the
+square root of `1 / t`, and a cusp, which only a fan reaches, as `1 / t`.
+
+The conservative box of a stroke (the path's box outset by `L h`) is exceeded by a
+miter-clip join's corners, which lie up to `h sqrt(L^2 + 1)` from the vertex (the
+clip line is `L h` along the bisector and a corner is up to `h` across it): by up
+to `h (sqrt(L^2 + 1) - L)`. The polygon expansion's tolerance hides it; at a fine
+tolerance it is visible, and a bound that must hold at any tolerance needs `L h`
+replaced by `h sqrt(L^2 + 1)` for the miter-clip and arcs joins.
+
+### What checks it
+
+`tests/curve_eval.h` is an independent curve-winding evaluator (lines,
+quadratics, cubics, rational quadratics and cubics flattened in `long double` to
+`t / 64`), first checked on circles and ellipses and seen to fail with a flipped
+sign of a rational term. The expansion is compared with the geometric oracle of
+`tests/stroke_oracle.h` over the whole case matrix of the polygon expansion
+(`tests/stroke_cases.h`): at every point the oracle decides the nonzero fill
+agrees, no ring winds negatively, the outline lies in the stroke's box, and the
+worst deviation measured is a recorded property (0.50 of `t` with boundary samples
+`t` apart, 0.06 of `t` with samples `t / 8` apart). Flattened at the polygon
+expansion's tolerance `tau`, the curves and the polygon agree within `2 tau + t`
+(the triangle inequality), and the worst measured disagreement, recorded, is 0.67
+`tau`, within the `2 tau` that bound would have to be for a plain doubling. The
+lowering is compared with `tests/curves_vectors.h`, an exact model in decimal
+arithmetic. `tools/stroke-curves-svg.c` and `tools/resvg-stroke/zoom.py` render
+nine strokes three ways with a pinned external renderer at 1x, 16x and 64x: the
+stroke as a stroke, the curve outline as a fill, and the polygon as a fill. At 64x
+the fill's boundary is within 0.06 pixel on average of the renderer's stroke, and
+the polygon, the control, within 0.3 to 1.0 pixel, so the gate is seen to fail
+on the facets it exists to remove. A stroke wider than twice the radius of its
+circle is not painted by that renderer, so its reference is the disc the stroke
+covers.
+
+### The revision
+
+`GSHGEOM_STROKE_CURVES_REVISION` and `gshgeom_stroke_curves_revision()` number the
+construction. The number is in no hash; there is no selector for an older revision.
+
+| Revision | What it was |
+|---|---|
+| 1 | The pieces above: exact lines and arcs, Hermite offsets with the certified bound, folds as chord polygons, inflated fans, the arcs join as trapezoids, and the lowering by bisection. |
+
 ## Tests and gates
 
 `make test` runs the unit tests and the gates; `make check-planted` builds

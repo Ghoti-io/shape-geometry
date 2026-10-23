@@ -31,6 +31,11 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   tolerance of it (proved; checked against an independent geometric oracle).
   Dashes cut the centerline first (SVG 2's dash positions, measured with the along-path
   parametrization), a DXF simple linetype lowers to a dash array, and `examples/stroke.c` shows a stroke.
+- Stroke curves (`stroke_curves.h`): the same region as an outline of lines, cubics and exact
+  rational-quadratic arcs in target units, with a tolerance stated in those units (rules SG32 to SG43), for a writer that
+  must expand a stroke its format cannot express and write it as a fill that stays exact under zoom;
+  `gshgeom_stroke_curves_lower_cubic` turns a path of curves into lines and cubics within a stated bound, and
+  `examples/stroke_curves.c` writes a stroke as SVG path data.
 - `_dump` and `_hash` for each (FNV-1a 64 over little-endian fields, the same
   value on every target).
 
