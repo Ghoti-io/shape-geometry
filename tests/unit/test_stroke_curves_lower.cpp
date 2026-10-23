@@ -240,6 +240,15 @@ TEST(CurvesLower, AQuadraticIsRaisedExactlyAndOtherElementsAreCopied) {
     EXPECT_NEAR((double)u.x, (double)v.x, 1e-14);
     EXPECT_NEAR((double)u.y, (double)v.y, 1e-14);
   }
+  /* and so is the one given by weights of 1: the same curve at every parameter, not a nearby one */
+  GSHGEOM_Element rq;
+  gshgeom_path_element(p, 4, &rq);
+  ce::Elem ra = ce::elem_of(rq), rb = ce::elem_of(el[4]);
+  for (int k = 0; k <= 20; k++) {
+    ce::P2 u = ce::eval(ra, k / 20.0L), v = ce::eval(rb, k / 20.0L);
+    EXPECT_NEAR((double)u.x, (double)v.x, 1e-14) << k;
+    EXPECT_NEAR((double)u.y, (double)v.y, 1e-14) << k;
+  }
   /* the cubic and the line are copied unchanged */
   EXPECT_EQ(el[3].curve.p[1].x, 10.0);
   EXPECT_EQ(el[3].curve.p[3].y, 3.0);
