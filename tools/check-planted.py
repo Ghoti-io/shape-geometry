@@ -1725,6 +1725,10 @@ def run_test(exe):
     except subprocess.TimeoutExpired:
         return 1, ["[  FAILED  ] (timed out)"]
     failing = [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("[  FAILED  ]")]
+    if r.returncode != 0 and not failing:
+        # A crash or a kill has no failed test to name: say how it ended.
+        tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+        failing = ["[  FAILED  ] (exit status %d: %s)" % (r.returncode, tail[0][:80])]
     return r.returncode, failing
 
 
