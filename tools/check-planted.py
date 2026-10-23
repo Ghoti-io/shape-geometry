@@ -1701,19 +1701,27 @@ def link_test(test, objs, out):
         raise RuntimeError("cannot link %s:\n%s" % (test, r.stderr))
 
 
-def _limits():
-    """A planted defect may loop or allocate without end; bound both."""
-    import resource
-    resource.setrlimit(resource.RLIMIT_AS, (3 << 30, 3 << 30))
-    resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
+# A test that is slow on purpose (the curve outline against the geometric oracle takes 90 s on a fast machine) is given
+# more than the others; a planted defect that loops is still bounded.
+SLOW_TESTS = {"testStroke_curves_oracle": 900}
+
+
+def _limiter(seconds):
+    def limits():
+        """A planted defect may loop or allocate without end; bound both."""
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (3 << 30, 3 << 30))
+        resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
+    return limits
 
 
 def run_test(exe):
     environment = dict(os.environ)
     environment["LD_LIBRARY_PATH"] = LD_PATH
+    seconds = SLOW_TESTS.get(Path(str(exe)).name, 120)
     try:
         r = subprocess.run([str(exe), "--gtest_brief=1"], capture_output=True, text=True,
-                           env=environment, cwd=ROOT, timeout=180, preexec_fn=_limits)
+                           env=environment, cwd=ROOT, timeout=seconds + 60, preexec_fn=_limiter(seconds))
     except subprocess.TimeoutExpired:
         return 1, ["[  FAILED  ] (timed out)"]
     failing = [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("[  FAILED  ]")]
