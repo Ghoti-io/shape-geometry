@@ -1843,12 +1843,17 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=JOBS) as pool:
         futures = {pool.submit(do_plant, p, control): p for p in plants}
         results = {}
-        for fut in concurrent.futures.as_completed(futures):
+        for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
             p = futures[fut]
             try:
                 results[p[0]] = fut.result()[1]
             except Exception as e:  # a plant that cannot be built is a defect of the harness
                 results[p[0]] = e
+            # Progress, as each plant ends, so a run cut short still says how far it got and what it found.
+            r = results[p[0]]
+            sys.stderr.write("[%d/%d] %s %s\n" % (done, len(plants), p[0],
+                             "error" if isinstance(r, Exception) else ("caught" if r else "NOT CAUGHT")))
+            sys.stderr.flush()
     for p in plants:
         r = results[p[0]]
         if isinstance(r, Exception):
