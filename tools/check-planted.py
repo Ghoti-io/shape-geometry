@@ -1601,6 +1601,22 @@ STROKE_PLANTS = [
 
 PLANTS += STROKE_PLANTS
 
+# Strokes story S6: the curve outline for writers (stroke_curves.h, SG32 to SG43).  The ids start with cv-.
+SCL = "src/stroke_curves/lower.c"
+TCL = ["testStroke_curves_lower"]
+CURVE_PLANTS = [
+    # SG40: the lowering
+    ('cv-lower-handle-short', "src", SCL, '4.0 * w / (3.0 * (1.0 + w))', '2.0 * w / (3.0 * (1.0 + w))', TCL),
+    ('cv-lower-never-bisects', "src", SCL, '  if (bound <= tol) {\n    if (w < 1.0) {', '  if (1) {\n    if (w < 1.0) {', TCL),
+    ('cv-lower-half-weight', "src", SCL, '  double wh = gmath_sqrt((1.0 + w) / 2.0);', '  double wh = w;', TCL),
+    ('cv-lower-quadratic-inexact', "src", SCL, '    return cubic(out, lerp(p0, p1, 2.0 / 3.0), lerp(p2, p1, 2.0 / 3.0), p2);\n  }\n  double bound;', '    return cubic(out, lerp(p0, p1, 0.5), lerp(p2, p1, 0.5), p2);\n  }\n  double bound;', TCL),
+    ('cv-lower-weight-not-standardized', "src", SCL, '      double ws = w[1] / gmath_sqrt(w[0] * w[2]);', '      double ws = w[1];', TCL),
+    ('cv-lower-error-too-loose', "src", SCL, '    double e = (1.0 - w) * (1.0 - w) * (1.0 - w) / (54.0 * (1.0 + w));', '    double e = (1.0 - w) * (1.0 - w) * (1.0 - w) / (5400.0 * (1.0 + w));', TCL),
+    ('cv-lower-ellipse-sag-dropped', "src", SCL, 'sag * sag * w * w / (s2 * s2)', '0.0', TCL),
+    ('cv-lower-general-spread-dropped', "src", SCL, '  double bound = (wmax - wmin) / wmin * d * UPL;', '  double bound = (wmax - wmin) / wmax * d * UPL * 0.001;', TCL),
+]
+PLANTS += CURVE_PLANTS
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
