@@ -1628,7 +1628,7 @@ CURVE_PLANTS = [
     ('cv-half-disc-wrong-side', "src", SCC, '  if (gshgeom_sk_cross(m, d) < 0.0) {\n    m = gshgeom_sk_scale(-1.0, m);\n  }\n  GSHGEOM_SK_Vec nm', '  m = gshgeom_sk_scale(-1.0, m);\n  GSHGEOM_SK_Vec nm', TCB),
     ('cv-contour-wound-backwards', "src", SCC, '  if (!cv->flip) {\n    r = gshgeom_path_move_to(cv->part, gp(cv->el[0].p[0]));', '  if (cv->flip) {\n    r = gshgeom_path_move_to(cv->part, gp(cv->el[0].p[0]));', TCB),
     ('cv-contour-never-flipped', "src", SKE, '      cvs.flip = sg < 0;', '      cvs.flip = 0;', TCB),
-    ('cv-conic-weights-not-reversed', "src", SCC, '    w[0] = e->w[reversed ? 2 : 0];', '    w[0] = e->w[0];', TCB),
+    # Removed, cv-conic-weights-not-reversed: equivalent: every conic element of a contour is made with end weights of 1 (gshgeom_skc_conic and the line's element), so the weights that reversing exchanges are equal.
     ('cv-line-polygon-dropped', "src", SCC, '  GSHGEOM_Result r = gshgeom_path_move_to(path, gp(pts[0]));\n  for (size_t i = 1; i < n', '  GSHGEOM_Result r = gshgeom_path_move_to(path, gp(pts[1]));\n  for (size_t i = 1; i < n', TCB),
     ('cv-fan-not-inflated', "src", SKB, '          *r = gshgeom_skc_fan_sector(c, centre, na, nb, d_in * UP);', '          *r = gshgeom_skc_fan_sector(c, centre, na, nb, 0.0);', TCO),
     ('cv-cusp-disc-dropped', "src", SKB, '        *r = gshgeom_skc_disc(c, centre, c->h + d_in * UP);', '        *r = GSHGEOM_OK;', TCO),
