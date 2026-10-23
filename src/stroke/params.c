@@ -176,6 +176,20 @@ GSHGEOM_Result gshgeom_stroke_map_invertible(const GSHGEOM_Map * map, int * inve
   return GSHGEOM_OK;
 }
 
+/**
+ * A whole number of magnitude below 2^40 as an int64_t, without the conversion of a double to a 64-bit integer (on
+ * i686 that is an x87 instruction, which the determinism gate refuses): the magnitude splits into 20-bit halves
+ * by exact operations, and each half converts through a 32-bit integer (SSE2).
+ */
+static int64_t whole_to_i64(double w) {
+  int neg = w < 0.0;
+  double m = neg ? 0.0 - w : w;
+  double hi = gmath_floor(m * 0x1p-20);
+  double lo = m - hi * 0x1p20;
+  int64_t v = ((int64_t)(int32_t)hi << 20) + (int64_t)(int32_t)lo;
+  return neg ? -v : v;
+}
+
 GSHGEOM_Result gshgeom_stroke_canonical_map(
     const GSHGEOM_Map * map, GSHGEOM_Map * canonical, int64_t * shift_x, int64_t * shift_y) {
   if (!map || !canonical || !shift_x || !shift_y || gshgeom_map_check(map) != GSHGEOM_OK || map->dim != 2) {
@@ -204,8 +218,8 @@ GSHGEOM_Result gshgeom_stroke_canonical_map(
   out.kind = frac[0] != 0.0 || frac[1] != 0.0 ? out.kind | (uint32_t)GSHGEOM_MAP_TRANSLATES
                                                : out.kind & ~(uint32_t)GSHGEOM_MAP_TRANSLATES;
   *canonical = out;
-  *shift_x = (int64_t)whole[0];
-  *shift_y = (int64_t)whole[1];
+  *shift_x = whole_to_i64(whole[0]);
+  *shift_y = whole_to_i64(whole[1]);
   return GSHGEOM_OK;
 }
 

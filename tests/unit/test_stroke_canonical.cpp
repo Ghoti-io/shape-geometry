@@ -107,6 +107,34 @@ TEST(StrokeCanonical, RefusesWhatItCannotSplit) {
   EXPECT_EQ(sx, (int64_t)(0x1p40 - 1.0));
 }
 
+TEST(StrokeCanonical, TheShiftIsExactAcrossTheHalvesItIsConvertedIn) {
+  /* The whole part converts to an integer in two 20-bit halves (no 64-bit conversion, which is x87 on i686): every
+   * value around a boundary of the halves, both signs, must come back exactly. */
+  const double whole[] = {0.0,       1.0,        1048575.0,    1048576.0,    1048577.0,    2097151.0,
+                          2097152.0, 1073741823.0, 1073741824.0, 1073741825.0, 1099511627775.0};
+  for (double w : whole) {
+    for (double f : {0.0, 0.5, 0.25}) {
+      for (double sign : {1.0, -1.0}) {
+        double t = sign * w + f;
+        if (!(t > -0x1p40 && t < 0x1p40)) {
+          continue;
+        }
+        GSHGEOM_Map m = affine(1.0, 0.0, 0.0, 1.0, t, -t);
+        GSHGEOM_Map canon;
+        int64_t sx = 0;
+        int64_t sy = 0;
+        ASSERT_EQ(gshgeom_stroke_canonical_map(&m, &canon, &sx, &sy), GSHGEOM_OK) << t;
+        int64_t want_x = (int64_t)(t - (t - std::floor(t)));
+        int64_t want_y = (int64_t)(-t - (-t - std::floor(-t)));
+        EXPECT_EQ(sx, want_x) << t;
+        EXPECT_EQ(sy, want_y) << t;
+        EXPECT_EQ((double)sx + canon.t[0], t) << t;
+        EXPECT_EQ((double)sy + canon.t[1], -t) << t;
+      }
+    }
+  }
+}
+
 TEST(StrokeCanonical, TheOutlineIsTheSameBitsAtEveryWholePixelTranslation) {
   GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {10, 0}}, {'Q', {14, 0, 14, 6}}, {'L', {6, 9}}});
   GSHGEOM_Stroke s;

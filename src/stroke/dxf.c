@@ -52,7 +52,7 @@ static double next_above(double x) {
   return x;
 }
 
-static int finite(double x) {
+static int dxf_finite(double x) {
   return x - x == 0.0;
 }
 
@@ -63,19 +63,19 @@ static int in_band(double x) {
 
 GSHGEOM_Result gshgeom_stroke_dashes_from_dxf(const double * elements, size_t count, double scale, double * dashes,
     size_t capacity, size_t * dash_count, double * offset) {
-  if (!elements || count == 0 || !dashes || !dash_count || !offset || !finite(scale) || !(scale > 0.0)) {
+  if (!elements || count == 0 || !dashes || !dash_count || !offset || !dxf_finite(scale) || !(scale > 0.0)) {
     return GSHGEOM_ERR_INVALID;
   }
   int any_down = 0, any_up = 0;
   double total = 0.0;
   for (size_t i = 0; i < count; i++) {
-    if (!finite(elements[i])) {
+    if (!dxf_finite(elements[i])) {
       return GSHGEOM_ERR_INVALID;
     }
   }
   for (size_t i = 0; i < count; i++) {
     double v = elements[i] * scale;
-    if (!finite(v) || !in_band(v)) {
+    if (!dxf_finite(v) || !in_band(v)) {
       return GSHGEOM_ERR_LIMIT;
     }
     if (v >= 0.0) {

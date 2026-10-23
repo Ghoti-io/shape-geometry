@@ -102,7 +102,7 @@ static size_t canonical_count(const double * dashes, size_t count) {
   return (count % 2u) ? count * 2u : count;
 }
 
-static int finite(double x) {
+static int dash_finite(double x) {
   return x - x == 0.0;
 }
 
@@ -198,11 +198,11 @@ static GSHGEOM_Result trampoline(void * ctx, double a, double b, int flags) {
 
 GSHGEOM_Result gshgeom_stroke_dash_each(const double * dashes, size_t count, double offset, double length,
     size_t max_steps, GSHGEOM_Dash_Fn fn, void * ctx) {
-  if (!fn || (count && !dashes) || !finite(offset) || !finite(length) || length < 0.0) {
+  if (!fn || (count && !dashes) || !dash_finite(offset) || !dash_finite(length) || length < 0.0) {
     return GSHGEOM_ERR_INVALID;
   }
   for (size_t i = 0; i < count; i++) {
-    if (!finite(dashes[i])) {
+    if (!dash_finite(dashes[i])) {
       return GSHGEOM_ERR_INVALID;
     }
   }

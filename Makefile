@@ -255,7 +255,7 @@ TESTFLAGS := `PKG_CONFIG_PATH=$(PKG_CONFIG_LOOKUP_PATH) pkg-config --libs --cfla
 
 # coverage clears this: --coverage links the gcov runtime, whose mangle_path
 # check-symbols is right to reject in a shipping library.
-TEST_GATES ?= check-symbols check-aliasing check-stamps check-fp-contract check-edges check-libm check-no-x87 check-gates check-corpus-hash check-fuzz-corpus fuzz-replay run-examples
+TEST_GATES ?= check-symbols check-aliasing check-stamps check-fp-contract check-edges check-libm check-libm-o0 check-no-x87 check-gates check-corpus-hash check-fuzz-corpus fuzz-replay run-examples
 
 PLANT_JOBS ?= 4
 
@@ -385,7 +385,7 @@ $(HASH_PROBE): tools/corpus-hash.c $(APP_DIR)/$(STATIC_TARGET) \
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: run-examples
 .PHONY: check-corpus-hash check-planted check-resvg-stroke check-resvg-zoom
-.PHONY: check-fp-contract check-edges check-libm check-no-x87 check-gates libver-gen
+.PHONY: check-fp-contract check-edges check-libm check-libm-o0 check-no-x87 check-gates libver-gen
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
 .PHONY: fuzz fuzz-clean check-fuzz-corpus fuzz-replay
@@ -540,6 +540,12 @@ check-edges: $(APP_DIR)/$(TARGET) ## Fail on an #include or NEEDED edge outside 
 
 check-libm: $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET) ## Fail if any libm function is referenced or defined (AD-22)
 	@tools/check-libm.sh $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET)
+
+# At -O0 nothing is inlined away, so a static helper that shares a libm name (a `finite`) is a definition the
+# gate sees; the -O2 build above hides it.  The archive is built into a tree of its own.
+check-libm-o0: ## Fail if the -O0 build defines or references a libm symbol (AD-22)
+	@$(MAKE) --no-print-directory OPT_CFLAGS=-O0 BUILD_DIR=./build/libm-o0 $(if $(PREFIX),PREFIX=$(PREFIX)) ./build/libm-o0/apps/$(STATIC_TARGET) > /dev/null
+	@tools/check-libm.sh ./build/libm-o0/apps/$(STATIC_TARGET)
 
 check-no-x87: $(APP_DIR)/$(STATIC_TARGET) ## Fail if an x86 object holds an x87 instruction (AD-17)
 	@tools/check-no-x87.sh $(APP_DIR)/$(STATIC_TARGET)
