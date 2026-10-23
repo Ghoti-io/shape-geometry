@@ -385,7 +385,7 @@ $(HASH_PROBE): tools/corpus-hash.c $(APP_DIR)/$(STATIC_TARGET) \
 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: run-examples
-.PHONY: check-corpus-hash check-planted check-resvg-stroke
+.PHONY: check-corpus-hash check-planted check-resvg-stroke check-resvg-zoom
 .PHONY: check-fp-contract check-edges check-libm check-no-x87 check-gates libver-gen
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
@@ -502,6 +502,27 @@ check-resvg-stroke: ## Re-render the resvg stroke verdicts in the pinned image a
 		printf 'check-resvg-stroke: skipped: no %s (tools/resvg-stroke/fetch.sh builds it)\n' "$(RESVG_IMAGE)"; exit 0; \
 	fi; \
 	$$engine run --rm -v "$$PWD:/w:Z" -w /w $(RESVG_IMAGE) python3 tools/resvg-stroke/gen.py --check
+
+# The zoom gate (stroke_curves.h, SG43): tools/stroke-curves-svg.c writes each case as a stroke, as the curve outline's fill and
+# as the polygon's fill (the control); the pinned resvg renders all three at 1x, 16x and 64x and tools/resvg-stroke/zoom.py
+# requires the fill to agree with the stroke and the control to fail.  Without a container engine or the image it skips, and
+# fails instead under GHOTI_ORACLE_REQUIRED=1.
+ZOOM_TOOL := $(APP_DIR)/stroke-curves-svg$(EXE_EXTENSION)
+
+$(ZOOM_TOOL): tools/stroke-curves-svg.c $(APP_DIR)/$(STATIC_TARGET) \
+		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(INCLUDE) -o $@ $< $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
+
+check-resvg-zoom: $(ZOOM_TOOL) ## Render the curve outline against the renderer's own strokes at 1x, 16x and 64x
+	@engine=$${GHOTI_CONTAINER_ENGINE:-$$(command -v podman || command -v docker)}; \
+	if [ -z "$$engine" ] || ! $$engine image inspect $(RESVG_IMAGE) >/dev/null 2>&1; then \
+		if [ "$${GHOTI_ORACLE_REQUIRED:-0}" = 1 ]; then printf 'check-resvg-zoom: FAIL: no %s (tools/resvg-stroke/fetch.sh builds it)\n' "$(RESVG_IMAGE)" >&2; exit 1; fi; \
+		printf 'check-resvg-zoom: skipped: no %s (tools/resvg-stroke/fetch.sh builds it)\n' "$(RESVG_IMAGE)"; exit 0; \
+	fi; \
+	rm -rf $(BUILD_DIR)/zoom; mkdir -p $(BUILD_DIR)/zoom; \
+	LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(ZOOM_TOOL) $(BUILD_DIR)/zoom > $(BUILD_DIR)/zoom/cases.txt || exit 1; \
+	$$engine run --rm -v "$$PWD:/w:Z" -w /w $(RESVG_IMAGE) python3 tools/resvg-stroke/zoom.py $(BUILD_DIR)/zoom
 
 check-stamps: ## Fail if a compile rule names no flags stamp, or a stamp omits a variable
 	@python3 tools/check-stamps.py

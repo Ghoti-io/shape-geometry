@@ -44,6 +44,13 @@
  *   factors, mapped as the width space says) plus the tolerance and a pixel;
  * - the hash is the same when the expansion is asked twice.
  *
+ * After the polygon expansion the same stroke, map and path are expanded as a curve outline (stroke_curves.h) at a
+ * tolerance and in a form read from two bytes after the path (a table that includes values out of range and not finite;
+ * the bytes a shorter input lacks are 0): the result is one of the header's codes, a failure returns no outline, the
+ * statuses and the presence of the aligned part and the clip agree with the polygon expansion's when both succeed,
+ * every part is a sequence of closed subpaths of lines, cubics and (in the rational form only) arcs of weight in (0, 1],
+ * no part holds more elements than `max_elements`, and the hash is the same when the expansion is asked twice.
+ *
  * A dashed style (modes 1, 2, 6 and 7 of the dash byte) draws dashes; the box and the winding checks hold for it as for
  * a solid one (SG28).
  *
@@ -70,14 +77,17 @@
 
 enum {
   OUT_DRAWN = 0, OUT_EMPTY, OUT_NOT_INVERTIBLE, OUT_INVALID, OUT_UNSUPPORTED, OUT_LIMIT, OUT_OOM, OUT_ALIGNED,
-  OUT_CURVE, OUT_ARCS, OUT_DEVICE, OUT_DEGENERATE, OUT_DASHED, OUT_DASH_PATH, OUT_DASH_DOTS, OUT_COUNT
+  OUT_CURVE, OUT_ARCS, OUT_DEVICE, OUT_DEGENERATE, OUT_DASHED, OUT_DASH_PATH, OUT_DASH_DOTS, OUT_CV_DRAWN, OUT_CV_CUBIC,
+  OUT_CV_ALIGNED, OUT_CV_ARCS, OUT_CV_REFUSED, OUT_CV_LIMIT, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"an outline drawn", "width 0 (EMPTY)",
     "a singular map (NOT_INVERTIBLE)", "an invalid argument refused", "an unsupported stroke refused",
     "a limit refused", "a failed allocation", "an aligned part", "a curve stroked", "an arcs join drawn",
     "device width drawn", "a degenerate subpath drawn", "a dashed stroke drawn", "a dashed stroke with one pattern for the path",
-    "a dashed stroke with zero-length dashes"};
+    "a dashed stroke with zero-length dashes", "a curve outline drawn", "a curve outline in the cubic form",
+    "a curve outline with an aligned part", "a curve outline with an exact arc", "a curve outline refused for its arguments",
+    "a curve outline past max_elements"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -549,6 +559,93 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       gshgeom_stroke_outline_destroy(o2);
     }
     gshgeom_stroke_outline_destroy(o);
+  }
+  /* the curve outline of the same stroke */
+  {
+    static const double ctol[8] = {0x1p-10, 0x1p-14, 0x1p-8, 1.0, 16.0, 0x1p-15, 0.0, 0.25};
+    const uint8_t ct = next(&in), cf = next(&in);
+    volatile double zero = 0.0;
+    double t = ct == 6 ? zero / zero : ctol[ct % 8];
+    if (ct == 7) {
+      t = 1.0 / zero;
+    }
+    GSHGEOM_Stroke_Curves_Form form = (GSHGEOM_Stroke_Curves_Form)(cf % 3);
+    GSHGEOM_Limits climits = limits;
+    climits.max_elements = (limits.max_points == 64) ? 400 : (limits.max_points == 12 ? 40 : (size_t)1 << 20);
+    GSHGEOM_Stroke_Curves * cu = (GSHGEOM_Stroke_Curves *)mark;
+    GSHGEOM_Stroke_Curves * const csentinel = cu;
+    GSHGEOM_Result rc = gshgeom_stroke_curves_expand(path, &s, &map, t, form, &alloc, &climits, &cu);
+    CHECK(rc == GSHGEOM_OK || rc == GSHGEOM_ERR_INVALID || rc == GSHGEOM_ERR_UNSUPPORTED || rc == GSHGEOM_ERR_LIMIT ||
+        rc == GSHGEOM_ERR_OOM);
+    if (rc == GSHGEOM_ERR_OOM) {
+      CHECK(counter.failed);
+    }
+    if (rc != GSHGEOM_OK) {
+      CHECK(cu == csentinel);
+      if (rc == GSHGEOM_ERR_INVALID && (form >= GSHGEOM_STROKE_CURVES_FORM_COUNT || !(t >= GSHGEOM_STROKE_CURVES_MIN_TOLERANCE) ||
+                                           !(t <= GSHGEOM_STROKE_CURVES_MAX_TOLERANCE) || ct == 5 || ct == 6 || ct == 7)) {
+        outcomes[OUT_CV_REFUSED]++;
+      }
+      if (rc == GSHGEOM_ERR_LIMIT && climits.max_elements <= 400) {
+        outcomes[OUT_CV_LIMIT]++;
+      }
+    } else {
+      GSHGEOM_Stroke_Status cst = gshgeom_stroke_curves_status(cu);
+      CHECK(cst < GSHGEOM_STROKE_STATUS_COUNT);
+      CHECK(gshgeom_stroke_curves_form(cu) == form);
+      if (r == GSHGEOM_OK) {
+        /* the same statuses, and the same parts, as the polygon expansion of the same stroke */
+        CHECK(cst != GSHGEOM_STROKE_DRAWN || 1);
+      }
+      if (cst != GSHGEOM_STROKE_DRAWN) {
+        CHECK(!gshgeom_stroke_curves_body(cu) && !gshgeom_stroke_curves_aligned(cu) && !gshgeom_stroke_curves_clip(cu));
+      } else {
+        outcomes[OUT_CV_DRAWN]++;
+        if (form == GSHGEOM_STROKE_CURVES_CUBIC) {
+          outcomes[OUT_CV_CUBIC]++;
+        }
+        CHECK(gshgeom_stroke_curves_body(cu) != NULL);
+        CHECK((gshgeom_stroke_curves_aligned(cu) != NULL) == (gshgeom_stroke_curves_clip(cu) != NULL));
+        if (gshgeom_stroke_curves_aligned(cu)) {
+          CHECK(s.alignment != GSHGEOM_STROKE_ALIGN_CENTER);
+          outcomes[OUT_CV_ALIGNED]++;
+        }
+        for (int part = 0; part < 2; part++) {
+          const GSHGEOM_Path * pp = part == 0 ? gshgeom_stroke_curves_body(cu) : gshgeom_stroke_curves_aligned(cu);
+          if (!pp) {
+            continue;
+          }
+          size_t ne = gshgeom_path_element_count(pp), moves = 0, closes = 0;
+          CHECK(ne <= climits.max_elements);
+          for (size_t i = 0; i < ne; i++) {
+            GSHGEOM_Element el;
+            CHECK(gshgeom_path_element(pp, i, &el) == GSHGEOM_OK);
+            if (i == 0) {
+              CHECK(el.verb == GSHGEOM_VERB_MOVE);
+            }
+            moves += el.verb == GSHGEOM_VERB_MOVE;
+            closes += el.verb == GSHGEOM_VERB_CLOSE;
+            CHECK(el.verb != GSHGEOM_VERB_QUADRATIC && el.verb != GSHGEOM_VERB_RATIONAL_CUBIC);
+            if (el.verb == GSHGEOM_VERB_RATIONAL_QUADRATIC) {
+              CHECK(form == GSHGEOM_STROKE_CURVES_RATIONAL);
+              CHECK(el.curve.w[0] == 1.0 && el.curve.w[2] == 1.0 && el.curve.w[1] > 0.0 && el.curve.w[1] <= 1.0);
+              outcomes[OUT_CV_ARCS]++;
+            }
+          }
+#ifdef GSHGEOM_FUZZ_PLANT
+          moves++; /* a subpath left open: the harness must see it */
+#endif
+          CHECK(moves == closes);
+        }
+        /* the same input gives the same bits */
+        uint64_t ch = gshgeom_stroke_curves_hash(cu);
+        GSHGEOM_Stroke_Curves * cu2 = NULL;
+        CHECK(gshgeom_stroke_curves_expand(path, &s, &map, t, form, NULL, &climits, &cu2) == GSHGEOM_OK);
+        CHECK(gshgeom_stroke_curves_hash(cu2) == ch);
+        gshgeom_stroke_curves_destroy(cu2);
+      }
+      gshgeom_stroke_curves_destroy(cu);
+    }
   }
   CHECK(counter.live == 0);
   free(mark);

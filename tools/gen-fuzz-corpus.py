@@ -179,8 +179,8 @@ S_POLY = [bytes([0]) + s_pt(0, 0), bytes([1]) + s_pt(160, 0), bytes([1]) + s_pt(
 S_CURVE = [bytes([0]) + s_pt(0, 0), bytes([2]) + s_pt(80, 160) + s_pt(160, 0), bytes([1]) + s_pt(240, 64)]
 
 
-def s_input(params, ops, opts=0, fail=0, tol=4, map_bytes=b"\x00", map3d=0):
-    return bytes([opts, fail, tol]) + params + map_bytes + bytes([map3d]) + s_path(ops)
+def s_input(params, ops, opts=0, fail=0, tol=4, map_bytes=b"\x00", map3d=0, tail=b""):
+    return bytes([opts, fail, tol]) + params + map_bytes + bytes([map3d]) + s_path(ops) + tail
 
 
 def stroke_scripted():
@@ -222,6 +222,23 @@ def stroke_scripted():
                                 [bytes([0]) + s_pt(0, 0), bytes([3]) + s_pt(128, 64) + s_pt(64, 64) + s_pt(64, 0)])
     out["s-rational.bin"] = s_input(s_params(cap=1),
                                     [bytes([0]) + s_pt(0, 0), bytes([4]) + s_pt(80, 80) + s_pt(160, 0) + bytes([0, 1, 0])])
+    # the curve outline (stroke_curves.h): two bytes after the path, the tolerance (an index into the C file's table: 0 is 2^-10,
+    # 1 the finest, 5 below the finest, 6 NaN, 7 infinity) and the form (0 rational, 1 cubic, 2 out of range)
+    out["s-curves-cubic.bin"] = s_input(s_params(join=1, cap=1), S_CURVE, tail=bytes([0, 1]))
+    out["s-curves-rational.bin"] = s_input(s_params(join=1, cap=1), S_CURVE, tail=bytes([0, 0]))
+    out["s-curves-aligned.bin"] = s_input(s_params(align=1, rule=1), S_SQUARE, tail=bytes([1, 0]))
+    out["s-curves-dashed.bin"] = s_input(s_params(cap=1, dash=bytes([6, 0, 5, 3, 0, 0])), S_CURVE, tail=bytes([2, 1]))
+    out["s-curves-bad-tolerance.bin"] = s_input(s_params(), S_POLY, tail=bytes([5, 0]))
+    out["s-curves-nan-tolerance.bin"] = s_input(s_params(), S_POLY, tail=bytes([6, 0]))
+    out["s-curves-infinite-tolerance.bin"] = s_input(s_params(), S_POLY, tail=bytes([7, 0]))
+    out["s-curves-bad-form.bin"] = s_input(s_params(), S_POLY, tail=bytes([0, 2]))
+    out["s-curves-limit.bin"] = s_input(s_params(join=1, cap=1), S_CURVE, opts=2, tail=bytes([0, 0]))
+    out["s-curves-oom.bin"] = s_input(s_params(join=1, cap=1), S_CURVE, opts=4, fail=40, tail=bytes([0, 1]))
+    out["s-curves-cusp.bin"] = s_input(s_params(join=1, cap=1, width=raw(48)),
+                                       [bytes([0]) + s_pt(0, 0), bytes([3]) + s_pt(128, 64) + s_pt(64, 64) + s_pt(64, 0)],
+                                       tail=bytes([3, 0]))
+    out["s-curves-device.bin"] = s_input(s_params(space=1, join=1), S_CURVE, map_bytes=bytes([1, 1]) + raw(48) + raw(16),
+                                         tail=bytes([2, 0]))
     # found by the fuzzer: a join between a segment of a few ulps' extent and its neighbour, whose direction needs a
     # norm that neither underflows nor overflows
     out["s-regress-norm.bin"] = base64.b64decode(
