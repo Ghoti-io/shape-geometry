@@ -232,6 +232,19 @@ changes no result, cannot be seen by any test:
     it)
   - the 200-step cap of ``bisect`` as a cap: it is reached only for roots
     closer than 2^-200 to an end, where 2^-200 is not a double of interest
+
+  The sweep of the tree after the strokes stories, 1110 plants in ghoti-build:gcc16 (``PLANT_ALL_TESTS=1`` tries a plant
+  its own tests do not see against every other test and the probe before it is called a survivor).  1074 were caught at
+  once; of the 33 that were not, 11 did not compile (they now keep the variable their only use removed) and 22 survived:
+  12 are seen since by a test or the probe's hash, two were the same program and are removed with the reason beside the
+  place they were (sg31-negative-zero, cv-conic-weights-not-reversed), and eight remain unseen and not shown equivalent,
+  each needing a case built for it: ``sk-smooth-gets-a-join`` (a join at a vertex that goes straight on, decided again
+  where the class was not decided before the map), ``sk-miter-tip-error-ignored`` (the error bound of a miter's tip, which
+  only the bound's gate reads), ``sk-arcs-limit-along-chord``, ``sk-arcs-crossings-not-heights`` and ``sk-arcs-grow-behind``
+  (steps of the arcs join that the case matrix and the probe reach only where they decide alike),
+  ``sk-body-coincident-start-ignored`` (a curve whose first two control points coincide, where the terms that vanish are
+  known to be zero and not only small), ``sk-dash-wrap-no-join`` (the join inside a dash across the start of a closed
+  subpath, at its last vertex) and ``cv-hulls-not-apart-ignored`` (the test that the two rails of a band do not overlap).
 """
 import concurrent.futures
 import os
