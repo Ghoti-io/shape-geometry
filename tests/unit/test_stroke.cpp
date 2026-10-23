@@ -356,6 +356,55 @@ TEST(StrokeInputs, RefusalsAndTolerances) {
 
 /* --- SG14, SG15: statuses ----------------------------------------------------------- */
 
+TEST(StrokeStatus, ADashedSubpathOfNoLengthIsADotOrNothingAsTheStyleSays) {
+  // A subpath that goes nowhere under a round cap and a dash pattern: SVG 2's dot, or nothing under `OMIT`.
+  GSHGEOM_Path * p = sm::build({{'M', {5, 5}}, {'L', {5, 5}}});
+  GSHGEOM_Map m = identity();
+  GSHGEOM_Stroke s = plain();
+  s.width = 4.0;
+  s.cap = GSHGEOM_STROKE_CAP_ROUND;
+  const double dashes[2] = {2.0, 2.0};
+  s.dashes = dashes;
+  s.dash_count = 2;
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  auto body_points = [&](uint32_t degenerate) {
+    s.degenerate = degenerate;
+    EXPECT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &o), GSHGEOM_OK);
+    const GSHGEOM_Flat_Path * body = gshgeom_stroke_outline_body(o);
+    const size_t n = body ? gshgeom_flat_path_point_count(body) : 0;
+    gshgeom_stroke_outline_destroy(o);
+    o = nullptr;
+    return n;
+  };
+  EXPECT_GT(body_points(GSHGEOM_STROKE_DEGENERATE_DRAW), 0u) << "the dot";
+  EXPECT_EQ(body_points(GSHGEOM_STROKE_DEGENERATE_OMIT), 0u) << "nothing";
+  gshgeom_path_destroy(p);
+}
+
+TEST(StrokeDashGate, ALinePastTheCutPositionsErrorBoundIsTheLimitAndAShorterOneIsDrawn) {
+  // SG26: the position of a cut is known to within a bound that grows with the length of the path; where that bound is
+  // past 2^-20 of a pixel (times the map's norm) the call refuses rather than place a dash by a guess.  Two long
+  // dashes, so that the work is nothing and only the bound decides.
+  GSHGEOM_Map m = identity();
+  GSHGEOM_Stroke s = plain();
+  s.width = 2.0;
+  for (double length : {0x1p24, 0x1p28}) {
+    GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {length, 0}}});
+    const double dashes[2] = {length / 4.0, length / 4.0};
+    s.dashes = dashes;
+    s.dash_count = 2;
+    GSHGEOM_Stroke_Outline * o = nullptr;
+    const GSHGEOM_Result r = gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &o);
+    if (length < 0x1p27) {
+      EXPECT_EQ(r, GSHGEOM_OK) << length;
+    } else {
+      EXPECT_EQ(r, GSHGEOM_ERR_LIMIT) << length;
+    }
+    gshgeom_stroke_outline_destroy(o);
+    gshgeom_path_destroy(p);
+  }
+}
+
 TEST(StrokeStatus, ZeroWidthIsEmptyDegenerateDotsIncluded) {
   GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {5, 0}}, {'M', {9, 9}}, {'Z', {}}});
   GSHGEOM_Map m = identity();

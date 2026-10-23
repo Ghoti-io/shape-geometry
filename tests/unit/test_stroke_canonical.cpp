@@ -72,6 +72,8 @@ TEST(StrokeCanonical, TheTranslationIsSplitExactly) {
       }
     }
     EXPECT_EQ(gshgeom_map_check(&canon), GSHGEOM_OK);
+    EXPECT_EQ((canon.kind & (uint32_t)GSHGEOM_MAP_TRANSLATES) != 0, c.fx != 0.0 || c.fy != 0.0)
+        << "the kind says a translation only where one is left: " << c.tx << " " << c.ty;
   }
   // A tiny negative translation: 1 - 2^-60 rounds to 1, taken as 0 with the whole pixel one more.
   GSHGEOM_Map tiny = affine(1, 0, 0, 1, -0x1p-60, 0.0);
