@@ -17,6 +17,10 @@
 #   - SVG 2 editor's draft, w3c/svgwg at commit f846f12e3f50: the same two
 #     chapters in their source form.
 #   - The SVG Strokes module draft at the same commit (stroke-alignment).
+#   - SVG 2, the same candidate recommendation's text chapter (text rendering
+#     order, "filled and stroked as if it were a single path"; the object
+#     bounding box of text, relative to the entire text element), and the
+#     editor's draft's source of it, for the stroke of text.
 #   - The WHATWG HTML standard's source at commit c6c3055c1287: the canvas
 #     line styles and the "trace a path" algorithm.
 #
@@ -54,5 +58,9 @@ fetch svg2-ed-paths.bs "$svgwg/master/paths.bs" \
   e3efdc40baab30f99bc3d2ca7dc968395aded3ed5b6f91dd987366e8c25e7838
 fetch svg-strokes-ed.html "$svgwg/specs/strokes/master/Overview.html" \
   fe5458059120c80609f1a9d8108c448058b3c51f33887744c7200c3ce413889f
+fetch svg2-cr-20181004-text.html https://www.w3.org/TR/2018/CR-SVG2-20181004/text.html \
+  165699deaff93e452e33e23ecd6d912d35e9307847264697e4a731a0e6ad1ee1
+fetch svg2-ed-text.bs "$svgwg/master/text.bs" \
+  2a700217499341392f049e37a1b421eebba42975795cdc21cbfc5a32b0f70200
 fetch whatwg-html-source "$whatwg/source" \
   915736f7cceded6c0b2f3a886aead8a1b058d7d01f512602731789f00abda9fa
