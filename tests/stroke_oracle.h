@@ -188,13 +188,28 @@ inline Real binom(int n, int k) {
 typedef std::vector<Real> Bern;
 
 inline Real bern_eval(const Bern & b, Real t) {
-  std::vector<Real> q(b);
-  for (size_t r = 1; r < q.size(); r++) {
-    for (size_t i = 0; i + r < q.size(); i++) {
+  /* de Casteljau on a copy; the common degrees on the stack (the same operations in the same order as on the heap) */
+  Real small[24];
+  std::vector<Real> big;
+  Real * q = small;
+  size_t n = b.size();
+  if (n == 0) {
+    return 0;
+  }
+  if (n > 24) {
+    big = b;
+    q = big.data();
+  } else {
+    for (size_t i = 0; i < n; i++) {
+      small[i] = b[i];
+    }
+  }
+  for (size_t r = 1; r < n; r++) {
+    for (size_t i = 0; i + r < n; i++) {
       q[i] = (1 - t) * q[i] + t * q[i + 1];
     }
   }
-  return q.empty() ? 0 : q[0];
+  return q[0];
 }
 
 /** The product of two Bernstein polynomials. */
@@ -1750,24 +1765,32 @@ struct Samples {
   }
 };
 
+/** The recursion of sample_curve: the ends' points are passed down, so each node evaluates the curve once (at its midpoint). */
+template <typename F>
+inline void sample_curve_rec(Samples & out, F & f, Real t0, Real t1, V2 a, V2 b, Real sigma, int depth) {
+  V2 m = f((t0 + t1) / 2);
+  if (!std::isfinite((double)m.x) || !std::isfinite((double)m.y)) {
+    abort(); /* a sampled curve must be finite everywhere: a bug of the sampler, not a long run */
+  }
+  if ((norm(b - a) <= sigma && norm(m - a) <= sigma && norm(m - b) <= sigma) || depth > 40) {
+    out.add(b);
+    return;
+  }
+  sample_curve_rec(out, f, t0, (t0 + t1) / 2, a, m, sigma, depth + 1);
+  sample_curve_rec(out, f, (t0 + t1) / 2, t1, m, b, sigma, depth + 1);
+}
+
 /** Sample a curve given by f on [t0, t1] so that consecutive device samples are at most sigma apart. */
 template <typename F>
 inline void sample_curve(Samples & out, F f, Real t0, Real t1, Real sigma, int depth = 0) {
+  (void)depth;
   V2 a = f(t0), b = f(t1);
   if (!std::isfinite((double)a.x) || !std::isfinite((double)a.y) || !std::isfinite((double)b.x) ||
       !std::isfinite((double)b.y)) {
     abort(); /* a sampled curve must be finite everywhere: a bug of the sampler, not a long run */
   }
-  if (depth == 0) {
-    out.add(a);
-  }
-  V2 m = f((t0 + t1) / 2);
-  if ((norm(b - a) <= sigma && norm(m - a) <= sigma && norm(m - b) <= sigma) || depth > 40) {
-    out.add(b);
-    return;
-  }
-  sample_curve(out, f, t0, (t0 + t1) / 2, sigma, depth + 1);
-  sample_curve(out, f, (t0 + t1) / 2, t1, sigma, depth + 1);
+  out.add(a);
+  sample_curve_rec(out, f, t0, t1, a, b, sigma, 0);
 }
 
 inline void sample_segment(Samples & out, V2 a, V2 b, Real sigma) {

@@ -206,6 +206,7 @@ struct Winding {
   Rings rings;
   struct Edge {
     Real ax, ay, bx, by;
+    int ring;
   };
   Real band = 1;
   Real lo = 0;
@@ -228,33 +229,62 @@ struct Winding {
     lo = std::floor(mn / band);
     int64_t nrow = (int64_t)(std::floor(mx / band) - lo) + 1;
     rows.assign((size_t)nrow, {});
+    int ri = 0;
     for (auto & r : rings.ring) {
       size_t n = r.size();
       for (size_t i = 0; i < n; i++) {
-        Edge e = {r[i].x, r[i].y, r[(i + 1) % n].x, r[(i + 1) % n].y};
+        Edge e = {r[i].x, r[i].y, r[(i + 1) % n].x, r[(i + 1) % n].y, ri};
         int64_t a = (int64_t)(std::floor(std::min(e.ay, e.by) / band) - lo);
         int64_t b = (int64_t)(std::floor(std::max(e.ay, e.by) / band) - lo);
         for (int64_t k = a; k <= b; k++) {
           rows[(size_t)k].push_back(e);
         }
       }
+      ri++;
     }
   }
 
-  int at(P2 x) const {
+  /** The winding number at x, and the least winding any single ring has there (a positively wound ring never goes below 0). */
+  int at(P2 x, int * least = nullptr) const {
     int64_t k = (int64_t)(std::floor(x.y / band) - lo);
+    if (least) {
+      *least = 0;
+    }
     if (k < 0 || (size_t)k >= rows.size()) {
       return 0;
     }
     int w = 0;
+    std::vector<std::pair<int, int>> per; /* ring, partial winding */
     for (const Edge & e : rows[(size_t)k]) {
       Real c = (e.bx - e.ax) * (x.y - e.ay) - (x.x - e.ax) * (e.by - e.ay);
+      int d = 0;
       if (e.ay <= x.y) {
         if (e.by > x.y && c > 0) {
-          w++;
+          d = 1;
         }
       } else if (e.by <= x.y && c < 0) {
-        w--;
+        d = -1;
+      }
+      if (d) {
+        w += d;
+        if (least) {
+          bool found = false;
+          for (auto & pr : per) {
+            if (pr.first == e.ring) {
+              pr.second += d;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            per.push_back({e.ring, d});
+          }
+        }
+      }
+    }
+    if (least) {
+      for (auto & pr : per) {
+        *least = std::min(*least, pr.second);
       }
     }
     return w;
@@ -263,18 +293,16 @@ struct Winding {
   /** The least winding any single ring has at x. */
   int least_ring(P2 x) const {
     int least = 0;
-    for (auto & r : rings.ring) {
-      least = std::min(least, ring_winding(r, x));
-    }
+    at(x, &least);
     return least;
   }
 };
 
 /** Points along every curve of a path (for the deviation profile): `per` samples per curve element. */
-inline std::vector<P2> sample_path(const GSHGEOM_Path * path, int per) {
+inline std::vector<P2> sample_path(const GSHGEOM_Path * path, int per, size_t stride = 1) {
   std::vector<P2> out;
   size_t n = path ? gshgeom_path_element_count(path) : 0;
-  for (size_t i = 0; i < n; i++) {
+  for (size_t i = 0; i < n; i += stride) {
     GSHGEOM_Element el;
     gshgeom_path_element(path, i, &el);
     if (el.verb == GSHGEOM_VERB_MOVE || el.verb == GSHGEOM_VERB_CLOSE) {

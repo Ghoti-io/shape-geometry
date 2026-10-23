@@ -233,6 +233,9 @@ static GSHGEOM_Result miter_clip(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHG
 
 /** The half disc {E + v : |v| <= h, v . d >= 0} as one convex piece (two quarter arcs). */
 static GSHGEOM_Result half_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHGEOM_SK_Vec m, GSHGEOM_SK_Vec d) {
+  if (c->cv) {
+    return gshgeom_skc_half_disc(c, anchor, m, d); /* two quarter arcs, exact (SG37) */
+  }
   double allowed = gshgeom_sk_room(c, 0.0);
   size_t n = 1;
   double d1 = 0.0, d2 = 0.0;

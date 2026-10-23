@@ -176,14 +176,14 @@ static int point_ok(const GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec p) {
     const GSHGEOM_Map * m = &c->map;
     double r0 = fabs_(m->m[0][0] * p.x) + fabs_(m->m[0][1] * p.y) + fabs_(m->t[0]);
     double r1 = fabs_(m->m[1][0] * p.x) + fabs_(m->m[1][1] * p.y) + fabs_(m->t[1]);
-    return r0 <= GSHGEOM_SK_MAG_LIMIT && r1 <= GSHGEOM_SK_MAG_LIMIT;
+    return r0 <= c->mag_limit && r1 <= c->mag_limit;
   }
-  return fabs_(p.x) <= GSHGEOM_SK_MAG_LIMIT && fabs_(p.y) <= GSHGEOM_SK_MAG_LIMIT;
+  return fabs_(p.x) <= c->mag_limit && fabs_(p.y) <= c->mag_limit;
 }
 
 static int magnitudes_ok(const GSHGEOM_SK_Ctx * c, const Reader * rd, double h_dev_widest) {
   double L = c->st.miter_limit > 2.0 ? c->st.miter_limit : 2.0;
-  if (!(h_dev_widest * L * 2.0 <= GSHGEOM_SK_MAG_LIMIT)) {
+  if (!(h_dev_widest * L * 2.0 <= c->mag_limit)) {
     return 0;
   }
   for (size_t i = 0; i < rd->sub_n; i++) {
@@ -208,7 +208,7 @@ static int magnitudes_ok(const GSHGEOM_SK_Ctx * c, const Reader * rd, double h_d
         }
       }
       GSHGEOM_SK_Vec d = gshgeom_sk_sub(s->p[k], s->p[0]);
-      if (!(c->norm * gshgeom_sk_norm(d) <= GSHGEOM_SK_MAG_LIMIT)) {
+      if (!(c->norm * gshgeom_sk_norm(d) <= c->mag_limit)) {
         return 0;
       }
     }
@@ -269,6 +269,66 @@ static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, 
   gshgeom_device_path_destroy(dp);
   gshgeom_path_destroy(mp);
   return r;
+}
+
+/** The curve outline's clip (SG32): the closed subpaths with extent, `M` applied to every element. */
+static GSHGEOM_Result build_clip_curves(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, const Reader * rd,
+    GSHGEOM_Path ** out) {
+  GSHGEOM_Path * mp = NULL;
+  GSHGEOM_Result r = gshgeom_path_create(&c->alloc, &c->limits, 2, &mp);
+  for (size_t i = 0; i < rd->sub_n && r == GSHGEOM_OK; i++) {
+    const Sub * s = &rd->subs[i];
+    if (!s->closed || s->seg_count == 0) {
+      continue;
+    }
+    GSHGEOM_Point sp;
+    r = gshgeom_map_apply_point(&c->map, s->start_model, &sp);
+    if (r == GSHGEOM_OK) {
+      r = gshgeom_path_move_to(mp, sp);
+    }
+    for (size_t e = s->first_el; e < s->end_el && r == GSHGEOM_OK; e++) {
+      GSHGEOM_Element el;
+      r = gshgeom_path_element(path, e, &el);
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      GSHGEOM_Curve cv;
+      r = gshgeom_map_apply_curve(&c->map, &el.curve, &cv);
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      const GSHGEOM_Point * p = cv.p;
+      switch (el.verb) {
+      case GSHGEOM_VERB_LINE:
+        r = gshgeom_path_line_to(mp, p[1]);
+        break;
+      case GSHGEOM_VERB_QUADRATIC:
+        r = gshgeom_path_quadratic_to(mp, p[1], p[2]);
+        break;
+      case GSHGEOM_VERB_CUBIC:
+        r = gshgeom_path_cubic_to(mp, p[1], p[2], p[3]);
+        break;
+      case GSHGEOM_VERB_RATIONAL_QUADRATIC:
+        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);
+        break;
+      case GSHGEOM_VERB_RATIONAL_CUBIC:
+        r = gshgeom_path_rational_cubic_to(mp, p[1], p[2], p[3], cv.w);
+        break;
+      case GSHGEOM_VERB_CLOSE:
+        r = gshgeom_path_close(mp);
+        break;
+      default:
+        r = GSHGEOM_ERR_INTERNAL;
+        break;
+      }
+    }
+  }
+  if (r != GSHGEOM_OK) {
+    gshgeom_path_destroy(mp);
+    return r;
+  }
+  *out = mp;
+  return GSHGEOM_OK;
 }
 
 /** SG11's effective tangent of the degenerate subpath i (raw, build space). */
@@ -345,12 +405,16 @@ GSHGEOM_Result gshgeom_stroke_expand_with_tolerance(const GSHGEOM_Path * centerl
   return gshgeom_stroke_expand_capped(centerline, stroke, map, tolerance, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, out);
 }
 
-GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
-    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
-    int depth_cap, GSHGEOM_Stroke_Outline ** out) {
-  if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
-    return GSHGEOM_ERR_INVALID;
-  }
+/** What a curve outline asks of the shared expansion (stroke_curves.h). */
+typedef struct CurveReq {
+  double t;
+  GSHGEOM_Stroke_Curves_Form form;
+} CurveReq;
+
+/** The expansion of stroke.h (@p cr NULL: 26.6 polygons in @p po) or of stroke_curves.h (curves in @p pc). */
+static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, int32_t tolerance, const CurveReq * cr, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc) {
   GSHGEOM_Result r = gshgeom_map_check(map);
   if (r != GSHGEOM_OK) {
     return r;
@@ -380,36 +444,74 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
       c.limits.max_points = limits->max_points;
     }
   }
+  GSHGEOM_SK_Curves cvs;
+  memset(&cvs, 0, sizeof cvs);
   c.tau = tolerance;
   c.budget = ((double)tolerance - GSHGEOM_SK_MARGIN) / 64.0;
   c.rho = (GSHGEOM_SK_ROUND + GSHGEOM_SK_ETA) / 64.0;
+  c.mag_limit = GSHGEOM_SK_MAG_LIMIT;
+  if (cr) {
+    /* SG35: t / 2 for the approximation of pieces; the arithmetic's reach, 2^-43 of the largest magnitude, must be
+     * within t / 8, which bounds the magnitudes the construction is certified for by t 2^40 (and by 2^30) */
+    cvs.t = cr->t;
+    cvs.budget = cr->t / 2.0;
+    c.cv = &cvs;
+    double lim = cr->t * 0x1p40;
+    c.mag_limit = lim < GSHGEOM_SK_MAG_LIMIT ? lim : GSHGEOM_SK_MAG_LIMIT;
+  }
   c.map = *map;
   c.local = c.st.width_space == GSHGEOM_STROKE_WIDTH_LOCAL;
   c.work_cap = 4 * c.limits.max_points + 4096;
   c.depth_cap = depth_cap < 1 ? 1 : (depth_cap > GSHGEOM_STROKE_MAX_DEPTH ? GSHGEOM_STROKE_MAX_DEPTH : depth_cap);
-  GSHGEOM_Stroke_Outline * o = gcu_allocator_calloc(&c.alloc, 1, sizeof *o);
-  if (!o) {
-    return GSHGEOM_ERR_OOM;
+  GSHGEOM_Stroke_Outline * o = NULL;
+  GSHGEOM_Stroke_Curves * cu = NULL;
+  if (cr) {
+    cu = gcu_allocator_calloc(&c.alloc, 1, sizeof *cu);
+    if (!cu) {
+      return GSHGEOM_ERR_OOM;
+    }
+    cu->alloc = c.alloc;
+    cu->form = cr->form;
+    cu->alignment = c.st.alignment;
+    cu->rule = c.st.alignment_rule;
+    cu->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;
+  } else {
+    o = gcu_allocator_calloc(&c.alloc, 1, sizeof *o);
+    if (!o) {
+      return GSHGEOM_ERR_OOM;
+    }
+    o->alloc = c.alloc;
+    o->alignment = c.st.alignment;
+    o->rule = c.st.alignment_rule;
+    o->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;
   }
-  o->alloc = c.alloc;
-  o->alignment = c.st.alignment;
-  o->rule = c.st.alignment_rule;
-  o->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;
+#define EXPAND_FAIL(res)                                                                                               \
+  do {                                                                                                                 \
+    gshgeom_stroke_outline_destroy(o);                                                                                 \
+    gshgeom_stroke_curves_destroy(cu);                                                                                 \
+    return (res);                                                                                                      \
+  } while (0)
+#define EXPAND_DONE(st)                                                                                                \
+  do {                                                                                                                 \
+    if (cr) {                                                                                                          \
+      cu->status = (st);                                                                                               \
+      *pc = cu;                                                                                                        \
+    } else {                                                                                                           \
+      o->status = (st);                                                                                                \
+      *po = o;                                                                                                         \
+    }                                                                                                                  \
+    return GSHGEOM_OK;                                                                                                 \
+  } while (0)
   int invertible = 0;
   r = gshgeom_stroke_map_invertible(map, &invertible);
   if (r != GSHGEOM_OK) {
-    gshgeom_stroke_outline_destroy(o);
-    return r;
+    EXPAND_FAIL(r);
   }
   if (!invertible) {
-    o->status = GSHGEOM_STROKE_NOT_INVERTIBLE; /* SG15, decided before SG14 */
-    *out = o;
-    return GSHGEOM_OK;
+    EXPAND_DONE(GSHGEOM_STROKE_NOT_INVERTIBLE); /* SG15, decided before SG14 */
   }
   if (c.st.width == 0.0) {
-    o->status = GSHGEOM_STROKE_EMPTY; /* SG14 */
-    *out = o;
-    return GSHGEOM_OK;
+    EXPAND_DONE(GSHGEOM_STROKE_EMPTY); /* SG14 */
   }
   if (c.local) {
     c.lin[0][0] = map->m[0][0];
@@ -419,6 +521,13 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
     double f = map->m[0][0] * map->m[0][0] + map->m[0][1] * map->m[0][1] + map->m[1][0] * map->m[1][0] +
         map->m[1][1] * map->m[1][1];
     c.norm = gmath_sqrt(f) * (1.0 + 0x1p-40);
+    if (cr) {
+      /* the determinant's sign, exactly: a mirroring map reverses the orientation of every contour */
+      GSHGEOM_Point o0 = {0.0, 0.0, 0.0}, ex = {map->m[0][0], map->m[1][0], 0.0}, ey = {map->m[0][1], map->m[1][1], 0.0};
+      int sg = 0;
+      (void)gshgeom_orient2d(o0, ex, ey, &sg);
+      cvs.flip = sg < 0;
+    }
   } else {
     c.lin[0][0] = c.lin[1][1] = 1.0;
     c.norm = 1.0;
@@ -444,19 +553,34 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
     r = gshgeom_sk_dash_begin(&c, centerline, &rd, stroke);
   }
   if (r == GSHGEOM_OK) {
-    r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->body);
+    if (cr) {
+      r = gshgeom_path_create(&c.alloc, &c.limits, 2, &cu->body);
+    } else {
+      r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->body);
+    }
   }
   if (r == GSHGEOM_OK && aligned && any_closed) {
-    r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->aligned);
-    if (r == GSHGEOM_OK) {
-      r = build_clip(&c, centerline, &rd, &o->clip);
+    if (cr) {
+      r = gshgeom_path_create(&c.alloc, &c.limits, 2, &cu->aligned);
+      if (r == GSHGEOM_OK) {
+        r = build_clip_curves(&c, centerline, &rd, &cu->clip);
+      }
+    } else {
+      r = gshgeom_flat_path_new(&c.alloc, &c.limits, &o->aligned);
+      if (r == GSHGEOM_OK) {
+        r = build_clip(&c, centerline, &rd, &o->clip);
+      }
     }
   }
   for (size_t i = 0; i < rd.sub_n && r == GSHGEOM_OK; i++) {
     int to_aligned = aligned && rd.subs[i].closed && rd.subs[i].seg_count;
     c.h = to_aligned ? 2.0 * h : h;
     c.h_dev = c.h * c.norm;
-    c.part = to_aligned ? o->aligned : o->body;
+    if (cr) {
+      cvs.part = to_aligned ? cu->aligned : cu->body;
+    } else {
+      c.part = to_aligned ? o->aligned : o->body;
+    }
     r = stroke_sub(&c, &rd, i);
   }
   gshgeom_sk_dash_end(&c);
@@ -464,11 +588,56 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
   gcu_allocator_free(&c.alloc, rd.segs);
   gcu_allocator_free(&c.alloc, c.scratch);
   gcu_allocator_free(&c.alloc, c.arcbuf);
-  if (r != GSHGEOM_OK) {
-    gshgeom_stroke_outline_destroy(o);
-    return r;
+  gcu_allocator_free(&c.alloc, cvs.el);
+  gcu_allocator_free(&c.alloc, cvs.run);
+  if (r == GSHGEOM_OK && cr && cr->form == GSHGEOM_STROKE_CURVES_CUBIC) {
+    /* SG40: the cubic form is the rational form lowered at a quarter of the tolerance, by the public function */
+    GSHGEOM_Path ** parts[2] = {&cu->body, &cu->aligned};
+    for (int k = 0; k < 2 && r == GSHGEOM_OK; k++) {
+      if (*parts[k]) {
+        GSHGEOM_Path * low = NULL;
+        r = gshgeom_stroke_curves_lower_cubic(*parts[k], cr->t / 4.0, &c.alloc, &c.limits, &low);
+        if (r == GSHGEOM_OK) {
+          gshgeom_path_destroy(*parts[k]);
+          *parts[k] = low;
+        }
+      }
+    }
   }
-  o->status = GSHGEOM_STROKE_DRAWN;
-  *out = o;
-  return GSHGEOM_OK;
+  if (r != GSHGEOM_OK) {
+    EXPAND_FAIL(r);
+  }
+  EXPAND_DONE(GSHGEOM_STROKE_DRAWN);
+#undef EXPAND_FAIL
+#undef EXPAND_DONE
+}
+
+GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    int depth_cap, GSHGEOM_Stroke_Outline ** out) {
+  if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  return expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, out, NULL);
+}
+
+GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out) {
+  if (!centerline || !stroke || !map || !out) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  if (!(tolerance >= GSHGEOM_STROKE_CURVES_MIN_TOLERANCE) || !(tolerance <= GSHGEOM_STROKE_CURVES_MAX_TOLERANCE) ||
+      (unsigned)form >= (unsigned)GSHGEOM_STROKE_CURVES_FORM_COUNT) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  CurveReq cr = {tolerance, form};
+  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, NULL, out);
+}
+
+GSHGEOM_Result gshgeom_stroke_curves_expand(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Stroke_Curves ** out) {
+  return gshgeom_stroke_curves_expand_capped(
+      centerline, stroke, map, tolerance, form, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, out);
 }

@@ -174,6 +174,9 @@ GSHGEOM_Result gshgeom_sk_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor_dev, 
   if (!(allowed > 0.0)) {
     return GSHGEOM_ERR_INTERNAL;
   }
+  if (c->cv) {
+    return gshgeom_skc_sector(c, anchor_dev, p, q); /* exact arcs (SG37) */
+  }
   size_t n = 0;
   double dev = 0.0;
   GSHGEOM_Result r = put(c, &n, gshgeom_sk_v(0.0, 0.0));
@@ -190,6 +193,9 @@ GSHGEOM_Result gshgeom_sk_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor_dev, do
   double allowed = gshgeom_sk_room(c, d_in) - extra_out;
   if (!(allowed > 0.0)) {
     return GSHGEOM_ERR_INTERNAL;
+  }
+  if (c->cv) {
+    return gshgeom_skc_disc(c, anchor_dev, c->h);
   }
   static const double axes[5][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 0}};
   size_t n = 0;
@@ -1113,7 +1119,7 @@ GSHGEOM_Result gshgeom_sk_arcs_join(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * i
   double eps = (s0 * 0x1p-30) * c->norm;
   double room = gshgeom_sk_room(c, 0.0) / (1.0 + GSHGEOM_SK_OCT);
   bd.allowed = room * 0.999 - eps;
-  if (!(bd.allowed > 0.0) || !(s0 * c->norm < GSHGEOM_SK_MAG_LIMIT)) {
+  if (!(bd.allowed > 0.0) || !(s0 * c->norm < c->mag_limit)) {
     return GSHGEOM_ERR_LIMIT;
   }
   GSHGEOM_SK_Vec zero = gshgeom_sk_v(0.0, 0.0);

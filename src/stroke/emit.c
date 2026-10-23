@@ -180,10 +180,17 @@ int gshgeom_sk_fits(const GSHGEOM_SK_Ctx * c, double d_in, double d_out) {
   if (!(d_in >= 0.0) || !(d_out >= 0.0)) {
     return 0; /* NaN or a negative bound: a computation that went wrong is never accepted */
   }
+  if (c->cv) {
+    /* curve mode (SG35): nothing is inflated or rounded, the piece is written as it is, so each bound is its own */
+    return d_in <= c->cv->budget && d_out <= c->cv->budget;
+  }
   return d_out + GSHGEOM_SK_OCT * (d_in + c->rho) + c->rho <= c->budget;
 }
 
 double gshgeom_sk_room(const GSHGEOM_SK_Ctx * c, double d_in) {
+  if (c->cv) {
+    return d_in <= c->cv->budget ? c->cv->budget : -1.0;
+  }
   return c->budget - GSHGEOM_SK_OCT * (d_in + c->rho) - c->rho;
 }
 
@@ -296,6 +303,10 @@ GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const 
     core[i] = gshgeom_sk_add(anchor, gshgeom_sk_lin(c, d[i]));
   }
   size_t h1 = convex_hull(core, tmp, n, hull1);
+  if (c->cv) {
+    /* curve mode: the core polygon is the piece, as lines, in target units; the hull is positive in target units */
+    return gshgeom_skc_ring(c, hull1, h1);
+  }
   /* An octagon of inradius at least d_in + rho: its axis vertices at 1.0824 >= 1 / cos(pi / 8) times that, its
    * diagonal ones (written 0.7072) at 1.0824 * 0.7072 * sqrt(2) < 1.0826 = OCT times it. */
   double rc = (d_in + c->rho) * 1.0824;

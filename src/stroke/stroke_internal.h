@@ -44,6 +44,7 @@
 #include <ghoti.io/shape-geometry/map.h>
 #include <ghoti.io/shape-geometry/path.h>
 #include <ghoti.io/shape-geometry/stroke.h>
+#include <ghoti.io/shape-geometry/stroke_curves.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -100,6 +101,36 @@ typedef struct GSHGEOM_SK_Reader {
  * and fourth powers of a length) stays inside a double's range for. */
 #define GSHGEOM_SK_BUILD_MIN 0x1p-200
 
+/** One element of a contour of the curve outline, in target units (curve mode, src/stroke_curves/contour.c). */
+typedef struct GSHGEOM_SK_CElem {
+  int deg;                ///< 1 a line, 2 a rational quadratic, 3 a cubic.
+  GSHGEOM_SK_Vec p[4];    ///< Control points; the first is the start, the last the end.
+  double w[3];            ///< The weights of a rational quadratic.
+} GSHGEOM_SK_CElem;
+
+/** One accepted band piece of a run (offset.c): the control points of its two offset cubics, in target units. */
+typedef struct GSHGEOM_SK_Band {
+  GSHGEOM_SK_Vec l[4]; ///< The offset on the left of the centerline.
+  GSHGEOM_SK_Vec r[4]; ///< The offset on the right.
+} GSHGEOM_SK_Band;
+
+/**
+ * The state of the curve outline's expansion (stroke_curves.h; curve mode).  When ::GSHGEOM_SK_Ctx::cv is not NULL
+ * every piece is written as lines, cubics and rational quadratics to `part`, in target units, instead of as 26.6
+ * polygons.  `budget` is what a piece may spend on approximation (SG35), `flip` is set when the build space's
+ * positive orientation is the device space's negative (a mirroring map), so contours are written reversed.
+ */
+typedef struct GSHGEOM_SK_Curves {
+  GSHGEOM_Path * part;         ///< The part being written (body or aligned).
+  double t;                    ///< The caller's tolerance.
+  double budget;               ///< t / 2: the approximation each piece may spend.
+  int flip;                    ///< The map reverses orientation.
+  GSHGEOM_SK_CElem * el;       ///< The contour being built.
+  size_t el_n, el_cap;
+  GSHGEOM_SK_Band * run;       ///< The band pieces of the segment being built, in order.
+  size_t run_n, run_cap;
+} GSHGEOM_SK_Curves;
+
 /** The state of a dashed expansion (dash.c). */
 typedef struct GSHGEOM_SK_Dash {
   int active;                 ///< Nonzero when the style has a non-solid canonical array.
@@ -140,6 +171,8 @@ typedef struct GSHGEOM_SK_Ctx {
   size_t work_cap;               ///< The most curve pieces one expansion visits (ERR_LIMIT past it).
   int depth_cap;                 ///< How deep a curve may be split (::GSHGEOM_STROKE_MAX_DEPTH but in tests).
   GSHGEOM_SK_Dash dash;          ///< Dashes (dash.c).
+  double mag_limit;              ///< The largest magnitude, in device units, the arithmetic bound is proved for.
+  GSHGEOM_SK_Curves * cv;        ///< Non-NULL in curve mode.
 } GSHGEOM_SK_Ctx;
 
 /** The outline (stroke.h, SG16). */
@@ -154,6 +187,19 @@ struct GSHGEOM_Stroke_Outline {
   GSHGEOM_Flat_Path * clip;     ///< NULL when absent.
 };
 
+/** The curve outline (stroke_curves.h, SG32). */
+struct GSHGEOM_Stroke_Curves {
+  GSHGEOM_Allocator alloc;           ///< What it was made with.
+  GSHGEOM_Stroke_Status status;      ///< SG14, SG15.
+  GSHGEOM_Stroke_Curves_Form form;   ///< The form it was asked for.
+  uint32_t alignment;                ///< The canonical alignment.
+  GSHGEOM_Fill_Rule rule;            ///< The clip's rule.
+  int complement;                    ///< 1 for outside alignment.
+  GSHGEOM_Path * body;               ///< NULL when absent.
+  GSHGEOM_Path * aligned;            ///< NULL when absent.
+  GSHGEOM_Path * clip;               ///< NULL when absent.
+};
+
 /**
  * ::gshgeom_stroke_expand_with_tolerance with the depth cap at @p depth_cap (1 to
  * ::GSHGEOM_STROKE_MAX_DEPTH): the seam a test forces the cap through, since no
@@ -162,6 +208,11 @@ struct GSHGEOM_Stroke_Outline {
 GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
     int depth_cap, GSHGEOM_Stroke_Outline ** out);
+
+/** ::gshgeom_stroke_curves_expand with the depth cap at @p depth_cap (1 to ::GSHGEOM_STROKE_MAX_DEPTH): the test seam. */
+GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out);
 
 /* --- params.c --------------------------------------------------------------- */
 
@@ -315,6 +366,43 @@ int gshgeom_sk_miter_within(GSHGEOM_SK_Vec q, GSHGEOM_SK_Vec v, GSHGEOM_SK_Vec s
  */
 GSHGEOM_Result gshgeom_sk_arcs_join(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * in, const GSHGEOM_SK_Seg * out,
     int outer_left, int reversal, int * miter_clip);
+
+/* --- contour.c (curve mode) ------------------------------------------------- */
+
+/** Start a contour. */
+void gshgeom_skc_begin(GSHGEOM_SK_Ctx * c);
+/** Append a line (a zero-length line is dropped). */
+GSHGEOM_Result gshgeom_skc_line(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec a, GSHGEOM_SK_Vec b);
+/** Append a cubic. */
+GSHGEOM_Result gshgeom_skc_cubic(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec p0, GSHGEOM_SK_Vec p1, GSHGEOM_SK_Vec p2,
+    GSHGEOM_SK_Vec p3);
+/** Append a rational quadratic of weights (1, w, 1). */
+GSHGEOM_Result gshgeom_skc_conic(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec p0, GSHGEOM_SK_Vec p1, GSHGEOM_SK_Vec p2, double w);
+/**
+ * Write the contour as one closed subpath of the part.  The contour was built in the build space's positive
+ * orientation; it is reversed when the map mirrors.  A contour of fewer than two elements is dropped.
+ */
+GSHGEOM_Result gshgeom_skc_finish(GSHGEOM_SK_Ctx * c);
+/** Write a convex polygon already in positive device orientation as lines (the hull of a polygon piece). */
+GSHGEOM_Result gshgeom_skc_ring(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Vec * pts, size_t n);
+/** The sector of radius h about the device point @p centre from unit @p p to unit @p q (the short way). */
+GSHGEOM_Result gshgeom_skc_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q);
+/** The half disc `{v : |v| <= h, v . d >= 0}` about @p centre, @p m the left normal of the unit @p d. */
+GSHGEOM_Result gshgeom_skc_half_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, GSHGEOM_SK_Vec m, GSHGEOM_SK_Vec d);
+/** The disc of radius @p radius (build space) about @p centre. */
+GSHGEOM_Result gshgeom_skc_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, double radius);
+/**
+ * The inflated sector of a fan: the sector of radius h about @p centre from unit @p p to unit @p q (the short way),
+ * grown by @p r (build space): the half planes of its sides moved out by @p r, the circle of radius `h + r`, and the
+ * line `r` behind the apex.  It contains the sector's Minkowski sum with a disc of radius @p r and lies within
+ * `sqrt(2) r` of the sector (SG37).
+ */
+GSHGEOM_Result gshgeom_skc_fan_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q,
+    double r);
+/** Write the run of band pieces as one contour and empty the run. */
+GSHGEOM_Result gshgeom_skc_flush_run(GSHGEOM_SK_Ctx * c);
+/** Add a band piece to the run. */
+GSHGEOM_Result gshgeom_skc_add_band(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Band * b);
 
 /* --- body.c ----------------------------------------------------------------- */
 

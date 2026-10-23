@@ -35,6 +35,7 @@
 
 #include "../test_helpers.h"
 
+#include "../stroke_cases.h"
 #include "../stroke_matrix.h"
 #include "../stroke_vectors.h"
 
@@ -43,42 +44,11 @@
 
 namespace sm = stroke_matrix;
 namespace so = stroke_oracle;
+namespace sc = stroke_cases;
 
 namespace {
 
-typedef sm::Ops Ops;
-
-GSHGEOM_Map map_id() {
-  GSHGEOM_Map m;
-  gshgeom_map_identity(2, &m);
-  return m;
-}
-
-GSHGEOM_Map map_of(double a, double b, double c, double d, double tx, double ty) {
-  double mm[4] = {a, b, c, d}, t[2] = {tx, ty};
-  GSHGEOM_Map m;
-  EXPECT_EQ(gshgeom_map_from_matrix(2, mm, t, &m), GSHGEOM_OK);
-  return m;
-}
-
-GSHGEOM_Stroke style(double width, int join, double limit, int cap) {
-  GSHGEOM_Stroke s;
-  gshgeom_stroke_init(&s);
-  s.width = width;
-  s.join = (uint32_t)join;
-  s.miter_limit = limit;
-  s.cap = (uint32_t)cap;
-  return s;
-}
-
-struct Case {
-  std::string name;
-  Ops ops;
-  GSHGEOM_Stroke st;
-  GSHGEOM_Map map;
-  int32_t tau;
-  std::vector<double> dashes = {}; ///< the dash array (SG19), empty for a solid stroke
-};
+using namespace stroke_cases;
 
 /** The worst deviation seen over every case, in 26.6 units. */
 double g_worst = 0.0;
@@ -128,75 +98,23 @@ void run(const Case & c) {
   gshgeom_path_destroy(path);
 }
 
-const int MITER = GSHGEOM_STROKE_JOIN_MITER, ROUND = GSHGEOM_STROKE_JOIN_ROUND, BEVEL = GSHGEOM_STROKE_JOIN_BEVEL,
-          MCLIP = GSHGEOM_STROKE_JOIN_MITER_CLIP, ARCS = GSHGEOM_STROKE_JOIN_ARCS;
-const int BUTT = GSHGEOM_STROKE_CAP_BUTT, RCAP = GSHGEOM_STROKE_CAP_ROUND, SQUARE = GSHGEOM_STROKE_CAP_SQUARE;
-
-Ops circle(double cx, double cy, double r) {
-  double w = 0.70710678118654752440;
-  return Ops{{'M', {cx + r, cy}}, {'R', {cx + r, cy + r, cx, cy + r, 1, w, 1}}, {'R', {cx - r, cy + r, cx - r, cy, 1, w, 1}},
-      {'R', {cx - r, cy - r, cx, cy - r, 1, w, 1}}, {'R', {cx + r, cy - r, cx + r, cy, 1, w, 1}}, {'Z', {}}};
-}
-
 } // namespace
 
 TEST(StrokeMatrix, LinesEveryJoinAndCap) {
-  std::vector<Ops> paths = {
-      {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {10, 10}}},                 // right angle
-      {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {1, 3}}},                   // acute
-      {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {20, 4}}},                  // obtuse
-      {{'M', {0, 0}}, {'L', {5, 0}}, {'L', {10, 0}}},                   // collinear, same direction (smooth)
-      {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {4, 0}}},                   // reversal
-      {{'M', {0, 0}}, {'L', {6, 0}}, {'L', {6, 6}}, {'L', {0, 6}}, {'Z', {}}}, // closed
-      {{'M', {0, 0}}, {'L', {8, 0}}, {'L', {8.2, 0.3}}, {'L', {0, 6}}},    // a very short segment
-  };
-  /* every join on every path; the caps in turn (every cap on the first path) */
-  int turn = 0;
-  for (const Ops & p : paths) {
-    for (int join : {MITER, ROUND, BEVEL, MCLIP, ARCS}) {
-      for (int cap : {BUTT, RCAP, SQUARE}) {
-        if (&p != &paths[0] && cap != (turn % 3)) {
-          continue;
-        }
-        Case c{"lines join " + std::to_string(join) + " cap " + std::to_string(cap), p, style(3, join, 4, cap),
-            map_id(), GSHGEOM_FLATTEN_TOLERANCE};
-        run(c);
-      }
-      turn++;
-    }
+  for (const Case & c : sc::linesEveryJoinAndCap()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, TheMiterBoundaryIsDecidedExactly) {
-  Ops tri = {{'M', {0, 0}}, {'L', {4, 3}}, {'L', {8, 0}}};
-  for (double L : {1.25, std::nextafter(1.25, 0.0), 1.1, 3.0}) {
-    for (int join : {MITER, MCLIP}) {
-      run({"miter boundary", tri, style(8, join, L, BUTT), map_id(), GSHGEOM_FLATTEN_TOLERANCE});
-    }
+  for (const Case & c : sc::theMiterBoundaryIsDecidedExactly()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, EveryCurveKind) {
-  std::vector<std::pair<std::string, Ops>> curves = {
-      {"quadratic", {{'M', {0, 0}}, {'Q', {5, 9, 10, 0}}}},
-      {"cubic inflection", {{'M', {0, 0}}, {'C', {4, 8, 6, -8, 10, 0}}}},
-      {"cubic loop", {{'M', {0, 0}}, {'C', {12, 8, -2, 8, 10, 0}}}},
-      {"cubic cusp", {{'M', {0, 0}}, {'C', {8, 4, 4, 4, 4, 0}}}},
-      {"cubic near cusp", {{'M', {0, 0}}, {'C', {8, 4, 4.01, 4, 4, 0}}}},
-      {"cubic p0 is p1", {{'M', {0, 0}}, {'C', {0, 0, 6, 2, 8, 6}}}},
-      {"rational cubic", {{'M', {0, 0}}, {'K', {3, 6, 7, 6, 10, 0, 1, 2, 0.5, 1.5}}}},
-      {"extreme weights", {{'M', {0, 0}}, {'R', {5, 8, 10, 0, 1, 1e6, 1}}}},
-      {"light middle", {{'M', {0, 0}}, {'R', {5, 8, 10, 0, 1, 1e-6, 1}}}},
-      {"circle h below r", circle(0, 0, 6)},
-      {"circle h is r", circle(0, 0, 2)},
-      {"circle h above r", circle(0, 0, 1)},
-      {"collinear back and forth", {{'M', {0, 0}}, {'C', {10, 0, -5, 0, 5, 0}}}},
-  };
-  const int pairs[3][2] = {{MITER, BUTT}, {ROUND, RCAP}, {MITER, SQUARE}};
-  for (const auto & cv : curves) {
-    for (const auto & jc : pairs) {
-      run({cv.first, cv.second, style(4, jc[0], 4, jc[1]), map_id(), GSHGEOM_FLATTEN_TOLERANCE});
-    }
+  for (const Case & c : sc::everyCurveKind()) {
+    run(c);
   }
 }
 
@@ -250,88 +168,26 @@ TEST(StrokeMatrix, ZeroExtentAndDegenerateSubpaths) {
 }
 
 TEST(StrokeMatrix, BothWidthSpacesUnderEveryMap) {
-  Ops p = {{'M', {0, 0}}, {'L', {6, 0}}, {'Q', {9, 0, 9, 4}}, {'L', {2, 6}}};
-  std::vector<std::pair<std::string, GSHGEOM_Map>> maps = {
-      {"identity", map_id()},
-      {"uniform", map_of(2, 0, 0, 2, 3, -1)},
-      {"scale 2 1", map_of(2, 0, 0, 1, 0, 0)},
-      {"rotation", map_of(0.6, -0.8, 0.8, 0.6, 5, 5)},
-      {"skew", map_of(1, 0.75, 0, 1, 0, 0)},
-      {"mirror", map_of(-1, 0, 0, 1, 20, 0)},
-      {"tiny", map_of(0x1p-40, 0, 0, 0x1p-40, 0, 0)},
-  };
-  for (const auto & mp : maps) {
-    for (uint32_t space : {0u, 1u}) {
-      for (int join : {MITER, ROUND, BEVEL}) {
-        GSHGEOM_Stroke s = style(space ? 2 : 1.5, join, 4, RCAP);
-        s.width_space = space;
-        Ops q = p;
-        if (mp.first == "tiny" && space == 0) {
-          /* model coordinates large enough that the device stroke is pixels wide */
-          for (auto & op : q) {
-            for (double & v : op.second) {
-              v *= 0x1p40;
-            }
-          }
-          s.width = 1.5 * 0x1p40;
-        } else if (mp.first == "tiny") {
-          for (auto & op : q) {
-            for (double & v : op.second) {
-              v *= 0x1p40;
-            }
-          }
-        }
-        run({mp.first, q, s, mp.second, GSHGEOM_FLATTEN_TOLERANCE});
-      }
-    }
+  for (const Case & c : sc::bothWidthSpacesUnderEveryMap()) {
+    run(c);
   }
-  /* the hairline: device width 1 */
-  GSHGEOM_Stroke hair = style(1, MITER, 4, BUTT);
-  hair.width_space = GSHGEOM_STROKE_WIDTH_DEVICE;
-  run({"hairline", p, hair, map_of(3, 0, 0, 3, 0, 0), GSHGEOM_FLATTEN_TOLERANCE});
 }
 
 TEST(StrokeMatrix, Alignment) {
-  std::vector<std::pair<std::string, Ops>> paths = {
-      {"square", {{'M', {0, 0}}, {'L', {8, 0}}, {'L', {8, 8}}, {'L', {0, 8}}, {'Z', {}}}},
-      {"star", {{'M', {5, 0}}, {'L', {7, 4}}, {'L', {11, 4}}, {'L', {8, 7}}, {'L', {9, 11}}, {'L', {5, 8}}, {'L', {1, 11}},
-                   {'L', {2, 7}}, {'L', {-1, 4}}, {'L', {3, 4}}, {'Z', {}}}},
-      {"self intersecting", {{'M', {0, 0}}, {'L', {10, 10}}, {'L', {10, 0}}, {'L', {0, 10}}, {'Z', {}}}},
-      {"open and closed", {{'M', {0, 0}}, {'L', {8, 0}}, {'L', {8, 8}}, {'Z', {}}, {'M', {12, 0}}, {'L', {16, 4}}}},
-  };
-  for (const auto & p : paths) {
-    for (uint32_t align : {1u, 2u}) {
-      for (int rule : {GSHGEOM_FILL_NONZERO, GSHGEOM_FILL_EVEN_ODD}) {
-        GSHGEOM_Stroke s = style(2, MITER, 4, BUTT);
-        s.alignment = align;
-        s.alignment_rule = (GSHGEOM_Fill_Rule)rule;
-        run({p.first, p.second, s, map_id(), GSHGEOM_FLATTEN_TOLERANCE});
-      }
-    }
+  for (const Case & c : sc::alignment()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, OverlapsAreOneUnion) {
-  std::vector<std::pair<std::string, Ops>> paths = {
-      {"figure eight", {{'M', {0, 0}}, {'C', {10, 10, 10, -10, 0, 0}}, {'C', {-10, 10, -10, -10, 0, 0}}, {'Z', {}}}},
-      {"retrace", {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {0, 0}}, {'L', {10, 0}}}},
-      {"overlapping subpaths", {{'M', {0, 0}}, {'L', {10, 10}}, {'M', {0, 10}}, {'Q', {5, -6, 10, 0}}}},
-      {"loop", {{'M', {0, 0}}, {'C', {14, 10, -4, 10, 10, 0}}}},
-      {"coincident", {{'M', {0, 0}}, {'L', {8, 0}}, {'M', {0, 0}}, {'L', {8, 0}}, {'M', {8, 0}}, {'L', {0, 0}}}},
-  };
-  for (const auto & p : paths) {
-    for (int join : {MITER, ROUND, BEVEL}) {
-      run({p.first, p.second, style(3, join, 4, RCAP), map_id(), GSHGEOM_FLATTEN_TOLERANCE});
-    }
+  for (const Case & c : sc::overlapsAreOneUnion()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, EveryTolerance) {
-  Ops p = {{'M', {0, 0}}, {'C', {8, 12, 14, -6, 20, 4}}, {'L', {12, 10}}};
-  for (int32_t tau : {2, 3, 4, 16, 64}) {
-    for (int join : {MITER, ROUND, ARCS}) {
-      run({"tolerance " + std::to_string(tau), p, style(5, join, 4, RCAP), map_id(), tau});
-    }
+  for (const Case & c : sc::everyTolerance()) {
+    run(c);
   }
 }
 
@@ -388,106 +244,22 @@ TEST(StrokeMatrix, TheExactVectorsThroughTheExpansion) {
   EXPECT_GT(checked, (size_t)1000);
 }
 
-namespace {
-
-Case dashed(const std::string & name, const Ops & ops, GSHGEOM_Stroke st, std::vector<double> d, double offset,
-    uint32_t scope = 0, GSHGEOM_Map m = map_id()) {
-  st.dash_offset = offset;
-  st.dash_scope = scope;
-  Case c{name, ops, st, m, GSHGEOM_FLATTEN_TOLERANCE};
-  c.dashes = d;
-  return c;
-}
-
-} // namespace
 
 TEST(StrokeMatrix, DashesOnLines) {
-  std::vector<std::pair<std::string, Ops>> paths = {
-      {"line", {{'M', {0, 0}}, {'L', {40, 0}}}},
-      {"slanted", {{'M', {0, 0}}, {'L', {24, 32}}}},
-      {"corners", {{'M', {0, 0}}, {'L', {20, 0}}, {'L', {20, 15}}, {'L', {5, 18}}}},
-      {"closed", {{'M', {0, 0}}, {'L', {16, 0}}, {'L', {16, 12}}, {'L', {0, 12}}, {'Z', {}}}},
-      {"smooth and reversal", {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {20, 0}}, {'L', {6, 0}}}},
-      {"two subpaths", {{'M', {0, 0}}, {'L', {14, 0}}, {'M', {0, 8}}, {'L', {9, 8}}, {'L', {9, 20}}}},
-  };
-  std::vector<std::vector<double>> arrays = {{5, 3}, {4, 2, 1}, {0, 6}, {6, 0, 2, 3}, {20, 4}};
-  int turn = 0;
-  for (const auto & p : paths) {
-    for (const auto & d : arrays) {
-      for (int cap : {BUTT, RCAP, SQUARE}) {
-        if ((turn++ % 2) && cap == BUTT) {
-          continue;
-        }
-        int join = (turn % 5);
-        GSHGEOM_Stroke st = style(3, join, 4, cap);
-        for (double off : {0.0, 2.5, -1.0}) {
-          if (off != 0.0 && (turn % 3)) {
-            continue;
-          }
-          for (uint32_t scope : {0u, 1u}) {
-            if (scope == 1u && p.first != "two subpaths" && (turn % 4)) {
-              continue;
-            }
-            run(dashed("dashes " + p.first + " cap " + std::to_string(cap), p.second, st, d, off, scope));
-          }
-        }
-      }
-    }
+  for (const Case & c : sc::dashesOnLines()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, DashesAtVerticesAndDots) {
-  /* dashes whose cuts fall exactly on vertices (axis-aligned lengths a pattern divides), dots at corners, at the
-   * ends and at the start of a closed subpath */
-  Ops sq = {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {10, 10}}, {'L', {0, 10}}, {'Z', {}}};
-  Ops open = {{'M', {0, 0}}, {'L', {10, 0}}, {'L', {10, 10}}};
-  for (int cap : {BUTT, RCAP, SQUARE}) {
-    for (int join : {MITER, ROUND, BEVEL}) {
-      GSHGEOM_Stroke st = style(2, join, 4, cap);
-      run(dashed("on vertices", sq, st, {5, 5}, 0));
-      run(dashed("on vertices, offset 5", sq, st, {10, 10}, 5));
-      run(dashed("dots on a square", sq, st, {0, 5}, 0));
-      run(dashed("dots on a path", open, st, {0, 10}, 0));
-      run(dashed("a dash across a corner", open, st, {6, 4}, 7));
-      run(dashed("a dash across the start", sq, st, {12, 6}, 3));
-      run(dashed("one dash for the whole subpath", sq, st, {1000, 1}, 0));
-    }
-  }
-  /* degenerate subpaths with dashes: the pattern is on at the point or it is not; degenerate omit draws nothing */
-  Ops deg = {{'M', {2, 2}}, {'L', {2, 2}}};
-  for (int cap : {RCAP, SQUARE}) {
-    GSHGEOM_Stroke st = style(3, MITER, 4, cap);
-    run(dashed("degenerate, on", Ops{{'M', {0, 0}}, {'L', {8, 0}}, {'M', {20, 5}}, {'L', {20, 5}}}, st, {5, 3}, 0));
-    run(dashed("degenerate path scope", Ops{{'M', {0, 0}}, {'L', {8, 0}}, {'M', {20, 5}}, {'L', {20, 5}}}, st, {5, 3}, 0, 1));
-    (void)deg;
-  }
-  /* a zero-length dash is drawn whatever `degenerate` says (SG24), and a degenerate subpath is omitted by it */
-  for (int cap : {RCAP, SQUARE}) {
-    GSHGEOM_Stroke st = style(3, MITER, 4, cap);
-    st.degenerate = GSHGEOM_STROKE_DEGENERATE_OMIT;
-    run(dashed("dots under omit", open, st, {0, 5}, 0));
-    run(dashed("dots under omit on a corner", sq, st, {0, 5}, 0));
+  for (const Case & c : sc::dashesAtVerticesAndDots()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, DashesAcrossTheStartOfAClosedSubpath) {
-  /* SG23: a dash that crosses the start is one dash joined at the start vertex; one that ends or begins exactly there
-   * is two; one that covers the whole subpath is its closed stroke.  The square's perimeter is 56 */
-  Ops sq = {{'M', {0, 0}}, {'L', {16, 0}}, {'L', {16, 12}}, {'L', {0, 12}}, {'Z', {}}};
-  Ops rect = {{'M', {0, 0}}, {'L', {20, 0}}, {'L', {20, 10}}, {'L', {0, 10}}, {'Z', {}}};
-  Ops tri = {{'M', {0, 0}}, {'L', {12, 3}}, {'L', {5, 14}}, {'Z', {}}};
-  Ops round = circle(0, 0, 9);
-  for (int join : {MITER, ROUND, BEVEL}) {
-    for (int cap : {BUTT, RCAP, SQUARE}) {
-      GSHGEOM_Stroke st = style(3, join, 4, cap);
-      run(dashed("wraps", sq, st, {30, 10}, 10));
-      run(dashed("starts exactly at the start", sq, st, {30, 10}, 0));
-      run(dashed("ends exactly at the end", rect, st, {35, 5}, 15));
-      run(dashed("covers it all", sq, st, {1000, 5}, 10));
-      run(dashed("wraps, a corner inside the wrapped part", tri, st, {20, 7}, 4));
-      run(dashed("wraps on a circle", round, st, {30, 9}, 12));
-      run(dashed("wraps, one pattern for the path", sq, st, {30, 10}, 10, 1));
-    }
+  for (const Case & c : sc::dashesAcrossTheStartOfAClosedSubpath()) {
+    run(c);
   }
 }
 
@@ -517,53 +289,20 @@ TEST(StrokeMatrix, ASmoothClosedCurveUnderADeviceMapHasNoArcsJoinAtItsSmoothVert
 }
 
 TEST(StrokeMatrix, DashesOnCurves) {
-  std::vector<std::pair<std::string, Ops>> curves = {
-      {"quadratic", {{'M', {0, 0}}, {'Q', {10, 18, 20, 0}}}},
-      {"cubic inflection", {{'M', {0, 0}}, {'C', {8, 16, 12, -16, 20, 0}}}},
-      {"cubic loop", {{'M', {0, 0}}, {'C', {24, 16, -4, 16, 20, 0}}}},
-      {"cubic cusp", {{'M', {0, 0}}, {'C', {16, 8, 8, 8, 8, 0}}}},
-      {"rational cubic", {{'M', {0, 0}}, {'K', {6, 12, 14, 12, 20, 0, 1, 2, 0.5, 1.5}}}},
-      {"circle", circle(0, 0, 10)},
-      {"extreme weights", {{'M', {0, 0}}, {'R', {10, 16, 20, 0, 1, 40, 1}}}},
-  };
-  const int pairs[3][2] = {{MITER, BUTT}, {ROUND, RCAP}, {BEVEL, SQUARE}};
-  for (const auto & cv : curves) {
-    for (const auto & jc : pairs) {
-      GSHGEOM_Stroke st = style(2, jc[0], 4, jc[1]);
-      run(dashed(cv.first, cv.second, st, {7, 4}, 0));
-      run(dashed(cv.first + " dots", cv.second, st, {0, 5}, 1.5));
-    }
+  for (const Case & c : sc::dashesOnCurves()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, DashesUnderBothWidthSpaces) {
-  Ops p = {{'M', {0, 0}}, {'L', {12, 0}}, {'Q', {18, 0, 18, 8}}, {'L', {4, 12}}};
-  std::vector<std::pair<std::string, GSHGEOM_Map>> maps = {
-      {"identity", map_id()},
-      {"scale 2 1", map_of(2, 0, 0, 1, 0, 0)},
-      {"rotation", map_of(0.6, -0.8, 0.8, 0.6, 5, 5)},
-      {"skew", map_of(1, 0.75, 0, 1, 0, 0)},
-      {"mirror", map_of(-1, 0, 0, 1, 40, 0)},
-  };
-  for (const auto & mp : maps) {
-    for (uint32_t space : {0u, 1u}) {
-      GSHGEOM_Stroke st = style(space ? 2 : 1.5, ROUND, 4, SQUARE);
-      st.width_space = space;
-      run(dashed("dashes " + mp.first, p, st, {5, 3, 1}, 1.0, 0, mp.second));
-      run(dashed("dots " + mp.first, p, st, {0, 6}, 0.0, 0, mp.second));
-    }
+  for (const Case & c : sc::dashesUnderBothWidthSpaces()) {
+    run(c);
   }
 }
 
 TEST(StrokeMatrix, DashedAlignment) {
-  Ops sq = {{'M', {0, 0}}, {'L', {16, 0}}, {'L', {16, 16}}, {'L', {0, 16}}, {'Z', {}}};
-  Ops mixed = {{'M', {0, 0}}, {'L', {12, 0}}, {'L', {12, 12}}, {'Z', {}}, {'M', {20, 0}}, {'L', {34, 5}}};
-  for (uint32_t align : {1u, 2u}) {
-    for (const Ops * p : {&sq, &mixed}) {
-      GSHGEOM_Stroke st = style(2, MITER, 4, BUTT);
-      st.alignment = align;
-      run(dashed("dashed alignment", *p, st, {6, 4}, 1));
-    }
+  for (const Case & c : sc::dashedAlignment()) {
+    run(c);
   }
 }
 
