@@ -311,6 +311,24 @@ TEST(OracleSelfCheck, ABernsteinRootIsFoundWhenTheIntervalStartsAtAnotherRoot) {
   }
 }
 
+TEST(OracleSelfCheck, ARootAtTheMidpointBetweenTwoOtherRootsIsKept) {
+  /* 96 (t - 1/4)(t - 1/2)(t - 3/4) in the Bernstein basis is exactly -9, 13, -13, 9.  The interval is split at 1/2, which
+   * is a root, so each half has one root inside and one at its end: where the coefficient at the split is exactly zero
+   * (a wide long double) the end root must still be reported, as it is where that coefficient is noise. */
+  stroke_oracle::Bern p = {-9.0L, 13.0L, -13.0L, 9.0L};
+  std::vector<stroke_oracle::Real> roots;
+  bool ambiguous = false;
+  stroke_oracle::bern_roots_rec(p, 0, 1, 0, roots, &ambiguous);
+  EXPECT_FALSE(ambiguous);
+  for (stroke_oracle::Real want : {0.25L, 0.5L, 0.75L}) {
+    bool found = false;
+    for (stroke_oracle::Real r : roots) {
+      found = found || std::fabs(r - want) < 1e-12L;
+    }
+    EXPECT_TRUE(found) << want << " among " << roots.size() << " roots";
+  }
+}
+
 TEST(OracleSelfCheck, RoundJoinsAndCapsAreTheDistanceToTheCenterline) {
   GSHGEOM_SKIP_UNDER_VALGRIND();
   for (const SelfCase & sc : self_cases()) {

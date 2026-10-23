@@ -326,7 +326,16 @@ inline void bern_roots_rec(const Bern & a, Real lo, Real hi, int depth, std::vec
     return;
   }
   if (v == 1) {
-    /* exactly one root: bisect the polynomial itself */
+    /* exactly one root inside; and a root at an end of the interval (an interval split exactly at a root has one at its
+     * end, and a coefficient that small is zero in a wide long double and noise of either sign in a narrow one: the
+     * noise made it count as a sign change and a root of its own, the zero would lose it) */
+    if (std::fabs(a.front()) <= eps) {
+      out.push_back(lo);
+    }
+    if (std::fabs(a.back()) <= eps) {
+      out.push_back(hi);
+    }
+    /* bisect the polynomial itself */
     Real l = 0, h = 1;
     /* The sign just inside the interval is that of the first coefficient beyond the noise: the front one can be a root
      * of the polynomial (a split exactly at a root leaves a coefficient of rounding noise, or exactly zero), and its
