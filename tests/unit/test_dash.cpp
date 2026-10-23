@@ -286,6 +286,13 @@ TEST(DashDxf, ALineThatStartsJustAfterADot) {
   /* a pattern too small for the offset band to place the start after its lone dot */
   const double tiny[2] = {-0x1p-64, 0};
   EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(tiny, 2, 1.0, out, 8, &n, &off), GSHGEOM_ERR_LIMIT);
+  /* the band is the scaled element's: an element in the band whose scaled length is past either end */
+  const double unit[2] = {1.0, -1.0};
+  EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(unit, 2, GSHGEOM_STROKE_VALUE_MAX * 4.0, out, 8, &n, &off), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(unit, 2, GSHGEOM_STROKE_VALUE_MIN / 4.0, out, 8, &n, &off), GSHGEOM_ERR_LIMIT);
+  /* and one outside the band that the scale brings in */
+  const double small[2] = {0x1p-70, -0x1p-70};
+  EXPECT_EQ(gshgeom_stroke_dashes_from_dxf(small, 2, 0x1p20, out, 8, &n, &off), GSHGEOM_OK);
 }
 
 TEST(DashDxf, Errors) {

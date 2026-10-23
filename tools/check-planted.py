@@ -1812,10 +1812,14 @@ def do_plant(plant, control_objs):
     if not caught_by and os.environ.get("PLANT_ALL_TESTS"):
         # PLANT_ALL_TESTS=1: a plant its own tests do not see is tried against every other test of the library
         # before it is called a survivor; the test that sees it is named, and the plant's list is the one to correct.
-        for test in [t for t in TESTS if t not in tests]:
-            exe = d / test
-            link_test(test, objs, exe)
-            rc, failing = run_test(exe)
+        for test in [t for t in TESTS + ["probe"] if t not in tests]:
+            if test == "probe":
+                rc, msg = probe_hash(objs, d)
+                failing = [msg.splitlines()[-1] if msg else "hash differs"]
+            else:
+                exe = d / test
+                link_test(test, objs, exe)
+                rc, failing = run_test(exe)
             if rc != 0:
                 caught_by.append((test + " [not in its list]", failing[:1]))
                 break
