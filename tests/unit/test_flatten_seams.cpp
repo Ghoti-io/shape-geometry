@@ -333,43 +333,53 @@ TEST(StrokeOutlineReduced, EachPartIsReducedBesideTheOutlineWhichIsNotChanged) {
   gshgeom_path_destroy(mp);
 }
 
-TEST(StrokeOutlineReduced, AnAllocationFailureLeavesTheOutlineWithoutAReducedForm) {
-  GSHGEOM_Path * mp = nullptr;
-  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &mp), GSHGEOM_OK);
-  ASSERT_EQ(gshgeom_path_move_to(mp, P(8, 8)), GSHGEOM_OK);
-  ASSERT_EQ(gshgeom_path_line_to(mp, P(48, 10)), GSHGEOM_OK);
-  ASSERT_EQ(gshgeom_path_line_to(mp, P(30, 50)), GSHGEOM_OK);
-  GSHGEOM_Stroke style;
-  gshgeom_stroke_init(&style);
-  style.width = 6.0;
-  GSHGEOM_Map map;
-  ASSERT_EQ(gshgeom_map_identity(2, &map), GSHGEOM_OK);
-  tracker::Tracker count;
-  long made = 0;
-  {
-    GSHGEOM_Allocator a = tracker::allocator_for(&count);
-    GSHGEOM_Stroke_Outline * o = nullptr;
-    ASSERT_EQ(gshgeom_stroke_expand(mp, &style, &map, &a, nullptr, &o), GSHGEOM_OK);
-    made = count.calls;
-    ASSERT_EQ(gshgeom_stroke_outline_reduce(o, nullptr), GSHGEOM_OK);
-    gshgeom_stroke_outline_destroy(o);
+TEST(StrokeOutlineReduced, AnAllocationFailureLeavesTheOutlineWithoutAReducedFormWhateverPartItFailsIn) {
+  // An open stroke has one part; a closed one aligned inside has three, so a failure in the second or the third must free the
+  // reduced parts already made.
+  for (int closed = 0; closed < 2; closed++) {
+    GSHGEOM_Path * mp = nullptr;
+    ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &mp), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_move_to(mp, P(8, 8)), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_line_to(mp, P(48, 10)), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_line_to(mp, P(30, 50)), GSHGEOM_OK);
+    if (closed) {
+      ASSERT_EQ(gshgeom_path_close(mp), GSHGEOM_OK);
+    }
+    GSHGEOM_Stroke style;
+    gshgeom_stroke_init(&style);
+    style.width = 6.0;
+    style.alignment = closed ? GSHGEOM_STROKE_ALIGN_INSIDE : GSHGEOM_STROKE_ALIGN_CENTER;
+    GSHGEOM_Map map;
+    ASSERT_EQ(gshgeom_map_identity(2, &map), GSHGEOM_OK);
+    tracker::Tracker count;
+    long made = 0;
+    {
+      GSHGEOM_Allocator a = tracker::allocator_for(&count);
+      GSHGEOM_Stroke_Outline * o = nullptr;
+      ASSERT_EQ(gshgeom_stroke_expand(mp, &style, &map, &a, nullptr, &o), GSHGEOM_OK);
+      EXPECT_EQ(gshgeom_stroke_outline_aligned(o) != nullptr, closed != 0);
+      made = count.calls;
+      ASSERT_EQ(gshgeom_stroke_outline_reduce(o, nullptr), GSHGEOM_OK);
+      gshgeom_stroke_outline_destroy(o);
+    }
+    ASSERT_GT(count.calls, made);
+    for (long k = made; k < count.calls; k++) {
+      tracker::Tracker t;
+      t.fail_from = k;
+      t.persistent = true;
+      GSHGEOM_Allocator a = tracker::allocator_for(&t);
+      GSHGEOM_Stroke_Outline * o = nullptr;
+      ASSERT_EQ(gshgeom_stroke_expand(mp, &style, &map, &a, nullptr, &o), GSHGEOM_OK);
+      EXPECT_EQ(gshgeom_stroke_outline_reduce(o, nullptr), GSHGEOM_ERR_OOM) << k;
+      EXPECT_EQ(gshgeom_stroke_outline_body_reduced(o), nullptr);
+      EXPECT_EQ(gshgeom_stroke_outline_aligned_reduced(o), nullptr);
+      t.fail_from = -1;
+      EXPECT_EQ(gshgeom_stroke_outline_reduce(o, nullptr), GSHGEOM_OK) << "it may be asked for again";
+      gshgeom_stroke_outline_destroy(o);
+      EXPECT_TRUE(t.live.empty()) << "closed=" << closed << " k=" << k << " leaked";
+    }
+    gshgeom_path_destroy(mp);
   }
-  ASSERT_GT(count.calls, made);
-  for (long k = made; k < count.calls; k++) {
-    tracker::Tracker t;
-    t.fail_from = k;
-    t.persistent = true;
-    GSHGEOM_Allocator a = tracker::allocator_for(&t);
-    GSHGEOM_Stroke_Outline * o = nullptr;
-    ASSERT_EQ(gshgeom_stroke_expand(mp, &style, &map, &a, nullptr, &o), GSHGEOM_OK);
-    EXPECT_EQ(gshgeom_stroke_outline_reduce(o, nullptr), GSHGEOM_ERR_OOM) << k;
-    EXPECT_EQ(gshgeom_stroke_outline_body_reduced(o), nullptr);
-    t.fail_from = -1;
-    EXPECT_EQ(gshgeom_stroke_outline_reduce(o, nullptr), GSHGEOM_OK) << "it may be asked for again";
-    gshgeom_stroke_outline_destroy(o);
-    EXPECT_TRUE(t.live.empty()) << "k=" << k << " leaked";
-  }
-  gshgeom_path_destroy(mp);
 }
 
 int main(int argc, char ** argv) {

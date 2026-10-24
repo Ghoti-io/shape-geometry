@@ -576,8 +576,9 @@ PLANTS += [
     ("o-3d-rows", "src", O, "const double c[3] = {r3.x, r3.y, r3.z};", "const double c[3] = {r3.x, r3.y, r3.y};", OT),
     ("o-2d-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2(a, b, c);", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2(a, b, c);", OT),
     # The cancelling of a path's reversed edge pairs (flatten.h, src/flatten/seams.c) and the outline's reduced form (src/stroke/outline.c).
+    # (Not planted: flipping `forward` of a pair. The pair is then stored hi to lo with the flag meaning the other way, and every edge, its twin and
+    # the arcs made of them come out the same: an equivalent mutant.)
     ("sm-zero-length-kept", "src", SE, "      if (a.x == b.x && a.y == b.y) {\n        continue;\n      }\n      Pair * e", "      if (0) {\n        continue;\n      }\n      Pair * e", SET),
-    ("sm-direction-flipped", "src", SE, "      e->forward = before(a.x, a.y, b.x, b.y);", "      e->forward = !before(a.x, a.y, b.x, b.y);", SET),
     ("sm-net-not-signed", "src", SE, "      net += pairs[j].forward ? 1 : -1;", "      net += 1;", SET),
     ("sm-run-too-long", "src", SE, "    while (j < n && cmp_pair(&pairs[i], &pairs[j]) == 0) {", "    while (j < n && cmp_pair(&pairs[i], &pairs[j]) <= 0) {", SET),
     ("sm-arc-tail-wrong", "src", SE, "      a->x0 = net > 0 ? pairs[i].x0 : pairs[i].x1;", "      a->x0 = net > 0 ? pairs[i].x1 : pairs[i].x0;", SET),
