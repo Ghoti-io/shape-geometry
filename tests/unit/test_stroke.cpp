@@ -796,6 +796,27 @@ TEST(StrokeSeams, EveryPointBetweenPiecesIsCovered) {
   gshgeom_path_destroy(p);
 }
 
+TEST(StrokeJoin, ARoundJoinBetweenNearlyParallelSegmentsIsDrawnWhateverTheLastBitIs) {
+  /* A2: the two directions at the join differ in their last bits, so their dot product rounds to a little over 1 and the
+   * arc's deviation came out as a tiny negative number; the sub-arc was halved to the depth cap and the stroke refused.
+   * (0,0), (2,33), (4,66) with the last point moved by whole units in the last place; only the exactly straight one was
+   * drawn.  The coordinates are exact (hexadecimal floating point). */
+  const double ys[] = {0x1.07ffffffffffdp+6, 0x1.07ffffffffffep+6, 0x1.07fffffffffffp+6, 0x1.08p+6,
+      0x1.0800000000001p+6, 0x1.0800000000002p+6, 0x1.0800000000003p+6};
+  for (double y : ys) {
+    GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {2, 33}}, {'L', {4, y}}});
+    GSHGEOM_Map m = identity();
+    GSHGEOM_Stroke s = plain();
+    s.width = 1.25;
+    s.join = GSHGEOM_STROKE_JOIN_ROUND;
+    GSHGEOM_Stroke_Outline * o = nullptr;
+    EXPECT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &o), GSHGEOM_OK) << y;
+    EXPECT_EQ(gshgeom_stroke_outline_status(o), GSHGEOM_STROKE_DRAWN) << y;
+    gshgeom_stroke_outline_destroy(o);
+    gshgeom_path_destroy(p);
+  }
+}
+
 TEST(StrokeLimits, AForcedPieceIsRefusedNeverDrawnCoarser) {
   /* with the depth cap at 2, a curve that needs more splits is ERR_LIMIT and returns nothing */
   GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'C', {40, 60, 80, -60, 120, 0}}});

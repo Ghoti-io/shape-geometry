@@ -133,9 +133,18 @@ GSHGEOM_Result gshgeom_sk_arc(GSHGEOM_SK_Ctx * c, double r, GSHGEOM_SK_Vec p, GS
     Sub s = stack[top];
     int dp = depth[top];
     double cpq = gshgeom_sk_dot(s.p, s.q);
-    /* the apex's distance outside the arc, in device pixels */
-    double d = (cpq > -0.5) ? r * c->norm * (gmath_sqrt(2.0 / (1.0 + cpq)) - 1.0) * UP : -1.0;
-    if (d >= 0.0 && d <= allowed) {
+    /* the apex's distance outside the arc, in device pixels.  Two directions that are nearly the same have a dot product
+     * that rounds to 1 or a little above it, and then the root is a little under 1: the distance is true zero, and a
+     * negative value computed from it is rounding, not "too wide a sub-arc" (which is what the -1 below says).  Without
+     * the clamp such a sub-arc is halved to the depth cap and the stroke is refused, depending on the last bit of its
+     * directions. */
+    int narrow = cpq > -0.5;
+    double d = -1.0;
+    if (narrow) {
+      double over = gmath_sqrt(2.0 / (1.0 + cpq)) - 1.0;
+      d = over > 0.0 ? r * c->norm * over * UP : 0.0;
+    }
+    if (narrow && d <= allowed) {
       double k = r / (1.0 + cpq);
       res = put(c, n, gshgeom_sk_scale(k, gshgeom_sk_add(s.p, s.q)));
       if (res == GSHGEOM_OK) {
