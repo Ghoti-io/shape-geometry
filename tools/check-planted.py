@@ -571,7 +571,7 @@ PLANTS += [
     ("o-3d-sign-abd", "src", O, "put_det3(t, &n, 0, a, b, d);", "put_det3(t, &n, 1, a, b, d);", OT),
     ("o-3d-sign-abc", "src", O, "put_det3(t, &n, 1, a, b, c);", "put_det3(t, &n, 0, a, b, c);", OT),
     ("o-3d-rows", "src", O, "const double c[3] = {r3.x, r3.y, r3.z};", "const double c[3] = {r3.x, r3.y, r3.y};", OT),
-    ("o-2d-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", OT),
+    ("o-2d-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2(a, b, c);", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2(a, b, c);", OT),
     ("o-2d-exact-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2", OT),
     ("o-3d-no-finite-check", "src", O, "if (!sign || !finite3(a) || !finite3(b) || !finite3(c) || !finite3(d)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", OT),
     ("o-3d-exact-no-finite-check", "src", O, "if (!sign || !finite3(a) || !finite3(b) || !finite3(c) || !finite3(d)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact3", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact3", OT),
@@ -1517,7 +1517,7 @@ STROKE_PLANTS = [
     ("sk-line-normal-right", "src", SKB, "    GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h, gshgeom_sk_left(gshgeom_sk_unit(a)));", "    GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h / 2, gshgeom_sk_left(gshgeom_sk_unit(a)));", STM),
     ("sk-split-error-dropped", "src", SKB, "      en[i] = SPLIT_C * en[i] + SPLIT * en[i + 1] + 3.0 * U * (SPLIT_C * ma + SPLIT * mb);", "      en[i] = 0.0 * (ma + mb);", ["testStroke_matrix", "probe"]),
     # arcs (circular pieces) and emission
-    ("sk-arc-norm-ignored", "src", SKA, "    double d = (cpq > -0.5) ? r * c->norm * (gmath_sqrt(2.0 / (1.0 + cpq)) - 1.0) * UP : -1.0;", "    double d = (cpq > -0.5) ? r * (gmath_sqrt(2.0 / (1.0 + cpq)) - 1.0) * UP : -1.0;", STM),
+    ("sk-arc-norm-ignored", "src", SKA, "      d = over > 0.0 ? r * c->norm * over * UP : 0.0;", "      d = over > 0.0 ? r * over * UP : 0.0;", STM),
     ("sk-arc-inscribed", "src", SKA, "      double k = r / (1.0 + cpq);", "      double k = r / 2.0;", STM + ["probe"]),
     ("sk-norm-unscaled", "src", SKM, "  double x = ax / m, y = ay / m;\n  return m * gmath_sqrt(x * x + y * y);", "  return gmath_sqrt(a.x * a.x + a.y * a.y);", STK),
     ("sk-build-min-dropped", "src", SKE, "        if (dm != 0.0 && dm < GSHGEOM_SK_BUILD_MIN) {\n          return 0;\n        }", "        (void)dm;", STK),
