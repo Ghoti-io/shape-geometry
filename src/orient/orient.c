@@ -60,12 +60,14 @@ static int small_enough(double v) {
   return v <= FILTER_COORD_LIMIT && v >= -FILTER_COORD_LIMIT;
 }
 
-/** 1 and *sign set if the filter decides. */
-static int filter2(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c, int * sign) {
-  if (!(small_enough(a.x) && small_enough(a.y) && small_enough(b.x) &&
-          small_enough(b.y) && small_enough(c.x) && small_enough(c.y))) {
-    return 0;
-  }
+/** Whether every coordinate is within the filter's limit (which no NaN and no infinity is). */
+static int all_small2(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c) {
+  return small_enough(a.x) & small_enough(a.y) & small_enough(b.x) & small_enough(b.y) &
+      small_enough(c.x) & small_enough(c.y);
+}
+
+/** 1 and *sign set if the filter decides, for coordinates that are all within the limit. */
+static int filter2_small(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c, int * sign) {
   double detleft = (a.x - c.x) * (b.y - c.y);
   double detright = (a.y - c.y) * (b.x - c.x);
   double det = detleft - detright;
@@ -182,14 +184,23 @@ GSHGEOM_Result gshgeom_orient2d_exact(
 
 GSHGEOM_Result gshgeom_orient2d(
     GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c, int * sign) {
-  if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {
+  if (!sign) {
     return GSHGEOM_ERR_INVALID;
   }
-  int s;
-  if (!filter2(a, b, c, &s)) {
-    s = exact2(a, b, c);
+  if (all_small2(a, b, c)) {
+    int s;
+    /* Within the limit is finite, so the checks below would pass: the filter is all that is left of them. */
+    if (!filter2_small(a, b, c, &s)) {
+      s = exact2(a, b, c);
+    }
+    *sign = s;
+    return GSHGEOM_OK;
   }
-  *sign = s;
+  if (!finite2(a) || !finite2(b) || !finite2(c)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  /* A coordinate past the limit: the filter's bound does not hold there, and the exact form decides. */
+  *sign = exact2(a, b, c);
   return GSHGEOM_OK;
 }
 

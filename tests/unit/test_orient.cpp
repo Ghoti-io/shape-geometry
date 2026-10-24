@@ -223,6 +223,29 @@ TEST(Orient2d, TheFilterAgreesWithTheExactPath) {
   }
 }
 
+TEST(Orient2d, TheLimitOfTheFilterIsNotAnEdgeOfTheAnswer) {
+  // Coordinates at the filter's limit (2^100), one step past it either way, and coincident or collinear triples among them:
+  // the answer is the exact one on both sides of the limit, and a point past it is not refused (only a non-finite one is).
+  const double edge = 0x1p100;
+  const double steps[] = {edge, std::nextafter(edge, kInf), std::nextafter(edge, 0.0), -edge, -std::nextafter(edge, kInf), 0.0,
+      1.0, -0.0, 0x1p99};
+  for (double x0 : steps) {
+    for (double y0 : steps) {
+      for (double x1 : steps) {
+        for (double y1 : steps) {
+          GSHGEOM_Point a = P(x0, y0);
+          GSHGEOM_Point b = P(x1, y1);
+          GSHGEOM_Point c = P(y0, x1);
+          EXPECT_EQ(o2(a, b, c), o2x(a, b, c));
+          EXPECT_EQ(o2(a, c, b), o2x(a, c, b));
+          EXPECT_EQ(o2(a, a, b), 0);
+          EXPECT_EQ(o2(a, b, b), 0);
+        }
+      }
+    }
+  }
+}
+
 TEST(Orient2d, RefusesNonFiniteInput) {
   int s = 7;
   const double bad[] = {kNaN, kInf, -kInf};
