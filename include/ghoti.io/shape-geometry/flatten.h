@@ -230,6 +230,32 @@ GSHGEOM_API GSHGEOM_Result gshgeom_path_flatten(const GSHGEOM_Path * path,
     const GSHGEOM_Map * map, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out);
 
+/**
+ * @brief The same winding everywhere, without the edges that cancel.
+ *
+ * Every subpath is read as closed, so a path is a multiset of directed edges.  An edge `a -> b` and an edge `b -> a`
+ * cross every ray from a point together or not at all, with opposite signs, so a pair of them changes the winding
+ * number nowhere; an edge of zero length changes nothing either.  The result is @p path without such pairs (as many of
+ * a repeated edge as have no twin remain, with their multiplicity) and without zero-length edges, regrouped into closed
+ * subpaths: the edges left have as many leaving each point as entering it, so they split into closed walks.  The winding
+ * number at every point not on an edge is the same as @p path's, and so is the nonzero and the even-odd fill, which are
+ * functions of it.  The stroke expansion builds its outline of positively wound pieces whose neighbours share their sides
+ * in opposite directions, so about two fifths of an outline's edges cancel, and they are the long ones.
+ *
+ * The result depends on the multiset of edges and not on the order of the subpaths or where each starts.  Its points are
+ * no more than @p path's.  `limits->max_points` bounds it as it bounds the flattener's.
+ *
+ * @param path   The flattened path; its subpaths are read as closed whatever their flag.
+ * @param alloc  The allocator for the result and the scratch, or NULL for the default.
+ * @param limits The limits, or NULL for the defaults.
+ * @param out    The result, to be destroyed with ::gshgeom_flat_path_destroy; written only on success.  It has no subpaths
+ *               when everything cancels.
+ * @return ::GSHGEOM_OK, ::GSHGEOM_ERR_INVALID (NULL @p path or @p out), ::GSHGEOM_ERR_LIMIT, ::GSHGEOM_ERR_OOM, or
+ *         ::GSHGEOM_ERR_INTERNAL for a path whose edges are not a union of closed subpaths (none that this library builds).
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path,
+    const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out);
+
 /** @brief Destroy a flattened path; NULL is ignored. */
 GSHGEOM_API void gshgeom_flat_path_destroy(GSHGEOM_Flat_Path * path);
 

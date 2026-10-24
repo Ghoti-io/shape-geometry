@@ -185,6 +185,8 @@ struct GSHGEOM_Stroke_Outline {
   GSHGEOM_Flat_Path * body;     ///< NULL when absent.
   GSHGEOM_Flat_Path * aligned;  ///< NULL when absent.
   GSHGEOM_Flat_Path * clip;     ///< NULL when absent.
+  GSHGEOM_Flat_Path * reduced[3]; ///< body, aligned and clip without their cancelling edges (gshgeom_stroke_outline_reduce); NULL until then.
+  int reduced_done;             ///< 1 once gshgeom_stroke_outline_reduce has run.
 };
 
 /** The curve outline (stroke_curves.h, SG32). */

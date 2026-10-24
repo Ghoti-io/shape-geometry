@@ -586,6 +586,30 @@ GSHGEOM_API const GSHGEOM_Flat_Path * gshgeom_stroke_outline_aligned(
 GSHGEOM_API const GSHGEOM_Flat_Path * gshgeom_stroke_outline_clip(
     const GSHGEOM_Stroke_Outline * outline);
 
+/**
+ * @brief Make each part's reduced form: the part without its cancelling edges (::gshgeom_flat_path_cancel_seams).
+ *
+ * The reduced form has the winding number of the part everywhere, so the fill it gives is the part's, and about two
+ * fifths of the edges (a rasterizer's cost goes with them) are gone.  The outline, its hash and its dump are not
+ * changed; the reduced paths are held beside the parts and destroyed with the outline.  It is the one call of the
+ * outline that writes, so make it on an outline no other thread has yet: once it has returned, the outline is
+ * read-only again.  A second call does nothing.
+ *
+ * @param outline The outline; NULL is ::GSHGEOM_ERR_INVALID.
+ * @param limits  As for ::gshgeom_flat_path_cancel_seams, or NULL for the defaults.
+ * @return ::GSHGEOM_OK, or an error of ::gshgeom_flat_path_cancel_seams, in which case the outline has no reduced form.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_stroke_outline_reduce(GSHGEOM_Stroke_Outline * outline, const GSHGEOM_Limits * limits);
+
+/** @brief The body without its cancelling edges; NULL for NULL, an absent part, or an outline not yet reduced. */
+GSHGEOM_API const GSHGEOM_Flat_Path * gshgeom_stroke_outline_body_reduced(const GSHGEOM_Stroke_Outline * outline);
+
+/** @brief The aligned part, likewise. */
+GSHGEOM_API const GSHGEOM_Flat_Path * gshgeom_stroke_outline_aligned_reduced(const GSHGEOM_Stroke_Outline * outline);
+
+/** @brief The clip part, likewise. */
+GSHGEOM_API const GSHGEOM_Flat_Path * gshgeom_stroke_outline_clip_reduced(const GSHGEOM_Stroke_Outline * outline);
+
 /** @brief The clip part's fill rule (the canonical alignment rule). */
 GSHGEOM_API GSHGEOM_Fill_Rule gshgeom_stroke_outline_clip_rule(
     const GSHGEOM_Stroke_Outline * outline);

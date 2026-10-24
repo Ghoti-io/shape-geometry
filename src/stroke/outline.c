@@ -42,6 +42,9 @@ void gshgeom_stroke_outline_destroy(GSHGEOM_Stroke_Outline * o) {
   gshgeom_flat_path_destroy(o->body);
   gshgeom_flat_path_destroy(o->aligned);
   gshgeom_flat_path_destroy(o->clip);
+  for (int i = 0; i < 3; i++) {
+    gshgeom_flat_path_destroy(o->reduced[i]);
+  }
   GSHGEOM_Allocator alloc = o->alloc;
   gcu_allocator_free(&alloc, o);
 }
@@ -60,6 +63,46 @@ const GSHGEOM_Flat_Path * gshgeom_stroke_outline_aligned(const GSHGEOM_Stroke_Ou
 
 const GSHGEOM_Flat_Path * gshgeom_stroke_outline_clip(const GSHGEOM_Stroke_Outline * o) {
   return o ? o->clip : NULL;
+}
+
+GSHGEOM_Result gshgeom_stroke_outline_reduce(GSHGEOM_Stroke_Outline * o, const GSHGEOM_Limits * limits) {
+  if (!o) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  if (o->reduced_done) {
+    return GSHGEOM_OK;
+  }
+  const GSHGEOM_Flat_Path * parts[3] = {o->body, o->aligned, o->clip};
+  GSHGEOM_Flat_Path * made[3] = {NULL, NULL, NULL};
+  for (int i = 0; i < 3; i++) {
+    if (!parts[i]) {
+      continue;
+    }
+    GSHGEOM_Result r = gshgeom_flat_path_cancel_seams(parts[i], &o->alloc, limits, &made[i]);
+    if (r != GSHGEOM_OK) {
+      for (int k = 0; k < i; k++) {
+        gshgeom_flat_path_destroy(made[k]);
+      }
+      return r;
+    }
+  }
+  for (int i = 0; i < 3; i++) {
+    o->reduced[i] = made[i];
+  }
+  o->reduced_done = 1;
+  return GSHGEOM_OK;
+}
+
+const GSHGEOM_Flat_Path * gshgeom_stroke_outline_body_reduced(const GSHGEOM_Stroke_Outline * o) {
+  return o ? o->reduced[0] : NULL;
+}
+
+const GSHGEOM_Flat_Path * gshgeom_stroke_outline_aligned_reduced(const GSHGEOM_Stroke_Outline * o) {
+  return o ? o->reduced[1] : NULL;
+}
+
+const GSHGEOM_Flat_Path * gshgeom_stroke_outline_clip_reduced(const GSHGEOM_Stroke_Outline * o) {
+  return o ? o->reduced[2] : NULL;
 }
 
 GSHGEOM_Fill_Rule gshgeom_stroke_outline_clip_rule(const GSHGEOM_Stroke_Outline * o) {
