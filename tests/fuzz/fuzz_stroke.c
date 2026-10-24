@@ -513,15 +513,21 @@ static void check_part(const GSHGEOM_Flat_Path * fp, size_t max_points, const do
         double x = v.x / 64.0, y = v.y / 64.0;
         CHECK(x >= box[0] - slack && x <= box[2] + slack && y >= box[1] - slack && y <= box[3] + slack);
       }
-      if (oriented && k >= 1 && k + 1 < sp.count) {
-        GSHGEOM_Device_Point a = pts[sp.first], c = pts[sp.first + k + 1];
-        GSHGEOM_Point pa = {a.x, a.y, 0.0}, pb = {v.x, v.y, 0.0}, pc = {c.x, c.y, 0.0};
-        int sg = 0;
-        CHECK(gshgeom_orient2d(pa, pb, pc, &sg) == GSHGEOM_OK);
-#ifndef GSHGEOM_FUZZ_PLANT
-        CHECK(sg >= 0);
-#endif
+    }
+    if (oriented) {
+      /* a positively wound subpath: its signed area is not negative (the pieces are rounded polygons that are convex but for a
+       * vertex or two moved by under a unit, so the sum of the cross products of a fan is the area, in doubled units) */
+      __extension__ typedef __int128 wide;
+      wide twice = 0;
+      for (size_t k = 0; k < sp.count; k++) {
+        GSHGEOM_Device_Point p = pts[sp.first + k], q = pts[sp.first + (k + 1 == sp.count ? 0 : k + 1)];
+        twice += (wide)p.x * q.y - (wide)q.x * p.y;
       }
+#ifndef GSHGEOM_FUZZ_PLANT
+      CHECK(twice >= 0);
+#else
+      (void)twice;
+#endif
     }
   }
 }

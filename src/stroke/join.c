@@ -206,10 +206,11 @@ static GSHGEOM_SK_Vec miter_tip(const GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec oa, GSH
 
 /** Emit a polygon of offsets from V with d_in = d_out = e. */
 static GSHGEOM_Result poly(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const GSHGEOM_SK_Vec * p, size_t n, double e) {
-  if (!gshgeom_sk_fits(c, e, e)) {
+  if (!gshgeom_sk_fits_conform(c, e, e)) {
     return GSHGEOM_ERR_LIMIT; /* a miter tip the arithmetic cannot place within the tolerance */
   }
-  return gshgeom_sk_emit(c, anchor, p, n, e, e);
+  GSHGEOM_SK_Vec piv[1] = {gshgeom_sk_v(0.0, 0.0)}; /* the vertex: a vertex of the piece, or a point of its base edge */
+  return gshgeom_sk_emit_conform(c, anchor, p, n, e, e, piv, 1);
 }
 
 /** The miter-clip join, the outer side given (also the arcs join's fallback). */
@@ -236,7 +237,7 @@ static GSHGEOM_Result half_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHGE
   if (c->cv) {
     return gshgeom_skc_half_disc(c, anchor, m, d); /* two quarter arcs, exact (SG37) */
   }
-  double allowed = gshgeom_sk_room(c, 0.0);
+  double allowed = gshgeom_sk_room_conform(c, 0.0);
   size_t n = 1;
   double d1 = 0.0, d2 = 0.0;
   GSHGEOM_Result r = gshgeom_sk_arc(c, c->h, m, d, allowed, &n, &d1);
@@ -246,7 +247,8 @@ static GSHGEOM_Result half_disc(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHGE
   }
   if (r == GSHGEOM_OK) {
     c->arcbuf[0] = gshgeom_sk_v(0.0, 0.0); /* the centre; slot 0 was kept for it */
-    r = gshgeom_sk_emit(c, anchor, c->arcbuf, n, 0.0, d1 > d2 ? d1 : d2);
+    GSHGEOM_SK_Vec piv[1] = {gshgeom_sk_v(0.0, 0.0)}; /* the centre is on the diameter */
+    r = gshgeom_sk_emit_conform(c, anchor, c->arcbuf, n, d1 > d2 ? d1 : d2, 0.0, piv, 1);
   }
   return r;
 }

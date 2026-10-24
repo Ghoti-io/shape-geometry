@@ -233,19 +233,19 @@ inline PartResult compare_part(const GSHGEOM_Flat_Path * fp, const so::Region & 
       }
     }
   }
-  /* no subpath winds negatively anywhere: each ring's fan from its first vertex has no negative triangle (then its
-   * winding is a sum of triangles' 0s and 1s), decided exactly on the 26.6 integers */
+  /* no subpath winds negatively anywhere: each ring's signed area is not negative (a ring that takes a pivot vertex a
+   * unit or two off a straight edge is no longer a fan from its first vertex, but it is still wound positively), decided
+   * exactly on the 26.6 integers; the winding at every tested point is checked below */
   for (const auto & ring : wd.polys.rings) {
-    for (size_t i = 1; i + 1 < ring.size(); i++) {
-      GSHGEOM_Point a = {(double)ring[0].first, (double)ring[0].second, 0.0};
-      GSHGEOM_Point b = {(double)ring[i].first, (double)ring[i].second, 0.0};
-      GSHGEOM_Point c = {(double)ring[i + 1].first, (double)ring[i + 1].second, 0.0};
-      int s = 0;
-      gshgeom_orient2d(a, b, c, &s);
-      if (s < 0) {
-        pr.negative++;
-        break;
-      }
+    __extension__ typedef __int128 wide;
+    wide twice = 0;
+    for (size_t i = 0; i < ring.size(); i++) {
+      const auto & p = ring[i];
+      const auto & q = ring[(i + 1) % ring.size()];
+      twice += (wide)p.first * q.second - (wide)q.first * p.second;
+    }
+    if (twice < 0) {
+      pr.negative++;
     }
   }
   /* every outline vertex inside the box plus tau; the deviation of those outside the region */

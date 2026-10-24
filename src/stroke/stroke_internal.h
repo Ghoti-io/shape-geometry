@@ -147,6 +147,14 @@ typedef struct GSHGEOM_SK_Dash {
   double phase0;              ///< The reduced offset (per subpath).
 } GSHGEOM_SK_Dash;
 
+/** One entry of the snap table (emit.c): a computed point and the lattice point it was rounded to. */
+typedef struct GSHGEOM_SK_Snap {
+  int64_t qx, qy;  ///< the point in 2^-18 pixel bins
+  double x, y;     ///< the computed point
+  int32_t rx, ry;  ///< its lattice point
+  int used;
+} GSHGEOM_SK_Snap;
+
 /** The state of one expansion. */
 typedef struct GSHGEOM_SK_Ctx {
   GSHGEOM_Allocator alloc;       ///< The caller's allocator.
@@ -173,6 +181,10 @@ typedef struct GSHGEOM_SK_Ctx {
   GSHGEOM_SK_Dash dash;          ///< Dashes (dash.c).
   double mag_limit;              ///< The largest magnitude, in device units, the arithmetic bound is proved for.
   GSHGEOM_SK_Curves * cv;        ///< Non-NULL in curve mode.
+  GSHGEOM_SK_Snap * snap;        ///< The snap table (emit.c), open addressing; NULL until a conforming piece is emitted.
+  size_t snap_cap, snap_n;
+  int conform;                   ///< Emit conforming pieces (whole-stroke pass one); 0: every piece inflated, as before.
+  int inflated;                  ///< An inflated piece was emitted while conforming: pass one is void, and is redone with 0.
 } GSHGEOM_SK_Ctx;
 
 /** The outline (stroke.h, SG16). */
@@ -275,6 +287,16 @@ int gshgeom_sk_fits(const GSHGEOM_SK_Ctx * c, double d_in, double d_out);
 double gshgeom_sk_room(const GSHGEOM_SK_Ctx * c, double d_in);
 
 /**
+ * The same for a **conforming** piece (::gshgeom_sk_emit_conform): one that is not inflated, because the pieces beside it
+ * share its seams exactly.  Its core polygon is within @p err of the piece and the piece within @p err of it; the rounding
+ * of the vertices adds `rho`, and the sum is within the budget.
+ */
+int gshgeom_sk_fits_conform(const GSHGEOM_SK_Ctx * c, double d_in, double err);
+
+/** What is left of the budget for the error of a conforming piece. */
+double gshgeom_sk_room_conform(const GSHGEOM_SK_Ctx * c, double d_in);
+
+/**
  * Emit one piece: the convex hull of the core points `A + lin d[i]`, inflated by
  * an octagon of inradius `d_in + rho`, rounded to 26.6 and written to the part as
  * positively wound closed subpaths (emit.c).  The caller has checked
@@ -285,6 +307,18 @@ double gshgeom_sk_room(const GSHGEOM_SK_Ctx * c, double d_in);
  */
 GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const GSHGEOM_SK_Vec * d, size_t n,
     double d_in, double d_out);
+
+/**
+ * Emit one conforming piece: the convex hull of the core points `A + lin d[i]`, **not inflated**, each vertex rounded to
+ * 26.6 through the snap table (two computed points that are the same point, within 2^-19 pixel, get the same lattice
+ * point, whichever piece computed them), and written as one closed subpath; @p piv are points that lie on an edge of the
+ * hull (the centerline point at the middle of a body's end edge) and are inserted as vertices of it when they do, so
+ * that the join or cap beside it, which has the same point as a vertex, shares the edge with it exactly: the two edges are
+ * a pair a rasterizer cancels.  @p err is the error of the core polygon both ways (::gshgeom_sk_fits_conform).  In curve
+ * mode this is ::gshgeom_sk_emit.
+ */
+GSHGEOM_Result gshgeom_sk_emit_conform(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const GSHGEOM_SK_Vec * d, size_t n,
+    double err, double d_in, const GSHGEOM_SK_Vec * piv, size_t npiv);
 
 /* --- arc.c ------------------------------------------------------------------ */
 

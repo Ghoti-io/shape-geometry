@@ -414,7 +414,8 @@ typedef struct CurveReq {
 /** The expansion of stroke.h (@p cr NULL: 26.6 polygons in @p po) or of stroke_curves.h (curves in @p pc). */
 static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const CurveReq * cr, const GSHGEOM_Allocator * alloc,
-    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc) {
+    const GSHGEOM_Limits * limits, int depth_cap, int conform, int * redo, GSHGEOM_Stroke_Outline ** po,
+    GSHGEOM_Stroke_Curves ** pc) {
   GSHGEOM_Result r = gshgeom_map_check(map);
   if (r != GSHGEOM_OK) {
     return r;
@@ -446,6 +447,7 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
   }
   GSHGEOM_SK_Curves cvs;
   memset(&cvs, 0, sizeof cvs);
+  c.conform = conform && !cr;
   c.tau = tolerance;
   c.budget = ((double)tolerance - GSHGEOM_SK_MARGIN) / 64.0;
   c.rho = (GSHGEOM_SK_ROUND + GSHGEOM_SK_ETA) / 64.0;
@@ -588,6 +590,7 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
   gcu_allocator_free(&c.alloc, rd.segs);
   gcu_allocator_free(&c.alloc, c.scratch);
   gcu_allocator_free(&c.alloc, c.arcbuf);
+  gcu_allocator_free(&c.alloc, c.snap);
   gcu_allocator_free(&c.alloc, cvs.el);
   gcu_allocator_free(&c.alloc, cvs.run);
   if (r == GSHGEOM_OK && cr && cr->form == GSHGEOM_STROKE_CURVES_CUBIC) {
@@ -607,6 +610,12 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
   if (r != GSHGEOM_OK) {
     EXPAND_FAIL(r);
   }
+  if (c.inflated) {
+    /* an inflated piece among conforming ones leaves hairline gaps along the seams it shares with them: draw it all again
+     * with every piece inflated */
+    *redo = 1;
+    EXPAND_FAIL(GSHGEOM_OK);
+  }
   EXPAND_DONE(GSHGEOM_STROKE_DRAWN);
 #undef EXPAND_FAIL
 #undef EXPAND_DONE
@@ -618,7 +627,12 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
   if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
     return GSHGEOM_ERR_INVALID;
   }
-  return expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, out, NULL);
+  int redo = 0;
+  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, out, NULL);
+  if (r == GSHGEOM_OK && redo) {
+    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 0, &redo, out, NULL);
+  }
+  return r;
 }
 
 GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
@@ -632,7 +646,8 @@ GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerli
     return GSHGEOM_ERR_INVALID;
   }
   CurveReq cr = {tolerance, form};
-  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, NULL, out);
+  int redo = 0;
+  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, 0, &redo, NULL, out);
 }
 
 GSHGEOM_Result gshgeom_stroke_curves_expand(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,

@@ -287,6 +287,9 @@ GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const 
   if (!gshgeom_sk_fits(c, d_in, d_out)) {
     return GSHGEOM_ERR_INTERNAL;
   }
+  if (c->conform && !c->cv) {
+    c->inflated = 1; /* the pieces beside this one are conforming and do not overlap it: the pass is void */
+  }
   if (n > SIZE_MAX / 32) {
     return GSHGEOM_ERR_OOM;
   }
@@ -367,6 +370,242 @@ GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const 
           continue;
         }
         GSHGEOM_Device_Point t[3] = {v[0], s > 0 ? v[i] : v[i + 1], s > 0 ? v[i + 1] : v[i]};
+        r = write_ring(c->part, t, 3);
+      }
+    }
+  }
+  if (v != stack) {
+    gcu_allocator_free(&c->alloc, v);
+  }
+  return r;
+}
+
+
+/* --- conforming pieces: shared lattice points, no inflation ---------------------------------------------------------------- */
+
+/*
+ * A conforming piece is the hull of its core points with no inflation, each vertex put on the 26.6 lattice through a table
+ * that gives two computed points that are the same point one lattice point.  The pieces that meet along a seam (the bodies
+ * and bands of a segment, the joins and caps beside them) compute the seam's two ends the same way, so they write the seam
+ * as two edges that are exact reverses, which ::gshgeom_flat_path_cancel_seams removes.  Nothing overlaps, so the error is
+ * two-sided, `err + rho <= budget`: the polygon is within `err` of the piece and the lattice within `rho` of the polygon.
+ *
+ * A piece that only approximates its region (a fan, a disc, an arcs join) has no edge in common with its neighbours, and
+ * relies on its inflation to cover the seam.  The covering is of the exact seam, and a conforming neighbour's edge is the
+ * exact one moved by up to a lattice rounding, so a hairline gap opens between them.  A stroke that emits one such piece
+ * while conforming (`inflated`) is therefore expanded again with every piece inflated, as it was before this existed.
+ */
+
+int gshgeom_sk_fits_conform(const GSHGEOM_SK_Ctx * c, double d_in, double err) {
+  if (!(err >= 0.0)) {
+    return 0; /* NaN or a negative bound: a computation that went wrong is never accepted */
+  }
+  if (c->cv) {
+    return err <= c->cv->budget;
+  }
+  if (!c->conform) {
+    return gshgeom_sk_fits(c, d_in, err);
+  }
+  return err + c->rho <= c->budget;
+}
+
+double gshgeom_sk_room_conform(const GSHGEOM_SK_Ctx * c, double d_in) {
+  if (c->cv) {
+    return c->cv->budget;
+  }
+  if (!c->conform) {
+    return gshgeom_sk_room(c, d_in);
+  }
+  return c->budget - c->rho;
+}
+
+/** Bins of 2^-18 pixel, and the distance within which two computed points are the same point: far above the rounding of the
+ * arithmetic that computes them (2^-40 pixel at a 2^30 pixel extent and below), far below the lattice (2^-6). */
+#define SNAP_BIN 0x1p18
+#define SNAP_TOL 0x1p-19
+
+static uint64_t snap_hash(int64_t qx, int64_t qy) {
+  uint64_t h = ((uint64_t)qx * UINT64_C(0x9E3779B97F4A7C15)) ^ ((uint64_t)qy * UINT64_C(0xC2B2AE3D27D4EB4F));
+  return h ^ (h >> 29);
+}
+
+static GSHGEOM_Result snap_grow(GSHGEOM_SK_Ctx * c) {
+  size_t cap = c->snap_cap ? c->snap_cap * 2 : 256;
+  GSHGEOM_SK_Snap * t = gcu_allocator_calloc(&c->alloc, cap, sizeof *t);
+  if (!t) {
+    return GSHGEOM_ERR_OOM;
+  }
+  for (size_t i = 0; i < c->snap_cap; i++) {
+    if (c->snap[i].used) {
+      size_t k = snap_hash(c->snap[i].qx, c->snap[i].qy) & (cap - 1);
+      while (t[k].used) {
+        k = (k + 1) & (cap - 1);
+      }
+      t[k] = c->snap[i];
+    }
+  }
+  gcu_allocator_free(&c->alloc, c->snap);
+  c->snap = t;
+  c->snap_cap = cap;
+  return GSHGEOM_OK;
+}
+
+/**
+ * The lattice point of the pixel point (@p x, @p y): the one an earlier point within SNAP_TOL of it was given, else the point
+ * rounded to nearest, which is remembered.  The pieces of an outline that meet along an edge compute its ends by different
+ * expressions that agree to a few ulps; a rounding that is right for both (an end within an ulp of a half unit would round
+ * two ways) is what makes the edge theirs together.
+ */
+static GSHGEOM_Result snap_round(GSHGEOM_SK_Ctx * c, double x, double y, GSHGEOM_Device_Point * out) {
+  int64_t qx = (int64_t)(x * SNAP_BIN), qy = (int64_t)(y * SNAP_BIN); /* finite and at most 2^31 pixels: 2^49 */
+  if (c->snap_cap) {
+    for (int dx = -1; dx <= 1; dx++) {
+      for (int dy = -1; dy <= 1; dy++) {
+        size_t k = snap_hash(qx + dx, qy + dy) & (c->snap_cap - 1);
+        while (c->snap[k].used) {
+          const GSHGEOM_SK_Snap * e = &c->snap[k];
+          if (e->qx == qx + dx && e->qy == qy + dy) {
+            double ex = e->x - x, ey = e->y - y;
+            if (ex < SNAP_TOL && ex > -SNAP_TOL && ey < SNAP_TOL && ey > -SNAP_TOL) {
+              out->x = e->rx;
+              out->y = e->ry;
+              return GSHGEOM_OK;
+            }
+          }
+          k = (k + 1) & (c->snap_cap - 1);
+        }
+      }
+    }
+  }
+  GSHGEOM_Result r = gshgeom_round_26_6(x, &out->x);
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_round_26_6(y, &out->y);
+  }
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if ((c->snap_n + 1) * 2 > c->snap_cap) {
+    r = snap_grow(c);
+    if (r != GSHGEOM_OK) {
+      return r;
+    }
+  }
+  size_t k = snap_hash(qx, qy) & (c->snap_cap - 1);
+  while (c->snap[k].used) {
+    k = (k + 1) & (c->snap_cap - 1);
+  }
+  GSHGEOM_SK_Snap * e = &c->snap[k];
+  e->qx = qx;
+  e->qy = qy;
+  e->x = x;
+  e->y = y;
+  e->rx = out->x;
+  e->ry = out->y;
+  e->used = 1;
+  c->snap_n++;
+  return GSHGEOM_OK;
+}
+
+/** Insert @p p into the ring @p v of @p *m vertices on the edge it lies on (within 2 units, between its ends), unless it is one. */
+static void ring_insert(GSHGEOM_Device_Point * v, size_t * m, GSHGEOM_Device_Point p) {
+  for (size_t i = 0; i < *m; i++) {
+    if (v[i].x == p.x && v[i].y == p.y) {
+      return;
+    }
+  }
+  for (size_t i = 0; i < *m; i++) {
+    GSHGEOM_Device_Point a = v[i], b = v[(i + 1) % *m];
+    double ex = (double)b.x - a.x, ey = (double)b.y - a.y, px = (double)p.x - a.x, py = (double)p.y - a.y;
+    double len2 = ex * ex + ey * ey, along = px * ex + py * ey, across = ex * py - ey * px;
+    /* an edge of under 8 units is too short to take a vertex off its line by a unit and keep the ring simple */
+    if (len2 >= 64.0 && along > 0.0 && along < len2 && across * across <= 4.0 * len2) {
+      for (size_t j = *m; j > i + 1; j--) {
+        v[j] = v[j - 1];
+      }
+      v[i + 1] = p;
+      (*m)++;
+      return;
+    }
+  }
+}
+
+GSHGEOM_Result gshgeom_sk_emit_conform(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const GSHGEOM_SK_Vec * d, size_t n,
+    double err, double d_in, const GSHGEOM_SK_Vec * piv, size_t npiv) {
+  if (c->cv) {
+    return gshgeom_sk_emit(c, anchor, d, n, err, err);
+  }
+  if (!c->conform) {
+    return gshgeom_sk_emit(c, anchor, d, n, d_in, err);
+  }
+  if (n == 0) {
+    return GSHGEOM_OK;
+  }
+  if (!gshgeom_sk_fits_conform(c, d_in, err)) {
+    return GSHGEOM_ERR_INTERNAL;
+  }
+  if (n > SIZE_MAX / 32) {
+    return GSHGEOM_ERR_OOM;
+  }
+  GSHGEOM_Result r = room_for(c, 3 * n + 1);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  GSHGEOM_SK_Vec * core = c->scratch;
+  GSHGEOM_SK_Vec * tmp = core + n;
+  GSHGEOM_SK_Vec * hull1 = tmp + n;
+  for (size_t i = 0; i < n; i++) {
+    core[i] = gshgeom_sk_add(anchor, gshgeom_sk_lin(c, d[i]));
+  }
+  size_t h1 = convex_hull(core, tmp, n, hull1);
+  GSHGEOM_Device_Point stack[72];
+  GSHGEOM_Device_Point * v = stack;
+  size_t room = h1 + npiv + 2;
+  if (room > 72) {
+    v = gcu_allocator_malloc(&c->alloc, room * sizeof *v);
+    if (!v) {
+      return GSHGEOM_ERR_OOM;
+    }
+  }
+  size_t m = 0;
+  for (size_t i = 0; i < h1 && r == GSHGEOM_OK; i++) {
+    GSHGEOM_Device_Point p;
+    r = snap_round(c, hull1[i].x, hull1[i].y, &p);
+    if (r == GSHGEOM_OK && (m == 0 || p.x != v[m - 1].x || p.y != v[m - 1].y)) {
+      v[m++] = p;
+    }
+  }
+  while (r == GSHGEOM_OK && m > 1 && v[0].x == v[m - 1].x && v[0].y == v[m - 1].y) {
+    m--;
+  }
+  /* fewer than three distinct lattice points: a piece of no area at this resolution, which draws nothing */
+  if (r == GSHGEOM_OK && m >= 3) {
+    int whole = 1;
+    for (size_t i = 1; i + 1 < m; i++) {
+      if (orient_dev(v[0], v[i], v[i + 1]) < 0) {
+        whole = 0;
+        break;
+      }
+    }
+    if (whole) {
+      for (size_t k = 0; k < npiv && r == GSHGEOM_OK; k++) {
+        GSHGEOM_SK_Vec pv = gshgeom_sk_add(anchor, gshgeom_sk_lin(c, piv[k]));
+        GSHGEOM_Device_Point p;
+        r = snap_round(c, pv.x, pv.y, &p);
+        if (r == GSHGEOM_OK) {
+          ring_insert(v, &m, p);
+        }
+      }
+      if (r == GSHGEOM_OK) {
+        r = write_ring(c->part, v, m);
+      }
+    } else {
+      /* rounding turned the hull's fan from its first vertex negative somewhere: each triangle of it, turned positive */
+      for (size_t i = 1; i + 1 < m && r == GSHGEOM_OK; i++) {
+        int sg = orient_dev(v[0], v[i], v[i + 1]);
+        if (sg == 0) {
+          continue;
+        }
+        GSHGEOM_Device_Point t[3] = {v[0], sg > 0 ? v[i] : v[i + 1], sg > 0 ? v[i + 1] : v[i]};
         r = write_ring(c->part, t, 3);
       }
     }

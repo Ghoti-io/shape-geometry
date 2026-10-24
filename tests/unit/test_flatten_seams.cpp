@@ -243,6 +243,35 @@ TEST(FlatPathSeams, AStrokesOutlineLosesMostOfItsEdgesAndNoneOfItsCoverage) {
   gshgeom_path_destroy(mp);
 }
 
+TEST(FlatPathSeams, ABendingStrokeOfStraightAndRoundPiecesCancelsToItsBoundaryAlone) {
+  /* its pieces share their seams exactly, so only the outline of their union is left: one ring for the open stroke */
+  GSHGEOM_Path * mp = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &mp), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_move_to(mp, P(6, 40)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(mp, P(30, 6)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(mp, P(54, 40)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(mp, P(70, 10)), GSHGEOM_OK);
+  GSHGEOM_Stroke style;
+  gshgeom_stroke_init(&style);
+  style.width = 5.0;
+  style.join = GSHGEOM_STROKE_JOIN_ROUND;
+  style.cap = GSHGEOM_STROKE_CAP_SQUARE;
+  GSHGEOM_Map map;
+  ASSERT_EQ(gshgeom_map_identity(2, &map), GSHGEOM_OK);
+  GSHGEOM_Stroke_Outline * outline = nullptr;
+  ASSERT_EQ(gshgeom_stroke_expand(mp, &style, &map, nullptr, nullptr, &outline), GSHGEOM_OK);
+  const GSHGEOM_Flat_Path * body = gshgeom_stroke_outline_body(outline);
+  ASSERT_NE(body, nullptr);
+  GSHGEOM_Flat_Path * out = nullptr;
+  ASSERT_EQ(gshgeom_flat_path_cancel_seams(body, nullptr, nullptr, &out), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_flat_path_subpath_count(out), (size_t)1);
+  expect_no_twins(out);
+  expect_same_winding(body, out, 60, 11);
+  gshgeom_flat_path_destroy(out);
+  gshgeom_stroke_outline_destroy(outline);
+  gshgeom_path_destroy(mp);
+}
+
 TEST(FlatPathSeams, TheArgumentsAndTheLimitAreChecked) {
   GSHGEOM_Flat_Path * fp = polygons({{{0, 0}, {10, 0}, {10, 10}, {0, 10}}});
   GSHGEOM_Flat_Path * out = nullptr;

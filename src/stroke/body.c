@@ -454,10 +454,13 @@ static int band(const Seg * sg, const Piece * p, const Know * k, GSHGEOM_Result 
     first = s;
   }
   double d = delta + corner;
-  if (!gshgeom_sk_fits(c, d, d)) {
+  if (!gshgeom_sk_fits_conform(c, d, d)) {
     return 0;
   }
-  *r = gshgeom_sk_emit(c, sg->anchor, q, 4, d, d);
+  /* the centerline points at the middle of the two end edges, so that the band beside this one, or the join or cap, shares
+   * each end edge with it exactly */
+  GSHGEOM_SK_Vec piv[2] = {P[0], P[n]};
+  *r = gshgeom_sk_emit_conform(c, sg->anchor, q, 4, d, d, piv, 2);
   return 1;
 }
 
@@ -979,7 +982,8 @@ GSHGEOM_Result gshgeom_sk_body(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Seg * s) {
     GSHGEOM_SK_Vec a = gshgeom_sk_sub(s->p[1], o);
     GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h, gshgeom_sk_left(gshgeom_sk_unit(a)));
     GSHGEOM_SK_Vec q[4] = {hn, gshgeom_sk_add(a, hn), gshgeom_sk_sub(a, hn), gshgeom_sk_scale(-1.0, hn)};
-    return gshgeom_sk_emit(c, sg.anchor, q, 4, 0.0, 0.0);
+    GSHGEOM_SK_Vec piv[2] = {gshgeom_sk_v(0.0, 0.0), a};
+    return gshgeom_sk_emit_conform(c, sg.anchor, q, 4, 0.0, 0.0, piv, 2);
   }
   Piece p;
   memset(&p, 0, sizeof p);

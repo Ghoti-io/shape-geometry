@@ -179,7 +179,10 @@ GSHGEOM_Result gshgeom_sk_arc(GSHGEOM_SK_Ctx * c, double r, GSHGEOM_SK_Vec p, GS
 
 GSHGEOM_Result gshgeom_sk_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor_dev, GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q,
     double d_in, double extra_out) {
-  double allowed = gshgeom_sk_room(c, d_in) - extra_out;
+  /* a sector of the exact region (a round join) has its two radii on the edges of the pieces beside it, which share them
+   * exactly: it is a conforming piece.  One that approximates (a fan) is inflated, to overlap what is beside it. */
+  int conform = c->conform && d_in == 0.0 && extra_out == 0.0;
+  double allowed = (conform ? gshgeom_sk_room_conform(c, d_in) : gshgeom_sk_room(c, d_in)) - extra_out;
   if (!(allowed > 0.0)) {
     return GSHGEOM_ERR_INTERNAL;
   }
@@ -193,7 +196,11 @@ GSHGEOM_Result gshgeom_sk_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor_dev, 
     r = gshgeom_sk_arc(c, c->h, p, q, allowed, &n, &dev);
   }
   if (r == GSHGEOM_OK) {
-    r = gshgeom_sk_emit(c, anchor_dev, c->arcbuf, n, d_in, dev + extra_out);
+    if (conform) {
+      r = gshgeom_sk_emit_conform(c, anchor_dev, c->arcbuf, n, dev, 0.0, NULL, 0);
+    } else {
+      r = gshgeom_sk_emit(c, anchor_dev, c->arcbuf, n, d_in, dev + extra_out);
+    }
   }
   return r;
 }
