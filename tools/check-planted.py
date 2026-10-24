@@ -510,6 +510,9 @@ M = "src/map/map.c"
 MH = "include/ghoti.io/shape-geometry/map.h"
 XT = ["testOrient", "testMap"]
 OT = ["testOrient"]
+SE = "src/flatten/seams.c"
+SOU = "src/stroke/outline.c"
+SET = ["testFlatten_seams"]
 MT = ["testMap"]
 
 
@@ -572,6 +575,22 @@ PLANTS += [
     ("o-3d-sign-abc", "src", O, "put_det3(t, &n, 1, a, b, c);", "put_det3(t, &n, 0, a, b, c);", OT),
     ("o-3d-rows", "src", O, "const double c[3] = {r3.x, r3.y, r3.z};", "const double c[3] = {r3.x, r3.y, r3.y};", OT),
     ("o-2d-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2(a, b, c);", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2(a, b, c);", OT),
+    # The cancelling of a path's reversed edge pairs (flatten.h, src/flatten/seams.c) and the outline's reduced form (src/stroke/outline.c).
+    ("sm-zero-length-kept", "src", SE, "      if (a.x == b.x && a.y == b.y) {\n        continue;\n      }\n      Pair * e", "      if (0) {\n        continue;\n      }\n      Pair * e", SET),
+    ("sm-direction-flipped", "src", SE, "      e->forward = before(a.x, a.y, b.x, b.y);", "      e->forward = !before(a.x, a.y, b.x, b.y);", SET),
+    ("sm-net-not-signed", "src", SE, "      net += pairs[j].forward ? 1 : -1;", "      net += 1;", SET),
+    ("sm-run-too-long", "src", SE, "    while (j < n && cmp_pair(&pairs[i], &pairs[j]) == 0) {", "    while (j < n && cmp_pair(&pairs[i], &pairs[j]) <= 0) {", SET),
+    ("sm-arc-tail-wrong", "src", SE, "      a->x0 = net > 0 ? pairs[i].x0 : pairs[i].x1;", "      a->x0 = net > 0 ? pairs[i].x1 : pairs[i].x0;", SET),
+    ("sm-multiplicity-lost", "src", SE, "    for (long r = net < 0 ? -net : net; r > 0; r--) {", "    for (long r = net != 0 ? 1 : 0; r > 0; r--) {", SET),
+    ("sm-used-edge-walked-again", "src", SE, "    if (used[i]) {\n      continue;\n    }\n    GSHGEOM_Device_Point start", "    if (0) {\n      continue;\n    }\n    GSHGEOM_Device_Point start", SET),
+    ("sm-lower-bound-past-equal", "src", SE, "    if (before(arcs[mid].x0, arcs[mid].y0, x, y)) {", "    if (!before(x, y, arcs[mid].x0, arcs[mid].y0)) {", SET),
+    ("sm-closing-edge-missing", "src", SE, "points[sub.first + (k + 1 == sub.count ? 0 : k + 1)];", "points[sub.first + (k + 1 == sub.count ? k : k + 1)];", SET),
+    ("sm-walk-takes-used-edge", "src", SE, "      while (j < m && arcs[j].x0 == hx && arcs[j].y0 == hy && used[j]) {", "      while (j < m && arcs[j].x0 == hx && arcs[j].y0 == hy && 0) {", SET),
+    ("sm-no-arguments-check", "src", SE, "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "  if (!alloc) {", SET),
+    ("sr-reduce-again", "src", SOU, "  if (o->reduced_done) {\n    return GSHGEOM_OK;\n  }\n", "", SET),
+    ("sr-reduced-leaked", "src", SOU, "  for (int i = 0; i < 3; i++) {\n    gshgeom_flat_path_destroy(o->reduced[i]);\n  }\n", "", SET),
+    ("sr-failure-leaks-the-made", "src", SOU, "      for (int k = 0; k < i; k++) {\n        gshgeom_flat_path_destroy(made[k]);\n      }\n", "", SET),
+    ("sr-reduced-not-marked", "src", SOU, "  o->reduced_done = 1;\n", "", SET),
     ("o-2d-exact-no-finite-check", "src", O, "if (!sign || !finite2(a) || !finite2(b) || !finite2(c)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact2", OT),
     ("o-3d-no-finite-check", "src", O, "if (!sign || !finite3(a) || !finite3(b) || !finite3(c) || !finite3(d)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  int s;", OT),
     ("o-3d-exact-no-finite-check", "src", O, "if (!sign || !finite3(a) || !finite3(b) || !finite3(c) || !finite3(d)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact3", "if (!sign) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *sign = exact3", OT),

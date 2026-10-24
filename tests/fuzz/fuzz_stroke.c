@@ -73,6 +73,80 @@
     } \
   } while (0)
 
+
+/* --- the reduced form of an outline: the winding it has everywhere ------------------------------- */
+
+/**
+ * The winding number of @p f at the point (@p qx, @p qy), both in sixteenths of a 26.6 unit, every subpath closed; -1 in @p ok
+ * when a product would overflow (the point is then not used).  Integer arithmetic throughout, so that an edge and its reverse
+ * give the opposite signs exactly.
+ */
+static int winding_sixteenths(const GSHGEOM_Flat_Path * f, int64_t qx, int64_t qy, int * ok) {
+  int wn = 0;
+  const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(f);
+  for (size_t s = 0; s < gshgeom_flat_path_subpath_count(f); s++) {
+    GSHGEOM_Flat_Subpath sub;
+    CHECK(gshgeom_flat_path_subpath(f, s, &sub) == GSHGEOM_OK);
+    for (size_t k = 0; k < sub.count; k++) {
+      GSHGEOM_Device_Point a = pts[sub.first + k];
+      GSHGEOM_Device_Point b = pts[sub.first + (k + 1 == sub.count ? 0 : k + 1)];
+      int64_t ax = (int64_t)a.x * 16, ay = (int64_t)a.y * 16, bx = (int64_t)b.x * 16, by = (int64_t)b.y * 16;
+      int64_t p1, p2, left;
+      if (__builtin_mul_overflow(bx - ax, qy - ay, &p1) || __builtin_mul_overflow(qx - ax, by - ay, &p2) ||
+          __builtin_sub_overflow(p1, p2, &left)) {
+        *ok = 0;
+        return 0;
+      }
+      if (ay <= qy) {
+        if (by > qy && left > 0) {
+          wn++;
+        }
+      } else if (by <= qy && left < 0) {
+        wn--;
+      }
+    }
+  }
+  return wn;
+}
+
+/** Reduce @p o and check the reduced parts: the same winding at sampled points, no more points, and reducing again changes nothing. */
+static void check_reduced(GSHGEOM_Stroke_Outline * o, const GSHGEOM_Limits * limits, uint64_t seed) {
+  GSHGEOM_Result rr = gshgeom_stroke_outline_reduce(o, limits);
+  CHECK(rr == GSHGEOM_OK || rr == GSHGEOM_ERR_OOM);
+  if (rr != GSHGEOM_OK) {
+    CHECK(gshgeom_stroke_outline_body_reduced(o) == NULL);
+    return;
+  }
+  const GSHGEOM_Flat_Path * whole[3] = {gshgeom_stroke_outline_body(o), gshgeom_stroke_outline_aligned(o), gshgeom_stroke_outline_clip(o)};
+  const GSHGEOM_Flat_Path * lean[3] = {gshgeom_stroke_outline_body_reduced(o), gshgeom_stroke_outline_aligned_reduced(o),
+      gshgeom_stroke_outline_clip_reduced(o)};
+  for (int i = 0; i < 3; i++) {
+    CHECK((whole[i] == NULL) == (lean[i] == NULL));
+    if (!whole[i]) {
+      continue;
+    }
+    size_t n = gshgeom_flat_path_point_count(whole[i]);
+    CHECK(gshgeom_flat_path_point_count(lean[i]) <= n);
+    if (n == 0) {
+      continue;
+    }
+    const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(whole[i]);
+    uint64_t r = seed + (uint64_t)i * 0x9E3779B97F4A7C15ull;
+    for (int t = 0; t < 24; t++) {
+      r = r * 6364136223846793005ull + 1442695040888963407ull;
+      GSHGEOM_Device_Point v = pts[(r >> 33) % n];
+      int64_t qx = ((int64_t)v.x + (int64_t)((r >> 8) & 127) - 64) * 16 + 5;
+      int64_t qy = ((int64_t)v.y + (int64_t)((r >> 16) & 127) - 64) * 16 + 9;
+      int ok = 1;
+      int w1 = winding_sixteenths(whole[i], qx, qy, &ok);
+      int w2 = winding_sixteenths(lean[i], qx, qy, &ok);
+      if (ok) {
+        CHECK(w1 == w2);
+      }
+    }
+  }
+}
+
 /* --- the outcomes the corpus must reach ----------------------------------------------------------- */
 
 enum {
@@ -557,6 +631,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       CHECK(gshgeom_stroke_expand_with_tolerance(path, &s, &map, tau, NULL, &limits, &o2) == GSHGEOM_OK);
       CHECK(gshgeom_stroke_outline_hash(o2) == h);
       gshgeom_stroke_outline_destroy(o2);
+      check_reduced(o, &limits, h);
+      CHECK(gshgeom_stroke_outline_hash(o) == h);
     }
     gshgeom_stroke_outline_destroy(o);
   }
