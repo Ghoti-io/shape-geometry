@@ -245,6 +245,14 @@ changes no result, cannot be seen by any test:
   ``sk-body-coincident-start-ignored`` (a curve whose first two control points coincide, where the terms that vanish are
   known to be zero and not only small), ``sk-dash-wrap-no-join`` (the join inside a dash across the start of a closed
   subpath, at its last vertex) and ``cv-hulls-not-apart-ignored`` (the test that the two rails of a band do not overlap).
+
+  The sweep after the conforming seams (the same 1132 plants, 23 not caught at once; the 23 run again with ``PLANT_ALL_TESTS=1``
+  left 11) adds three that nothing sees: ``sk-snap-tolerance-tiny``, ``sk-snap-never-found`` and ``sk-conform-pivot-short-edges``.
+  The snap table and the pivots matter only where two pieces compute one point by expressions that differ in the last bit and
+  the point lies within that bit of a half unit of the lattice.  A search put 20000 random strokes and 2.7 million strokes with a
+  width stepped by single units in the last place about the width that puts a vertex of the outline on such a half unit, with each of
+  the three plants, beside the real code: the outlines were the same in every one.  So nothing here separates them from the code
+  they replace, and none is shown equivalent.
 """
 import concurrent.futures
 import os
@@ -1554,6 +1562,17 @@ STROKE_PLANTS = [
     ("sk-hash-status-dropped", "src", SKO, "  gshgeom_hash_u8(&h, (uint8_t)o->status);\n", "", STK),
     ("sk-hash-complement-dropped", "src", SKO, "  gshgeom_hash_u8(&h, (uint8_t)(o->complement ? 1 : 0));\n", "", STK),
     ("sk-dump-absent-part", "src", SKO, '    return fprintf(out, "part %s -\\n", name) < 0 ? GSHGEOM_ERR_IO : GSHGEOM_OK;', '    return fprintf(out, "part %s\\n", name) < 0 ? GSHGEOM_ERR_IO : GSHGEOM_OK;', STK),
+    # the conforming pieces: the snap table, the pivots that make a seam two exact twins, the fallback to inflated pieces
+    ("sk-snap-tolerance-tiny", "src", SKM, "#define SNAP_TOL 0x1p-19", "#define SNAP_TOL 0x1p-60", SET + STM),
+    ("sk-snap-never-found", "src", SKM, "            if (ex < SNAP_TOL && ex > -SNAP_TOL && ey < SNAP_TOL && ey > -SNAP_TOL) {", "            if (0 * ey + 0 * ex) {", SET + STM),
+    ("sk-conform-pivot-not-inserted", "src", SKM, "          ring_insert(v, &m, p);", "          (void)p;", SET),
+    ("sk-conform-pivot-short-edges", "src", SKM, "    if (len2 >= 64.0 && along > 0.0 && along < len2 && across * across <= 4.0 * len2) {", "    if (len2 >= 0.0 && along > 0.0 && along < len2 && across * across <= 4.0 * len2) {", SET + STM),
+    ("sk-conform-pivot-off-edge", "src", SKM, "    if (len2 >= 64.0 && along > 0.0 && along < len2 && across * across <= 4.0 * len2) {", "    if (len2 >= 64.0 && along > 0.0 && along < len2 && across * across <= 400.0 * len2) {", SET + STM),
+    ("sk-conform-whole-test-flipped", "src", SKM, "      if (orient_dev(v[0], v[i], v[i + 1]) < 0) {\n        whole = 0;\n        break;\n      }\n    }\n    if (whole) {\n      for (size_t k = 0; k < npiv", "      if (orient_dev(v[0], v[i], v[i + 1]) > 0) {\n        whole = 0;\n        break;\n      }\n    }\n    if (whole) {\n      for (size_t k = 0; k < npiv", STM + STK),
+    ("sk-conform-fits-unbounded", "src", SKM, "  return err + c->rho <= c->budget;", "  return 1;", STM + STK),
+    ("sk-inflated-not-flagged", "src", SKM, "    c->inflated = 1; /* the pieces beside this one", "    c->inflated = 0; /* the pieces beside this one", STM),
+    ("sk-inflated-not-redrawn", "src", SKE, "  if (c.inflated) {", "  if (0) {", STM),
+    ("sk-conform-room-unbounded", "src", SKM, "  return c->budget - c->rho;\n}\n\n/** Bins", "  return c->budget;\n}\n\n/** Bins", STM + STK),
     ("sk-dump-flush", "src", SKO, "  return (fflush(out) == 0 && !ferror(out)) ? GSHGEOM_OK : GSHGEOM_ERR_IO;\n}", "  (void)fflush(out);\n  return GSHGEOM_OK;\n}", STK),
     # the wide exact sum
     ("sk-sum-base", "src", SKS, "#define SUM_BASE 12888L", "#define SUM_BASE 12000L", STK),

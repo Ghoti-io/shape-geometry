@@ -457,7 +457,15 @@ static GSHGEOM_Result snap_grow(GSHGEOM_SK_Ctx * c) {
  * two ways) is what makes the edge theirs together.
  */
 static GSHGEOM_Result snap_round(GSHGEOM_SK_Ctx * c, double x, double y, GSHGEOM_Device_Point * out) {
-  int64_t qx = (int64_t)(x * SNAP_BIN), qy = (int64_t)(y * SNAP_BIN); /* finite and at most 2^31 pixels: 2^49 */
+  GSHGEOM_Device_Point p;
+  GSHGEOM_Result r = gshgeom_round_26_6(x, &p.x); /* first: it refuses what is not finite or is out of range */
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_round_26_6(y, &p.y);
+  }
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  int64_t qx = (int64_t)(x * SNAP_BIN), qy = (int64_t)(y * SNAP_BIN); /* in range, so at most 2^31 pixels: 2^49 */
   if (c->snap_cap) {
     for (int dx = -1; dx <= 1; dx++) {
       for (int dy = -1; dy <= 1; dy++) {
@@ -477,13 +485,7 @@ static GSHGEOM_Result snap_round(GSHGEOM_SK_Ctx * c, double x, double y, GSHGEOM
       }
     }
   }
-  GSHGEOM_Result r = gshgeom_round_26_6(x, &out->x);
-  if (r == GSHGEOM_OK) {
-    r = gshgeom_round_26_6(y, &out->y);
-  }
-  if (r != GSHGEOM_OK) {
-    return r;
-  }
+  *out = p;
   if ((c->snap_n + 1) * 2 > c->snap_cap) {
     r = snap_grow(c);
     if (r != GSHGEOM_OK) {

@@ -249,6 +249,10 @@ def stroke_scripted():
     # found by the fuzzer: a miter-clip join whose clipped corners lie a little past L h from the vertex
     out["s-regress-miter-clip-box.bin"] = base64.b64decode(
         "AAgEGDMQAQMYABoAAQAAAAAAAAUAGP9aGP8BAAAANhgAlxgAIhj/rwIYAEIY/+gY/8UAQAAAAP+PGP+yABgArRj/SA==")
+    # found by the fuzzer: a coordinate that is not a number reached the snap table of the conforming seams, whose key is
+    # the coordinate cast to an integer; the rounding that refuses it now comes first
+    out["s-regress-snap-nan.bin"] = base64.b64decode(
+        "AAAEGAAgQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQECKioqKQEBAQEBAQAABGABAAgAAAABL4AAGAQQDBQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIABBgAIAABGABAAQAAAAAAAAEDABcAABi4uLgAAAIYAFAYAKAYAAABGAAFABgAABgAAAEYAIAAQBgAAQAAAA==")
     return out
 
 
