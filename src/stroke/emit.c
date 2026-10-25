@@ -450,6 +450,17 @@ static GSHGEOM_Result snap_grow(GSHGEOM_SK_Ctx * c) {
   return GSHGEOM_OK;
 }
 
+/*
+ * The bin of a coordinate in range (at most 2^31 sixty-fourths, so a bin of at most 2^49), as the floor of its scaled value.  It
+ * is taken in two int32 steps, since the conversion of a double to an int64_t is an x87 instruction on i686, which the build
+ * keeps out of this library.
+ */
+static int64_t snap_bin(double x) {
+  double t = x * SNAP_BIN;
+  double hi = gmath_floor(t / 1048576.0);
+  return (int64_t)(int32_t)hi * 1048576 + (int32_t)(t - hi * 1048576.0);
+}
+
 /**
  * The lattice point of the pixel point (@p x, @p y): the one an earlier point within SNAP_TOL of it was given, else the point
  * rounded to nearest, which is remembered.  The pieces of an outline that meet along an edge compute its ends by different
@@ -465,7 +476,7 @@ static GSHGEOM_Result snap_round(GSHGEOM_SK_Ctx * c, double x, double y, GSHGEOM
   if (r != GSHGEOM_OK) {
     return r;
   }
-  int64_t qx = (int64_t)(x * SNAP_BIN), qy = (int64_t)(y * SNAP_BIN); /* in range, so at most 2^31 pixels: 2^49 */
+  int64_t qx = snap_bin(x), qy = snap_bin(y);
   if (c->snap_cap) {
     for (int dx = -1; dx <= 1; dx++) {
       for (int dy = -1; dy <= 1; dy++) {
