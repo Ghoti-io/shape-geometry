@@ -14,6 +14,7 @@
 
 #include "../known_answers.h"
 #include "../dump_sink.h"
+#include "../stretch_vectors.h"
 
 #include <ghoti.io/math/math.h>
 
@@ -1325,6 +1326,94 @@ TEST(Chiral, TheLeftOfATangentIsATurnByANegativeAngle) {
   GSHGEOM_Point edge = P(kF[1].x - kF[0].x, kF[1].y - kF[0].y);
   GSHGEOM_Point out = gshgeom_normal_left(edge);
   EXPECT_LT(out.y, 0.0) << "outward from the top edge is up the screen";
+}
+
+/* --- gshgeom_map_stretches_every_direction ------------------------------------------------------------------------ */
+
+namespace {
+
+GSHGEOM_Map linear_map(double m00, double m01, double m10, double m11, double tx = 0.0, double ty = 0.0) {
+  const double m[4] = {m00, m01, m10, m11};
+  const double t[2] = {tx, ty};
+  GSHGEOM_Map map;
+  EXPECT_EQ(gshgeom_map_from_matrix(2, m, t, &map), GSHGEOM_OK);
+  return map;
+}
+
+}  // namespace
+
+TEST(MapStretch, EveryVectorOfTheGeneratorIsDecidedAsItDecidesIt) {
+  unsigned stretching = 0;
+  for (unsigned i = 0; i < stretchvec::kCaseCount; i++) {
+    const stretchvec::Case & c = stretchvec::kCases[i];
+    GSHGEOM_Map map = linear_map(c.m00, c.m01, c.m10, c.m11);
+    EXPECT_EQ(gshgeom_map_stretches_every_direction(&map), c.expected) << c.name;
+    stretching += (unsigned)c.expected;
+  }
+  EXPECT_EQ(stretching, stretchvec::kStretching);
+  EXPECT_GT(stretching, 0u);
+  EXPECT_LT(stretching, stretchvec::kCaseCount);
+}
+
+TEST(MapStretch, AnExactlyUnitScaleDoesNotStretchAndOneUlpMoreDoes) {
+  GSHGEOM_Map unit = linear_map(1, 0, 0, 1);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&unit), 0);
+  const double up = std::nextafter(1.0, 2.0);
+  GSHGEOM_Map above = linear_map(up, 0, 0, up);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&above), 1);
+  GSHGEOM_Map one_axis = linear_map(up, 0, 0, 1);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&one_axis), 0) << "the other axis is exactly 1";
+  GSHGEOM_Map quarter = linear_map(0, -1, 1, 0);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&quarter), 0) << "a rotation at scale 1";
+}
+
+TEST(MapStretch, TheDeterminantIsNotTheTest) {
+  GSHGEOM_Map mixed = linear_map(7, 0, 0, 0.3);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&mixed), 0) << "area up 2.1 times, one direction shrunk";
+  GSHGEOM_Map det_one = linear_map(2, 0, 0, 0.5);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&det_one), 0);
+  GSHGEOM_Map both = linear_map(2, 0, 0, 2);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&both), 1);
+}
+
+TEST(MapStretch, ATranslationAndTheOtherPartsOfAThreeDMapDoNotMatter) {
+  GSHGEOM_Map moved = linear_map(2, 0, 0, 2, 1e9, -1e9);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&moved), 1);
+  GSHGEOM_Map shrunk = linear_map(0.5, 0, 0, 0.5, 1e9, -1e9);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&shrunk), 0);
+  /* A 3D map is judged by the plane's linear part. */
+  const double m3[9] = {2, 0, 0, 0, 2, 0, 0, 0, 0.1};
+  const double t3[3] = {0, 0, 0};
+  GSHGEOM_Map three;
+  ASSERT_EQ(gshgeom_map_from_matrix(3, m3, t3, &three), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&three), 1);
+  const double n3[9] = {0.9, 0, 0, 0, 0.9, 0, 0, 0, 50};
+  GSHGEOM_Map three_small;
+  ASSERT_EQ(gshgeom_map_from_matrix(3, n3, t3, &three_small), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&three_small), 0);
+}
+
+TEST(MapStretch, NothingValidIsRefusedAsAStretch) {
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(nullptr), 0);
+  GSHGEOM_Map zero;
+  std::memset(&zero, 0, sizeof zero);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&zero), 0) << "a zero-filled map is the identity";
+  GSHGEOM_Map bad = linear_map(2, 0, 0, 2);
+  bad.m[0][0] = std::numeric_limits<double>::infinity();
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&bad), 0);
+  bad.m[0][0] = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&bad), 0);
+}
+
+TEST(MapStretch, RotationsAndMirrorsKeepTheAnswer) {
+  const double c = std::cos(0.7), s = std::sin(0.7);
+  /* The product of a rotation and a scale of 2 has a smallest singular value near 2, far from 1, whatever the rounding. */
+  GSHGEOM_Map turned = linear_map(2 * c, -2 * s, 2 * s, 2 * c);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&turned), 1);
+  GSHGEOM_Map mirrored = linear_map(-2 * c, 2 * s, 2 * s, 2 * c);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&mirrored), 1);
+  GSHGEOM_Map small = linear_map(0.9 * c, -0.9 * s, 0.9 * s, 0.9 * c);
+  EXPECT_EQ(gshgeom_map_stretches_every_direction(&small), 0);
 }
 
 int main(int argc, char ** argv) {

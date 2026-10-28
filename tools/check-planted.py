@@ -770,6 +770,27 @@ PLANTS += [
 ]
 
 
+# Story I2: the predicate that tells a magnification from a minification (ids start with ms-).
+PLANTS += [
+    ('ms-unit-a-gone', 'src', M, 'if (sign_of_norm_less_one(p, q) <= 0) {', 'if (0) {', MT),
+    ('ms-norm-constant', 'src', M, '  f[0] = f[1] = 1.0;\n  gshgeom_exact_sum_add(&sum, 1, 1, f);\n', '', MT),
+    ('ms-norm-q', 'src', M, '  f[0] = f[1] = q;\n  gshgeom_exact_sum_add(&sum, 0, 2, f);\n', '  f[0] = f[1] = q;\n', MT),
+    ('ms-norm-p', 'src', M, '  double f[2] = {p, p};\n  gshgeom_exact_sum_add(&sum, 0, 2, f);\n', '  double f[2] = {p, p};\n', MT),
+    ('ms-det-edge', 'src', M, 'return !sum.bad && gshgeom_exact_sum_sign(&sum) > 0;', 'return !sum.bad && gshgeom_exact_sum_sign(&sum) >= 0;', MT),
+    ('ms-det-ps', 'src', M, '  gshgeom_exact_sum_add(&sum, 0, 4, ps);\n', '  (void)ps;\n', MT),
+    ('ms-det-qr', 'src', M, '  gshgeom_exact_sum_add(&sum, 0, 4, qr);\n', '  (void)qr;\n', MT),
+    ('ms-det-cross', 'src', M, '  gshgeom_exact_sum_add(&sum, 1, 4, pqrs);\n  gshgeom_exact_sum_add(&sum, 1, 4, pqrs);\n', '  gshgeom_exact_sum_add(&sum, 1, 4, pqrs);\n', MT),
+    ('ms-det-a-p', 'src', M, '  gshgeom_exact_sum_add(&sum, 1, 2, a1);\n', '  (void)a1;\n', MT),
+    ('ms-det-a-q', 'src', M, '  gshgeom_exact_sum_add(&sum, 1, 2, a2);\n', '  (void)a2;\n', MT),
+    ('ms-det-c-r', 'src', M, '  gshgeom_exact_sum_add(&sum, 1, 2, c1);\n', '  (void)c1;\n', MT),
+    ('ms-det-c-s', 'src', M, '  gshgeom_exact_sum_add(&sum, 1, 2, c2);\n', '  (void)c2;\n', MT),
+    ('ms-det-one', 'src', M, '  gshgeom_exact_sum_add(&sum, 0, 1, one);\n', '  (void)one;\n', MT),
+    ('ms-det-sign-ps', 'src', M, '  gshgeom_exact_sum_add(&sum, 0, 4, ps);\n', '  gshgeom_exact_sum_add(&sum, 1, 4, ps);\n', MT),
+    ('ms-column-q', 'src', M, '  const double q = map->m[1][0];', '  const double q = map->m[1][1];', MT),
+    ('ms-column-r', 'src', M, '  const double r = map->m[0][1];', '  const double r = map->m[0][0];', MT),
+]
+
+
 # Plants caught by the probe's hash alone.
 FLAG_PLANTS = [
     ("fused-multiply-add", "-mfma -ffp-contract=fast"),

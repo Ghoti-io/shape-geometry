@@ -260,6 +260,22 @@ GSHGEOM_API GSHGEOM_Result gshgeom_map_grid_aligned(
     const GSHGEOM_Map * map, int * aligned, GSHGEOM_Grid * grid);
 
 /**
+ * Whether the map stretches every direction of the plane, exactly: the smallest singular value of its 2x2 linear part is
+ * greater than 1.
+ *
+ * With the columns `a = (m00, m10)` and `b = (m01, m11)` and the exact reals `A = a.a`, `B = a.b`, `C = b.b`, that is
+ * `A > 1`, `C > 1` and `(A - 1)(C - 1) > B^2`, decided on the entries' own doubles by exact arithmetic (no rounding in the
+ * products, no square root).  An exactly unit scale does not stretch (the smallest singular value is 1), and neither does a
+ * map that stretches one direction and shrinks another: a determinant, which is an area ratio, would call a 7 by 0.3
+ * map a stretch.  A 3D map is judged by the plane's linear part (`m00, m01, m10, m11`), as a 2D map is.  The translation does
+ * not matter.
+ *
+ * @param map The map; a zero-filled map (dimension 0) is the identity.
+ * @return 1 if every direction is stretched; 0 otherwise, and for NULL, an invalid map or a non-finite entry.
+ */
+GSHGEOM_API int gshgeom_map_stretches_every_direction(const GSHGEOM_Map * map);
+
+/**
  * The map's hash, in the spelling of hash.h: the format version, the
  * dimension and the kind tag as `u32`, the entries row by row (`dim * dim`
  * doubles) and then the translation.  An invalid map hashes as the empty

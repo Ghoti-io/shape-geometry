@@ -145,6 +145,7 @@
 #define gshgeom_map_apply_curve GHOTIIO_SHAPE_GEOMETRY(gshgeom_map_apply_curve)
 #define gshgeom_map_grid_aligned GHOTIIO_SHAPE_GEOMETRY(gshgeom_map_grid_aligned)
 #define gshgeom_map_hash GHOTIIO_SHAPE_GEOMETRY(gshgeom_map_hash)
+#define gshgeom_map_stretches_every_direction GHOTIIO_SHAPE_GEOMETRY(gshgeom_map_stretches_every_direction)
 #define gshgeom_map_dump GHOTIIO_SHAPE_GEOMETRY(gshgeom_map_dump)
 #define gshgeom_round_26_6 GHOTIIO_SHAPE_GEOMETRY(gshgeom_round_26_6)
 #define gshgeom_scale_26_6 GHOTIIO_SHAPE_GEOMETRY(gshgeom_scale_26_6)

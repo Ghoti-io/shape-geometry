@@ -73,6 +73,18 @@ The route predicate (`gshgeom_map_grid_aligned`) reads the tag and the values:
 `x' = s x + tx`, `y' = +-s y + ty`, `s > 0`. It returns the scale and
 translation; whether a hinter takes that size is the caller's.
 
+**Whether a map stretches every direction** (`gshgeom_map_stretches_every_direction`) is the predicate a sampler chooses
+between its magnifying and its minifying filter by. It is true exactly when the smallest singular value of the 2x2 linear
+part is greater than 1. With the columns `a = (m00, m10)` and `b = (m01, m11)` and `A = a.a`, `B = a.b`, `C = b.b`, that is
+`A > 1` and `(A - 1)(C - 1) > B^2` (then `C > 1` follows: the two factors have one sign), decided on the entries' own
+doubles in the exact sum of products that the orientation predicates use, so there is no rounding in the products and no
+square root. `(A - 1)(C - 1) - B^2` is `D^2 - A - C + 1` with `D = m00 m11 - m01 m10`, by Lagrange's identity. An exactly
+unit scale does not stretch, and neither does a map that stretches one direction and shrinks another: a determinant, an area
+ratio, would call a 7 by 0.3 map a stretch. A 3D map is judged by the plane's linear part, and the translation does not
+matter. `tools/gen-stretch-vectors.py` decides 439 cases in exact rationals and writes `tests/stretch_vectors.h`; the
+cross-target probe folds the predicate over 600 maps into a hash and count of their own (`predicate-hash`,
+`predicate-count`), so the first pair never moves.
+
 ## Orientation and the exact predicates
 
 `orient.h` states the rules once (a positive angle turns +x toward +y; positive

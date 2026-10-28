@@ -7,7 +7,8 @@
 #
 # PROBE is tools/corpus-hash.c built for this host (or a planted variant);
 # HASH_FILE is tests/corpus/geometry.hash, whose `hash` and `count` lines are
-# the committed values.  No value may be empty, so a probe that crashed, or a
+# the committed values, and whose `predicate-hash` and `predicate-count` lines are the predicate section's (a hash of its
+# own, so the first pair never moves).  No value may be empty, so a probe that crashed, or a
 # hash file that was emptied, fails rather than comparing nothing with nothing.
 probe="${1:?usage: check-corpus-hash.sh PROBE HASH_FILE}"
 file="${2:?usage: check-corpus-hash.sh PROBE HASH_FILE}"
@@ -17,9 +18,14 @@ got_hash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hash"{print $2}')
 got_count=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.count"{print $2}')
 want_hash=$(awk '$1=="hash"{print $2}' "$file" 2>/dev/null)
 want_count=$(awk '$1=="count"{print $2}' "$file" 2>/dev/null)
-if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$got_count" ]; then
-  printf 'check-corpus-hash: nothing to compare (probe %s/%s, committed %s/%s in %s)\n' \
-    "$got_hash" "$got_count" "$want_hash" "$want_count" "$file" >&2
+got_phash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.predicate-hash"{print $2}')
+got_pcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.predicate-count"{print $2}')
+want_phash=$(awk '$1=="predicate-hash"{print $2}' "$file" 2>/dev/null)
+want_pcount=$(awk '$1=="predicate-count"{print $2}' "$file" 2>/dev/null)
+if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$got_count" ] ||
+   [ -z "$want_phash" ] || [ -z "$want_pcount" ] || [ -z "$got_phash" ] || [ -z "$got_pcount" ]; then
+  printf 'check-corpus-hash: nothing to compare (probe %s/%s and predicate %s/%s, committed %s/%s and %s/%s in %s)\n' \
+    "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$want_hash" "$want_count" "$want_phash" "$want_pcount" "$file" >&2
   exit 1
 fi
 if [ "$got_hash" != "$want_hash" ] || [ "$got_count" != "$want_count" ]; then
@@ -27,4 +33,9 @@ if [ "$got_hash" != "$want_hash" ] || [ "$got_count" != "$want_count" ]; then
     "$got_hash" "$got_count" "$want_hash" "$want_count" >&2
   exit 1
 fi
-printf 'check-corpus-hash: ok, %s over %s results\n' "$got_hash" "$got_count"
+if [ "$got_phash" != "$want_phash" ] || [ "$got_pcount" != "$want_pcount" ]; then
+  printf 'check-corpus-hash: FAIL: predicate %s over %s results, committed %s over %s\n' \
+    "$got_phash" "$got_pcount" "$want_phash" "$want_pcount" >&2
+  exit 1
+fi
+printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount"

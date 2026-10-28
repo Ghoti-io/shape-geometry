@@ -946,5 +946,39 @@ int main(void) {
 
   printf("shape-geometry.hash %016" PRIx64 "\n", gshgeom_hash_value(&total));
   printf("shape-geometry.count %lu\n", count);
+
+  /* The predicate section (masks-images-patterns story I2, IP8): whether a map stretches every direction, over maps
+   * that are exact in binary and over the unit scale and its neighbours by a few ulps.  Its own hash, so the first
+   * pair above is unchanged.  Pure integer arithmetic inside, so every target must print the same. */
+  GSHGEOM_Hash predicate_total;
+  unsigned long predicate_count = 0;
+  gshgeom_hash_init(&predicate_total);
+  for (unsigned i = 0; i < 600; i++) {
+    double m[4];
+    for (int k = 0; k < 4; k++) {
+      unsigned pick = (unsigned)(next() % 5u);
+      uint64_t draw = next();
+      if (pick == 0) {
+        m[k] = 1.0 + (double)((int)(draw % 9u) - 4) * 0x1p-52;
+      } else if (pick == 1) {
+        m[k] = (double)((int)(draw % 17u) - 8) / 4.0;
+      } else if (pick == 2) {
+        m[k] = coord();
+      } else if (pick == 3) {
+        m[k] = coord() / 16.0;
+      } else {
+        m[k] = (double)((int64_t)(draw % 9u) - 4);
+      }
+    }
+    const double t[2] = {0.0, 0.0};
+    GSHGEOM_Map map;
+    if (gshgeom_map_from_matrix(2, m, t, &map) != GSHGEOM_OK) {
+      continue;
+    }
+    gshgeom_hash_u64(&predicate_total, (uint64_t)gshgeom_map_stretches_every_direction(&map));
+    predicate_count++;
+  }
+  printf("shape-geometry.predicate-hash %016" PRIx64 "\n", gshgeom_hash_value(&predicate_total));
+  printf("shape-geometry.predicate-count %lu\n", predicate_count);
   return 0;
 }

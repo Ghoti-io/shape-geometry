@@ -680,6 +680,59 @@ GSHGEOM_Result gshgeom_map_grid_aligned(
 /* Hash and dump                                                           */
 /* ---------------------------------------------------------------------- */
 
+/* The sign of A - 1, with A = p^2 + q^2, exactly. */
+static int sign_of_norm_less_one(double p, double q) {
+  GSHGEOM_ExactSum sum;
+  gshgeom_exact_sum_init(&sum);
+  double f[2] = {p, p};
+  gshgeom_exact_sum_add(&sum, 0, 2, f);
+  f[0] = f[1] = q;
+  gshgeom_exact_sum_add(&sum, 0, 2, f);
+  f[0] = f[1] = 1.0;
+  gshgeom_exact_sum_add(&sum, 1, 1, f);
+  return sum.bad ? 0 : gshgeom_exact_sum_sign(&sum);
+}
+
+int gshgeom_map_stretches_every_direction(const GSHGEOM_Map * map) {
+  if (!map || gshgeom_map_check(map) != GSHGEOM_OK || map->dim == 0) {
+    return 0;
+  }
+  const double p = map->m[0][0];
+  const double q = map->m[1][0];
+  const double r = map->m[0][1];
+  const double s = map->m[1][1];
+  if (!(p - p == 0.0 && q - q == 0.0 && r - r == 0.0 && s - s == 0.0)) {
+    return 0;
+  }
+  /* A > 1.  C > 1 is not tested on its own: with (A - 1)(C - 1) > B^2 >= 0 the two factors have the same sign, so A > 1 gives it. */
+  if (sign_of_norm_less_one(p, q) <= 0) {
+    return 0;
+  }
+  /* (A - 1)(C - 1) - B^2 = D^2 - A - C + 1 with D = p s - q r (Lagrange's identity: A C - B^2 = D^2), a sum of products. */
+  GSHGEOM_ExactSum sum;
+  gshgeom_exact_sum_init(&sum);
+  const double ps[4] = {p, s, p, s};
+  const double qr[4] = {q, r, q, r};
+  const double pqrs[4] = {p, s, q, r};
+  gshgeom_exact_sum_add(&sum, 0, 4, ps);
+  gshgeom_exact_sum_add(&sum, 0, 4, qr);
+  gshgeom_exact_sum_add(&sum, 1, 4, pqrs);
+  gshgeom_exact_sum_add(&sum, 1, 4, pqrs);
+  const double a1[2] = {p, p};
+  const double a2[2] = {q, q};
+  const double c1[2] = {r, r};
+  const double c2[2] = {s, s};
+  const double one[1] = {1.0};
+  gshgeom_exact_sum_add(&sum, 1, 2, a1);
+  gshgeom_exact_sum_add(&sum, 1, 2, a2);
+  gshgeom_exact_sum_add(&sum, 1, 2, c1);
+  gshgeom_exact_sum_add(&sum, 1, 2, c2);
+  gshgeom_exact_sum_add(&sum, 0, 1, one);
+  return !sum.bad && gshgeom_exact_sum_sign(&sum) > 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
 uint64_t gshgeom_map_hash(const GSHGEOM_Map * map) {
   GSHGEOM_Hash h;
   gshgeom_hash_init(&h);
