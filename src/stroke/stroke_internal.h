@@ -177,6 +177,7 @@ typedef struct GSHGEOM_SK_Ctx {
   size_t arc_limit;              ///< When nonzero, the most points one gshgeom_sk_arc call may produce (arc.c).
   size_t work;                   ///< Curve pieces visited so far.
   size_t work_cap;               ///< The most curve pieces one expansion visits (ERR_LIMIT past it).
+  size_t dash_cap;               ///< The most dash steps one expansion visits (ERR_LIMIT past it): the limits' max_dash_steps, else work_cap.
   int depth_cap;                 ///< How deep a curve may be split (::GSHGEOM_STROKE_MAX_DEPTH but in tests).
   GSHGEOM_SK_Dash dash;          ///< Dashes (dash.c).
   double mag_limit;              ///< The largest magnitude, in device units, the arithmetic bound is proved for.

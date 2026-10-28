@@ -38,6 +38,7 @@ extern "C" {
 #include "../../src/stroke/stroke_internal.h"
 }
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -673,6 +674,136 @@ TEST(StrokeLimits, AnOutlineOutsideTheRangeOrPastMaxPointsIsRefused) {
   ASSERT_EQ(gshgeom_map_from_matrix(2, mm, t, &shift), GSHGEOM_OK);
   EXPECT_EQ(gshgeom_stroke_expand(far, &s, &shift, nullptr, nullptr, &o), GSHGEOM_ERR_LIMIT);
   gshgeom_path_destroy(far);
+  gshgeom_path_destroy(p);
+}
+
+namespace {
+
+/** Whether a dashed expansion of @p path under @p cap dash steps (0: the default) succeeds. */
+GSHGEOM_Result dashed(GSHGEOM_Path * path, const GSHGEOM_Stroke & stroke, uint64_t cap) {
+  GSHGEOM_Map m = identity();
+  GSHGEOM_Limits lim;
+  gshgeom_limits_default(&lim);
+  lim.max_dash_steps = cap;
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  GSHGEOM_Result r = gshgeom_stroke_expand(path, &stroke, &m, nullptr, &lim, &o);
+  gshgeom_stroke_outline_destroy(o);
+  return r;
+}
+
+} // namespace
+
+// The caller bounds the dash steps of a stroke (max_dash_steps), 0 keeping the default; one past the bound is refused, the bound passes,
+// and the refusal made from the lengths before the walk is never one the walk would not make: the least cap that passes is never below the
+// steps the lengths promise.
+TEST(StrokeLimits, TheCallerBoundsTheDashSteps) {
+  struct Case {
+    std::vector<double> lengths;
+    std::vector<double> dashes;
+    double offset;
+    uint32_t scope;
+    bool closed;
+  };
+  const Case cases[] = {
+      {{1000.0}, {1.0, 1.0}, 0.0, GSHGEOM_STROKE_DASH_PER_SUBPATH, false},
+      {{1000.0, 640.0, 3.0}, {1.0, 1.0}, 0.5, GSHGEOM_STROKE_DASH_PATH, false},
+      {{1000.0, 640.0}, {0.0, 3.0}, 1.0, GSHGEOM_STROKE_DASH_PER_SUBPATH, false},
+      {{900.0}, {2.0, 1.0, 0.5}, 0.0, GSHGEOM_STROKE_DASH_PER_SUBPATH, true},
+      {{1200.0, 50.0}, {5.0, 1.0}, 2.5, GSHGEOM_STROKE_DASH_PATH, true},
+  };
+  for (const Case & c : cases) {
+    sm::Ops ops;
+    double y = 0.0;
+    for (double length : c.lengths) {
+      ops.push_back({'M', {0, y}});
+      ops.push_back({'L', {length, y}});
+      if (c.closed) {
+        ops.push_back({'L', {length, y + 4}});
+        ops.push_back({'Z', {}});
+      }
+      y += 20.0;
+    }
+    GSHGEOM_Path * p = sm::build(ops);
+    GSHGEOM_Stroke s = plain();
+    s.dash_count = c.dashes.size();
+    s.dashes = c.dashes.data();
+    s.dash_offset = c.offset;
+    s.dash_scope = c.scope;
+    s.width = 1.0;
+    ASSERT_EQ(dashed(p, s, 0), GSHGEOM_OK);
+    double period = 0.0;
+    for (double d : c.dashes) {
+      period += d;
+    }
+    if (c.dashes.size() % 2) {
+      period *= 2.0; // an odd array is repeated
+    }
+    const double n = (double)(c.dashes.size() % 2 ? 2 * c.dashes.size() : c.dashes.size());
+    double promised = 0.0;
+    for (double length : c.lengths) {
+      const double perimeter = c.closed ? 2.0 * (length + 4.0) : length;
+      promised += n * std::fmax(0.0, std::floor(perimeter / period) - 1.0);
+    }
+    uint64_t lo = 1, hi = 1u << 22; // the least cap that passes, by bisection
+    ASSERT_EQ(dashed(p, s, hi), GSHGEOM_OK);
+    while (lo < hi) {
+      const uint64_t mid = lo + (hi - lo) / 2;
+      if (dashed(p, s, mid) == GSHGEOM_OK) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    EXPECT_EQ(dashed(p, s, lo), GSHGEOM_OK) << "the bound passes";
+    EXPECT_EQ(dashed(p, s, lo - 1), GSHGEOM_ERR_LIMIT) << "one past the bound is refused";
+    EXPECT_GE((double)lo, promised) << "the lengths promise no more steps than the walk makes";
+    if (c.lengths.size() == 1 && !c.closed) {
+      // One open subpath: the expansion makes the steps of the pattern's own walk, and the refusal is exactly the walk's.
+      uint64_t a = 1, b = 1u << 22;
+      auto nothing = [](void *, double, double) { return GSHGEOM_OK; };
+      while (a < b) {
+        const uint64_t mid = a + (b - a) / 2;
+        if (gshgeom_stroke_dash_each(c.dashes.data(), c.dashes.size(), c.offset, c.lengths[0], (size_t)mid, nothing, nullptr) ==
+            GSHGEOM_OK) {
+          b = mid;
+        } else {
+          a = mid + 1;
+        }
+      }
+      EXPECT_EQ(lo, a) << "the walk's own count";
+    }
+    gshgeom_path_destroy(p);
+  }
+}
+
+// A stroke the lengths show to be far past the cap is refused before the walk: 2^25 pixels dashed at a thousandth is 3e10 steps, which
+// the walk took seconds to refuse and the check refuses at once.
+TEST(StrokeLimits, AHostileDashPatternIsRefusedBeforeItIsWalked) {
+  GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {0x1p24, 0}}});
+  const double dashes[2] = {0.001, 0.001};
+  GSHGEOM_Stroke s = plain();
+  s.dash_count = 2;
+  s.dashes = dashes;
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_EQ(dashed(p, s, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(dashed(p, s, 100), GSHGEOM_ERR_LIMIT);
+  const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  EXPECT_LT(seconds, 0.5) << "refused from the lengths, not found by walking 16.8 million steps";
+  gshgeom_path_destroy(p);
+}
+
+// The promise is summed over the subpaths: three that each stay under the cap and together pass it are refused at once, where walking them
+// would take the cap's worth of steps (6e9: tens of minutes).
+TEST(StrokeLimits, TheDashStepsOfSeveralSubpathsAreSummedBeforeTheWalk) {
+  GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {0x1p22, 0}}, {'M', {0, 20}}, {'L', {0x1p22, 20}}, {'M', {0, 40}}, {'L', {0x1p22, 40}}});
+  const double dashes[2] = {0.001, 0.001}; // 2^22 / 0.002 periods of two entries: 4.2e9 steps a subpath
+  GSHGEOM_Stroke s = plain();
+  s.dash_count = 2;
+  s.dashes = dashes;
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_EQ(dashed(p, s, 6000000000ull), GSHGEOM_ERR_LIMIT); // each subpath (4.2e9 steps: two entries a period of 0.002) is under it, the three are not
+  const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  EXPECT_LT(seconds, 0.5);
   gshgeom_path_destroy(p);
 }
 

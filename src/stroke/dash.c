@@ -41,6 +41,8 @@
 
 #include "stroke_internal.h"
 
+#include <ghoti.io/math/basic.h>
+
 #include <string.h>
 
 #include <ghoti.io/shape-geometry/along.h>
@@ -702,6 +704,27 @@ GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * ce
   if (!(eps * c->norm <= 0x1p-20)) {
     return GSHGEOM_ERR_LIMIT;
   }
+  /* The steps the walk is certain to make, from the lengths alone: a full period of the pattern is `n` steps and a subpath holds at
+   * least `floor(L / period) - 1` of them after its first piece (the phase leaves at most one period out).  A stroke past the cap by
+   * that count is refused now, as the walk would refuse it, without the walk (which costs a fraction of a microsecond a step whether
+   * or not a dash emits).  A function of the stroke alone. */
+  if (D->period > 0.0) {
+    double certain = 0.0;
+    const size_t subpaths = gshgeom_measured_subpath_count(D->m);
+    for (size_t k = 0; k < subpaths; k++) {
+      GSHGEOM_Measured_Subpath ms;
+      if (gshgeom_measured_subpath(D->m, k, &ms) != GSHGEOM_OK) {
+        return GSHGEOM_ERR_INTERNAL;
+      }
+      const double periods = gmath_floor((ms.end - ms.begin) / D->period) - 1.0;
+      if (periods > 0.0) {
+        certain += periods * (double)n;
+      }
+    }
+    if (certain > (double)c->dash_cap) {
+      return GSHGEOM_ERR_LIMIT;
+    }
+  }
   D->active = 1;
   return GSHGEOM_OK;
 }
@@ -745,7 +768,7 @@ GSHGEOM_Result gshgeom_sk_dash_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader *
     Census k;
     memset(&k, 0, sizeof k);
     size_t steps = 0;
-    GSHGEOM_Result r = gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, L, &steps, c->work_cap, census, &k);
+    GSHGEOM_Result r = gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, L, &steps, c->dash_cap, census, &k);
     if (r != GSHGEOM_OK) {
       return r;
     }
@@ -757,5 +780,5 @@ GSHGEOM_Result gshgeom_sk_dash_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader *
       cb.total = k.n;
     }
   }
-  return gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, L, &D->steps, c->work_cap, on_dash, &cb);
+  return gshgeom_sk_dash_positions(D->dashes, D->n, D->n, D->period, o, L, &D->steps, c->dash_cap, on_dash, &cb);
 }

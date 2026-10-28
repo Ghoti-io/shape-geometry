@@ -524,8 +524,7 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand(const GSHGEOM_Path * centerline
  *   as SG2, for an outline vertex outside the 26.6 range, a part past
  *   `max_points`, a magnitude past the expansion's arithmetic bound
  *   (documentation/design.md, "The expansion's arithmetic"), a piece the
- *   depth cap would force, more dash steps than the work cap (`4 max_points +
- *   4096`) or a cut position's error past SG26's gate; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.
+ *   depth cap would force, more dash steps than `max_dash_steps` (`4 max_points + 4096` where it is 0) or a cut position's error past SG26's gate; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand_with_tolerance(
     const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,

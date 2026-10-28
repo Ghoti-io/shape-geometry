@@ -84,7 +84,14 @@ GSHGEOM_API const char * gshgeom_result_string(GSHGEOM_Result result);
 typedef struct GSHGEOM_Limits {
   size_t max_elements;  ///< Most elements (verbs) one model or device path may hold.
   size_t max_points;    ///< Most points one flattened path may hold, and most rows (quadrature panels) one measured path may hold.
-  uint8_t _reserved[8]; ///< Reserved; zero.
+  /**
+   * Most dash steps one stroke expansion visits (an entry of the pattern is a step), over every subpath of the stroke.  0 is `4
+   * max_points + 4096`.  A stroke that would visit more is ::GSHGEOM_ERR_LIMIT, decided before any dash is walked wherever the path's
+   * length and the pattern show it (documentation/design.md, "Dash steps"), so a caller who lowers it spends no time on the stroke it
+   * refuses.  The walk costs a fraction of a microsecond a step whether or not a dash emits anything.  `uint64_t` whatever the target,
+   * so the structure keeps its size (it took the place of the reserved bytes).
+   */
+  uint64_t max_dash_steps;
 } GSHGEOM_Limits;
 
 /**

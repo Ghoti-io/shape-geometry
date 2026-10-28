@@ -444,6 +444,7 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
     if (limits->max_points) {
       c.limits.max_points = limits->max_points;
     }
+    c.limits.max_dash_steps = limits->max_dash_steps;
   }
   GSHGEOM_SK_Curves cvs;
   memset(&cvs, 0, sizeof cvs);
@@ -464,6 +465,7 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
   c.map = *map;
   c.local = c.st.width_space == GSHGEOM_STROKE_WIDTH_LOCAL;
   c.work_cap = 4 * c.limits.max_points + 4096;
+  c.dash_cap = c.limits.max_dash_steps && c.limits.max_dash_steps < (uint64_t)SIZE_MAX ? (size_t)c.limits.max_dash_steps : c.work_cap;
   c.depth_cap = depth_cap < 1 ? 1 : (depth_cap > GSHGEOM_STROKE_MAX_DEPTH ? GSHGEOM_STROKE_MAX_DEPTH : depth_cap);
   GSHGEOM_Stroke_Outline * o = NULL;
   GSHGEOM_Stroke_Curves * cu = NULL;

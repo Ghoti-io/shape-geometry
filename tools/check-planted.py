@@ -1671,6 +1671,21 @@ STROKE_PLANTS = [
     ('sk-join-class-wrap-dropped', "src", SKE, '    if (s->closed && s->seg_count > 0) {\n      classify(', '    if (0) {\n      classify(', STM),
 ]
 
+# The caller's bound on dash steps (GSHGEOM_Limits.max_dash_steps) and the refusal made from the lengths before the walk.  Not planted, as
+# equivalent: the census pass's own cap (its steps are at most the walk's of the same subpath, which refuses the same stroke), and `>=` for
+# `>` in the check (the walk makes more steps than the promise, never as few, so equality never arises).
+SKX = "src/stroke/expand.c"
+STL = ["testStroke"]
+STROKE_PLANTS += [
+    ("sk-dash-cap-ignored", "src", SKX, "c.limits.max_dash_steps && c.limits.max_dash_steps < (uint64_t)SIZE_MAX ? (size_t)c.limits.max_dash_steps : c.work_cap;", "c.work_cap;", STL),
+    ("sk-dash-cap-not-read", "src", SKX, "    c.limits.max_dash_steps = limits->max_dash_steps;\n", "", STL),
+    ("sk-dash-walk-uncapped", "src", SKD, "&D->steps, c->dash_cap, on_dash, &cb);", "&D->steps, c->work_cap, on_dash, &cb);", STL),
+    ("sk-dash-precheck-removed", "src", SKD, "    if (certain > (double)c->dash_cap) {\n      return GSHGEOM_ERR_LIMIT;\n    }\n", "", STL),
+    ("sk-dash-precheck-over", "src", SKD, "gmath_floor((ms.end - ms.begin) / D->period) - 1.0;", "gmath_floor((ms.end - ms.begin) / D->period) + 1.0;", STL),
+    ("sk-dash-precheck-width", "src", SKD, "certain += periods * (double)n;", "certain += periods * (double)n * 2.0;", STL),
+    ("sk-dash-precheck-last-only", "src", SKD, "      if (periods > 0.0) {\n        certain += periods * (double)n;", "      if (periods > 0.0) {\n        certain = periods * (double)n;", STL),
+]
+
 PLANTS += STROKE_PLANTS
 
 # Strokes story S6: the curve outline for writers (stroke_curves.h, SG32 to SG43).  The ids start with cv-.

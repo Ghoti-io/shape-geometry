@@ -432,6 +432,20 @@ convention is half open at both ends.
 | A degenerate subpath | The first piece of SG21 for a length of zero: a dot at its point when the pattern is on there, with SG11's effective tangent; omitted when `degenerate` says omit. |
 | Alignment | The clip region is of the undashed closed subpaths; the aligned region is the dashed centered region at twice the width. |
 
+**Dash steps** (`GSHGEOM_Limits.max_dash_steps`). An entry of the pattern is a step, whether or not its dash emits anything, and a
+step costs a fraction of a microsecond (about 0.3, and a dot with a butt cap emits nothing), so a short pattern on a long path makes
+tens of millions of steps and seconds of work with no output for any other cap to refuse. The expansion visits at most
+`max_dash_steps` of them over all of a stroke's subpaths; 0 is the derived default `4 max_points + 4096`, so a caller who states
+nothing meets what it always met, and one who wants less states it. A stroke that would visit more is `ERR_LIMIT`. The refusal is
+made **before the walk** wherever the lengths show it: a subpath of length `L` holds at least `n (floor(L / P) - 1)` steps after its
+first piece (`n` entries a period `P`; the phase leaves at most one period out, and every entry of a period that ends inside the
+subpath starts inside it), so a stroke whose subpaths promise more than the cap is refused at once, as the walk would have refused it,
+and the walk is made only for a stroke that may pass. It is a function of the stroke alone, not of what is drawn, so refusal does not
+depend on damage and a cached outline is unaffected. The promise is a lower bound and never refuses a stroke the walk accepts (a
+test finds the least cap that passes by bisection and requires it at or above the promise, and for one subpath equal to the
+pattern walk's own count). A walk of the section that is visible only, which the phase arithmetic would allow, is not done: it would
+make the outline depend on the window.
+
 **The cut position's error** (SG26). The error of a distance is `along.h`'s
 contract (its estimate of a segment's error is at most the tolerance times the
 control polygon's length; the running sum adds `rows 2^-53` of itself; the solve
