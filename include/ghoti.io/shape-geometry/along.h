@@ -43,6 +43,10 @@
  * between two segments (or two subpaths) belongs to the later one; `L` is the
  * end of the last segment with extent.
  *
+ * An arc (arc.h) is measured as the pieces of its decomposition, in order; a point on it is reported with the
+ * element and the piece (::GSHGEOM_Measured_Frame), and ::gshgeom_measured_segment_count counts pieces.  The arc
+ * length of an ellipse is an elliptic integral, so the tolerance below is the one stated, no tighter.
+ *
  * ### Arc length
  *
  * A line's length is the hypotenuse of its difference.  A curve's is the
@@ -139,7 +143,8 @@ typedef struct GSHGEOM_Measured_Frame {
   GSHGEOM_Point tangent; ///< The unit tangent, in the direction of travel.
   GSHGEOM_Point normal;  ///< The unit left normal (2D only).
   size_t element;        ///< The index of the path element the point is on (0 for a path with no extent).
-  double t;              ///< The parameter of the point on that element, in [0, 1].
+  size_t piece;          ///< For a point on an arc, the index of the piece of its decomposition (0 to 3) the parameter @c t is on; 0 otherwise.
+  double t;              ///< The parameter of the point on that element (for an arc, on that piece), in [0, 1].
   int has_tangent;       ///< Nonzero if the point has a tangent.
   int has_normal;        ///< Nonzero in 2D when it has a tangent.
 } GSHGEOM_Measured_Frame;

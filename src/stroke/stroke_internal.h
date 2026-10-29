@@ -62,6 +62,8 @@ typedef struct GSHGEOM_SK_Seg {
   GSHGEOM_SK_Vec p[4];   ///< Control points, build space.
   double w[4];           ///< Weights (1 for a polynomial kind).
   size_t elem;           ///< The index of the path element it was read from.
+  size_t piece;          ///< For an arc, the index of the piece of the element it was read from (0 otherwise).
+  int seam;              ///< Nonzero for a piece of an arc that follows another piece of the same arc: no join is made at its start (AR13).
   GSHGEOM_SK_Vec model_p[4]; ///< The control points before the map (what the vertex class is decided on).
   int vtx_valid;         ///< Nonzero when `vtx_class` was decided from the model points.
   int vtx_class;         ///< The vertex at this segment's start, against the segment before it: 0 a turn, 1 smooth, 2 a reversal.
@@ -132,6 +134,12 @@ typedef struct GSHGEOM_SK_Curves {
 } GSHGEOM_SK_Curves;
 
 /** The state of a dashed expansion (dash.c). */
+/** Where an element of the mapped centerline came from: an element of the model path and, for an arc, the piece of it. */
+typedef struct GSHGEOM_SK_Origin {
+  size_t elem;
+  size_t piece;
+} GSHGEOM_SK_Origin;
+
 typedef struct GSHGEOM_SK_Dash {
   int active;                 ///< Nonzero when the style has a non-solid canonical array.
   double * dashes;            ///< The canonical array (an odd array repeated), owned.
@@ -141,6 +149,8 @@ typedef struct GSHGEOM_SK_Dash {
   int per_path;               ///< ::GSHGEOM_STROKE_DASH_PATH.
   GSHGEOM_Measured * m;///< The centerline measured in build space.
   GSHGEOM_Path * bpath;       ///< The mapped centerline (device width), owned; NULL under local width.
+  GSHGEOM_SK_Origin * origin; ///< For each element of `bpath`, where it came from; NULL when they are the model path's own (no arc).
+  size_t origin_n, origin_cap;
   size_t msub;                ///< The next measured subpath.
   size_t steps;               ///< Pattern entries visited so far.
   size_t pieces;              ///< Dashes handed out so far.

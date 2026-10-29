@@ -55,6 +55,15 @@
  * direction of its first as outgoing: the corner at the start of a closed
  * subpath is a corner like any other.
  *
+ * ### Arcs
+ *
+ * An arc (arc.h) is one segment of its subpath and ends one vertex, at its authoritative end, so the count is
+ * still one per element; the boundaries between the pieces of its decomposition are not vertices.  It has extent
+ * when some piece has; its start direction is the first such piece's and its end direction the last such piece's,
+ * read by the code the stroke expansion reads them with, so a marker and a join never disagree.  A tangent-continuous
+ * join whose tangents are parallel to an axis (every rounded corner) has bit-equal incoming and outgoing directions.
+ * A full-turn arc has extent, and both directions at its vertex.
+ *
  * ### The marker direction
  *
  * `direction` is the direction an `orient="auto"` marker takes (SVG 2, markers):

@@ -81,7 +81,12 @@
  * **ends** are the first and last points of an open subpath with extent.  The
  * **start direction** of a segment is `P_k - P_0` for the least `k` with
  * `P_k != P_0`; its **end direction** `P_n - P_k` for the greatest `k` with
- * `P_k != P_n`.  The left normal is ::gshgeom_normal_left.
+ * `P_k != P_n`.  The left normal is ::gshgeom_normal_left.  An arc (arc.h) is one
+ * segment: its body is the union of its pieces' bodies, its joins and caps are made
+ * at its two ends only, from the start direction of its first piece with extent and
+ * the end direction of its last (the pieces' control polygons, read by the same
+ * code), and no join is made where two of its pieces meet.  Dashes measure along it
+ * as along its pieces, and a dash cut inside it is stroked as the cut conics.
  *
  * **SG6 The body.**  A segment `c` with extent covers the closure of the union,
  * over every `t` with `c'(t) != 0`, of the normal segment

@@ -76,6 +76,7 @@
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
+#include <ghoti.io/shape-geometry/arc.h>
 
 #include <ghoti.io/math/basic.h>
 #include <ghoti.io/shape-geometry/stroke_curves.h>
@@ -244,8 +245,28 @@ GSHGEOM_Result gshgeom_stroke_curves_lower_cubic(const GSHGEOM_Path * in, double
   GSHGEOM_Result r = gshgeom_path_create(alloc, limits, 2, &dst);
   size_t n = gshgeom_path_element_count(in);
   for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {
+    GSHGEOM_Verb verb;
+    r = gshgeom_path_verb(in, i, &verb);
+    if (r == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC) {
+      /* an arc is its pieces, each lowered as a rational quadratic is (AR8, AR15) */
+      GSHGEOM_Arc arc;
+      GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+      int np = 0;
+      r = gshgeom_path_arc(in, i, &arc);
+      if (r == GSHGEOM_OK) {
+        r = gshgeom_arc_pieces(&arc, pieces, &np);
+      }
+      for (int k = 0; k < np && r == GSHGEOM_OK; k++) {
+        const GSHGEOM_Point * q = pieces[k].p;
+        double ws = pieces[k].w[1] / gmath_sqrt(pieces[k].w[0] * pieces[k].w[2]);
+        r = conic(dst, pt(q[0].x, q[0].y), pt(q[1].x, q[1].y), pt(q[2].x, q[2].y), ws, tolerance, 0);
+      }
+      continue;
+    }
     GSHGEOM_Element el;
-    r = gshgeom_path_element(in, i, &el);
+    if (r == GSHGEOM_OK) {
+      r = gshgeom_path_element(in, i, &el);
+    }
     if (r != GSHGEOM_OK) {
       break;
     }

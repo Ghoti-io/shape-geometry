@@ -30,6 +30,7 @@
 #include <ghoti.io/shape-geometry/macros.h>
 
 #include <ghoti.io/math/basic.h>
+#include <ghoti.io/shape-geometry/arc.h>
 #include <ghoti.io/shape-geometry/device.h>
 
 #include "../core/grow.h"
@@ -68,6 +69,35 @@ static int has_extent(const GSHGEOM_SK_Seg * s) {
   return 0;
 }
 
+/** Add the segment @p s (with extent) to subpath @p sb. */
+static GSHGEOM_Result push_seg(GSHGEOM_SK_Ctx * c, Reader * rd, Sub * sb, const GSHGEOM_SK_Seg * s) {
+  void * g = rd->segs;
+  GSHGEOM_Result r = gshgeom_grow(&c->alloc, &g, &rd->seg_cap, rd->seg_n + 1, sizeof *rd->segs);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  rd->segs = g;
+  rd->segs[rd->seg_n++] = *s;
+  sb->seg_count++;
+  return GSHGEOM_OK;
+}
+
+/** The segment of element @p i, piece @p piece, from the curve @p el (model space) and its image @p cv (build space). */
+static GSHGEOM_SK_Seg make_seg(size_t i, size_t piece, const GSHGEOM_Curve * el, const GSHGEOM_Curve * cv) {
+  GSHGEOM_SK_Seg s;
+  memset(&s, 0, sizeof s);
+  s.elem = i;
+  s.piece = piece;
+  s.n = gshgeom_curve_point_count(cv->kind) - 1;
+  s.rational = gshgeom_curve_is_rational(cv->kind);
+  for (int k = 0; k <= s.n; k++) {
+    s.model_p[k] = gshgeom_sk_v(el->p[k].x, el->p[k].y);
+    s.p[k] = gshgeom_sk_v(cv->p[k].x, cv->p[k].y);
+    s.w[k] = s.rational ? cv->w[k] : 1.0;
+  }
+  return s;
+}
+
 /** Read the centerline: subpaths and segments with extent, in build space (SG5, SG10). */
 static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, Reader * rd) {
   size_t n = gshgeom_path_element_count(path);
@@ -75,21 +105,42 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
   GSHGEOM_SK_Vec start = {0.0, 0.0};
   GSHGEOM_Point start_model = {0.0, 0.0, 0.0};
   for (size_t i = 0; i < n; i++) {
-    GSHGEOM_Element el;
-    GSHGEOM_Result r = gshgeom_path_element(path, i, &el);
+    GSHGEOM_Verb verb;
+    GSHGEOM_Result r = gshgeom_path_verb(path, i, &verb);
     if (r != GSHGEOM_OK) {
-      return r == GSHGEOM_ERR_UNSUPPORTED ? r : GSHGEOM_ERR_INTERNAL; /* an arc is refused, never drawn as its chord */
+      return GSHGEOM_ERR_INTERNAL;
     }
-    GSHGEOM_Curve cv = el.curve;
-    if (!c->local) {
-      r = gshgeom_map_apply_curve(&c->map, &el.curve, &cv);
-      if (r != GSHGEOM_OK) {
-        return r;
+    /* an element is one curve, or an arc's pieces: the arc is one segment of its subpath (SG5) whose body is the
+     * union of its pieces' bodies (AR13) */
+    GSHGEOM_Curve model[GSHGEOM_ARC_MAX_PIECES];
+    int nc = 1;
+    if (verb == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Arc arc;
+      r = gshgeom_path_arc(path, i, &arc);
+      if (r == GSHGEOM_OK) {
+        r = gshgeom_arc_pieces(&arc, model, &nc);
       }
+      if (r != GSHGEOM_OK) {
+        return GSHGEOM_ERR_INTERNAL;
+      }
+    } else {
+      GSHGEOM_Element el;
+      r = gshgeom_path_element(path, i, &el);
+      if (r != GSHGEOM_OK) {
+        return GSHGEOM_ERR_INTERNAL;
+      }
+      model[0] = el.curve;
     }
-    if (el.verb == GSHGEOM_VERB_MOVE) {
+    if (verb == GSHGEOM_VERB_MOVE) {
+      GSHGEOM_Curve cv = model[0];
+      if (!c->local) {
+        r = gshgeom_map_apply_curve(&c->map, &model[0], &cv);
+        if (r != GSHGEOM_OK) {
+          return r;
+        }
+      }
       start = gshgeom_sk_v(cv.p[0].x, cv.p[0].y);
-      start_model = el.curve.p[0];
+      start_model = model[0].p[0];
       r = push_sub(c, rd, start, start_model, i + 1);
       if (r != GSHGEOM_OK) {
         return r;
@@ -108,27 +159,26 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
     Sub * sb = &rd->subs[rd->sub_n - 1];
     sb->draws = 1;
     sb->end_el = i + 1;
-    GSHGEOM_SK_Seg s;
-    memset(&s, 0, sizeof s);
-    s.elem = i;
-    s.n = gshgeom_curve_point_count(cv.kind) - 1;
-    s.rational = gshgeom_curve_is_rational(cv.kind);
-    for (int k = 0; k <= s.n; k++) {
-      s.model_p[k] = gshgeom_sk_v(el.curve.p[k].x, el.curve.p[k].y);
-      s.p[k] = gshgeom_sk_v(cv.p[k].x, cv.p[k].y);
-      s.w[k] = s.rational ? cv.w[k] : 1.0;
-    }
-    if (has_extent(&s)) {
-      void * g = rd->segs;
-      r = gshgeom_grow(&c->alloc, &g, &rd->seg_cap, rd->seg_n + 1, sizeof *rd->segs);
-      if (r != GSHGEOM_OK) {
-        return r;
+    int kept = 0; /* a piece of this arc has been kept: the next one continues it, and no join is made between them */
+    for (int k = 0; k < nc; k++) {
+      GSHGEOM_Curve cv = model[k];
+      if (!c->local) {
+        r = gshgeom_map_apply_curve(&c->map, &model[k], &cv);
+        if (r != GSHGEOM_OK) {
+          return r;
+        }
       }
-      rd->segs = g;
-      rd->segs[rd->seg_n++] = s;
-      sb->seg_count++;
+      GSHGEOM_SK_Seg s = make_seg(i, (size_t)k, &model[k], &cv);
+      if (has_extent(&s)) {
+        s.seam = kept;
+        kept = 1;
+        r = push_seg(c, rd, sb, &s);
+        if (r != GSHGEOM_OK) {
+          return r;
+        }
+      }
     }
-    if (el.verb == GSHGEOM_VERB_CLOSE) {
+    if (verb == GSHGEOM_VERB_CLOSE) {
       sb->closed = 1;
       open = 0;
     }
@@ -216,6 +266,27 @@ static int magnitudes_ok(const GSHGEOM_SK_Ctx * c, const Reader * rd, double h_d
   return 1;
 }
 
+/** Append the pieces of arc element @p e of @p path to @p mp as rational quadratics, mapped by @p map when it is not NULL. */
+static GSHGEOM_Result clip_arc(GSHGEOM_Path * mp, const GSHGEOM_Path * path, size_t e, const GSHGEOM_Map * map) {
+  GSHGEOM_Arc arc;
+  GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+  int np = 0;
+  GSHGEOM_Result r = gshgeom_path_arc(path, e, &arc);
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_arc_pieces(&arc, pieces, &np);
+  }
+  for (int k = 0; k < np && r == GSHGEOM_OK; k++) {
+    GSHGEOM_Curve cv = pieces[k];
+    if (map) {
+      r = gshgeom_map_apply_curve(map, &pieces[k], &cv);
+    }
+    if (r == GSHGEOM_OK) {
+      r = gshgeom_path_rational_quadratic_to(mp, cv.p[1], cv.p[2], cv.w);
+    }
+  }
+  return r;
+}
+
 /** The clip's region F (SG12): the closed subpaths with extent, flattened after the map at the tolerance. */
 static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, const Reader * rd,
     GSHGEOM_Flat_Path ** out) {
@@ -230,6 +301,10 @@ static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, 
     for (size_t e = s->first_el; e < s->end_el && r == GSHGEOM_OK; e++) {
       GSHGEOM_Element el;
       r = gshgeom_path_element(path, e, &el);
+      if (r == GSHGEOM_ERR_UNSUPPORTED) {
+        r = clip_arc(mp, path, e, NULL);
+        continue;
+      }
       if (r != GSHGEOM_OK) {
         break;
       }
@@ -289,6 +364,10 @@ static GSHGEOM_Result build_clip_curves(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path *
     for (size_t e = s->first_el; e < s->end_el && r == GSHGEOM_OK; e++) {
       GSHGEOM_Element el;
       r = gshgeom_path_element(path, e, &el);
+      if (r == GSHGEOM_ERR_UNSUPPORTED) {
+        r = clip_arc(mp, path, e, &c->map);
+        continue;
+      }
       if (r != GSHGEOM_OK) {
         break;
       }
@@ -379,7 +458,9 @@ GSHGEOM_Result gshgeom_sk_solid_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader 
   for (size_t k = 0; k < n && r == GSHGEOM_OK; k++) {
     r = gshgeom_sk_body(c, &seg[k]);
     if (r == GSHGEOM_OK && k + 1 < n) {
-      r = gshgeom_sk_join(c, &seg[k], &seg[k + 1]);
+      if (!seg[k + 1].seam) { /* a boundary between two pieces of one arc is not a vertex (AR13) */
+        r = gshgeom_sk_join(c, &seg[k], &seg[k + 1]);
+      }
     } else if (r == GSHGEOM_OK && s->closed) {
       r = gshgeom_sk_join(c, &seg[k], &seg[0]);
     }

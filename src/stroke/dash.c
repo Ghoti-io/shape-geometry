@@ -38,7 +38,9 @@
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
+#include <ghoti.io/shape-geometry/arc.h>
 
+#include "../core/grow.h"
 #include "stroke_internal.h"
 
 #include <ghoti.io/math/basic.h>
@@ -445,16 +447,27 @@ static GSHGEOM_Result locate(const Cb * cb, double s, size_t * k, double * t) {
   if (gshgeom_measured_at(cb->c->dash.m, s, &fr) != GSHGEOM_OK) {
     return GSHGEOM_ERR_INTERNAL;
   }
+  size_t el = fr.element, pc = fr.piece;
+  if (cb->c->dash.origin) {
+    /* the mapped centerline lowered the arcs: the frame's element is an element of that path */
+    const GSHGEOM_SK_Dash * D = &cb->c->dash;
+    if (fr.element >= D->origin_n) {
+      return GSHGEOM_ERR_INTERNAL;
+    }
+    el = D->origin[fr.element].elem;
+    pc = D->origin[fr.element].piece;
+  }
   size_t lo = f, hi = last + 1;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
-    if (cb->rd->segs[mid].elem < fr.element) {
+    const Seg * sm = &cb->rd->segs[mid];
+    if (sm->elem < el || (sm->elem == el && sm->piece < pc)) {
       lo = mid + 1;
     } else {
       hi = mid;
     }
   }
-  if (lo > last || cb->rd->segs[lo].elem != fr.element) {
+  if (lo > last || cb->rd->segs[lo].elem != el) {
     return GSHGEOM_ERR_INTERNAL;
   }
   *k = lo;
@@ -537,7 +550,7 @@ static GSHGEOM_Result emit_run(const Cb * cb, size_t k0, double t0, size_t k1, d
   for (size_t jj = 0; jj < m && r == GSHGEOM_OK; jj++) {
     size_t k = f + (r0 + j0 + jj) % N;
     r = gshgeom_sk_body(c, jj == 0 ? &first : (jj == m - 1 ? &lastp : &segs[k]));
-    if (r == GSHGEOM_OK && jj + 1 < m) {
+    if (r == GSHGEOM_OK && jj + 1 < m && !segs[f + (r0 + j0 + jj + 1) % N].seam) {
       r = gshgeom_sk_join(c, &segs[k], &segs[f + (r0 + j0 + jj + 1) % N]);
     }
   }
@@ -611,6 +624,21 @@ static GSHGEOM_Result census(void * ctx, double a, double b, int flags) {
   return GSHGEOM_OK;
 }
 
+/** Record that the next element of the mapped centerline came from element @p elem, piece @p piece. */
+static GSHGEOM_Result push_origin(GSHGEOM_SK_Ctx * c, size_t elem, size_t piece) {
+  GSHGEOM_SK_Dash * D = &c->dash;
+  void * g = D->origin;
+  GSHGEOM_Result r = gshgeom_grow(&c->alloc, &g, &D->origin_cap, D->origin_n + 1, sizeof *D->origin);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  D->origin = g;
+  D->origin[D->origin_n].elem = elem;
+  D->origin[D->origin_n].piece = piece;
+  D->origin_n++;
+  return GSHGEOM_OK;
+}
+
 GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * centerline,
     const GSHGEOM_SK_Reader * rd, const GSHGEOM_Stroke * stroke) {
   GSHGEOM_SK_Dash * D = &c->dash;
@@ -634,7 +662,46 @@ GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * ce
     /* the mapped centerline, element for element: its arc length is the one the pattern is measured in */
     r = gshgeom_path_create(&c->alloc, &c->limits, 2, &D->bpath);
     size_t ne = gshgeom_path_element_count(centerline);
+    int arcs = 0;
     for (size_t i = 0; i < ne && r == GSHGEOM_OK; i++) {
+      GSHGEOM_Verb verb;
+      r = gshgeom_path_verb(centerline, i, &verb);
+      arcs |= verb == GSHGEOM_VERB_ARC;
+    }
+    for (size_t i = 0; i < ne && r == GSHGEOM_OK; i++) {
+      GSHGEOM_Verb verb;
+      r = gshgeom_path_verb(centerline, i, &verb);
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      if (verb == GSHGEOM_VERB_ARC) {
+        /* an arc is its pieces, each mapped as a conic is (AR13), so that the measured segments are the ones the
+         * body is built from */
+        GSHGEOM_Arc arc;
+        GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+        int np = 0;
+        r = gshgeom_path_arc(centerline, i, &arc);
+        if (r == GSHGEOM_OK) {
+          r = gshgeom_arc_pieces(&arc, pieces, &np);
+        }
+        for (int k = 0; k < np && r == GSHGEOM_OK; k++) {
+          GSHGEOM_Curve cv;
+          r = gshgeom_map_apply_curve(&c->map, &pieces[k], &cv);
+          if (r == GSHGEOM_OK) {
+            r = gshgeom_path_rational_quadratic_to(D->bpath, cv.p[1], cv.p[2], cv.w);
+          }
+          if (r == GSHGEOM_OK) {
+            r = push_origin(c, i, (size_t)k);
+          }
+        }
+        continue;
+      }
+      if (arcs) {
+        r = push_origin(c, i, 0);
+        if (r != GSHGEOM_OK) {
+          break;
+        }
+      }
       GSHGEOM_Element el;
       r = gshgeom_path_element(centerline, i, &el);
       if (r != GSHGEOM_OK) {
@@ -733,6 +800,9 @@ void gshgeom_sk_dash_end(GSHGEOM_SK_Ctx * c) {
   GSHGEOM_SK_Dash * D = &c->dash;
   gshgeom_measured_destroy(D->m);
   gshgeom_path_destroy(D->bpath);
+  gcu_allocator_free(&c->alloc, D->origin);
+  D->origin = NULL;
+  D->origin_n = D->origin_cap = 0;
   gcu_allocator_free(&c->alloc, D->dashes);
   D->m = NULL;
   D->bpath = NULL;

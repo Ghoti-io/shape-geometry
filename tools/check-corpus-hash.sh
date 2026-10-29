@@ -31,10 +31,15 @@ got_ahash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.arc-hash"{print $2}'
 got_acount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.arc-count"{print $2}')
 want_ahash=$(awk '$1=="arc-hash"{print $2}' "$file" 2>/dev/null)
 want_acount=$(awk '$1=="arc-count"{print $2}' "$file" 2>/dev/null)
+got_avhash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.arc-vertex-hash"{print $2}')
+got_avcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.arc-vertex-count"{print $2}')
+want_avhash=$(awk '$1=="arc-vertex-hash"{print $2}' "$file" 2>/dev/null)
+want_avcount=$(awk '$1=="arc-vertex-count"{print $2}' "$file" 2>/dev/null)
 if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$got_count" ] ||
    [ -z "$want_phash" ] || [ -z "$want_pcount" ] || [ -z "$got_phash" ] || [ -z "$got_pcount" ] ||
    [ -z "$want_vhash" ] || [ -z "$want_vcount" ] || [ -z "$got_vhash" ] || [ -z "$got_vcount" ] ||
-   [ -z "$want_ahash" ] || [ -z "$want_acount" ] || [ -z "$got_ahash" ] || [ -z "$got_acount" ]; then
+   [ -z "$want_ahash" ] || [ -z "$want_acount" ] || [ -z "$got_ahash" ] || [ -z "$got_acount" ] ||
+   [ -z "$want_avhash" ] || [ -z "$want_avcount" ] || [ -z "$got_avhash" ] || [ -z "$got_avcount" ]; then
   printf 'check-corpus-hash: nothing to compare (probe %s/%s, predicate %s/%s and vertex %s/%s, committed %s/%s, %s/%s and %s/%s in %s)\n' \
     "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$want_hash" "$want_count" "$want_phash" "$want_pcount" \
     "$want_vhash" "$want_vcount" "$file" >&2
@@ -60,4 +65,9 @@ if [ "$got_ahash" != "$want_ahash" ] || [ "$got_acount" != "$want_acount" ]; the
     "$got_ahash" "$got_acount" "$want_ahash" "$want_acount" >&2
   exit 1
 fi
-printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount"
+if [ "$got_avhash" != "$want_avhash" ] || [ "$got_avcount" != "$want_avcount" ]; then
+  printf 'check-corpus-hash: FAIL: arc-vertex %s over %s results, committed %s over %s\n' \
+    "$got_avhash" "$got_avcount" "$want_avhash" "$want_avcount" >&2
+  exit 1
+fi
+printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount"

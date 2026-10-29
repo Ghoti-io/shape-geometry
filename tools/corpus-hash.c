@@ -186,6 +186,28 @@ static void feed_arc_u64(uint64_t v, GSHGEOM_Hash * h, unsigned long * n) {
   gshgeom_hash_u64(h, v);
 }
 
+/* The end point of the last element of @p path (an arc's authoritative end, a curve's last control point). */
+static GSHGEOM_Point path_end(const GSHGEOM_Path * path) {
+  const size_t n = gshgeom_path_element_count(path);
+  GSHGEOM_Verb verb;
+  GSHGEOM_Point p = {0.0, 0.0, 0.0};
+  if (n == 0 || gshgeom_path_verb(path, n - 1, &verb) != GSHGEOM_OK) {
+    return p;
+  }
+  if (verb == GSHGEOM_VERB_ARC) {
+    GSHGEOM_Arc a;
+    if (gshgeom_path_arc(path, n - 1, &a) == GSHGEOM_OK) {
+      p = a.end;
+    }
+    return p;
+  }
+  GSHGEOM_Element el;
+  if (gshgeom_path_element(path, n - 1, &el) == GSHGEOM_OK) {
+    p = el.curve.p[gshgeom_curve_point_count(el.curve.kind) - 1];
+  }
+  return p;
+}
+
 int main(void) {
   gshgeom_hash_init(&total);
 
@@ -1158,6 +1180,79 @@ int main(void) {
     }
     printf("shape-geometry.arc-hash %016" PRIx64 "\n", gshgeom_hash_value(&arc_total));
     printf("shape-geometry.arc-count %lu\n", arc_count);
+  }
+
+  /* The arc-vertex section (vertices.h, AR14): the vertices of random paths that hold arcs, and the directions at them,
+   * bit for bit.  Lines, arcs of every constructor (a circle or ellipse that begins at the current point, SVG's endpoint
+   * form, arcTo, a bulge), closes and lines of no extent; coordinates on a coarse grid (axis-aligned tangents,
+   * reversals, smooth joins) and fine ones.  Its own pair after the others, so they never move. */
+  {
+    VertexSink vs;
+    gshgeom_hash_init(&vs.total);
+    vs.count = 0;
+    static const double quarter_cos[4] = {1.0, 0.0, -1.0, 0.0};
+    static const double quarter_sin[4] = {0.0, 1.0, 0.0, -1.0};
+    for (unsigned round = 0; round < 500; round++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("cannot make a path for the arc-vertex section");
+      }
+      const unsigned fine = round % 2u;
+      GSHGEOM_Point cur = vertex_point(fine);
+      if (gshgeom_path_move_to(path, cur) != GSHGEOM_OK) {
+        return fail("cannot begin a path for the arc-vertex section");
+      }
+      const unsigned len = 2u + (unsigned)(next() % 8u);
+      for (unsigned i = 0; i < len; i++) {
+        const unsigned pick = (unsigned)(next() % 9u);
+        GSHGEOM_Point e = vertex_point(fine);
+        GSHGEOM_Result r = GSHGEOM_OK;
+        if (pick == 0) {
+          r = gshgeom_path_line_to(path, e);
+        } else if (pick <= 2) {
+          /* a circle or an ellipse that begins at the current point, at a quarter turn of its parameter */
+          const unsigned k = (unsigned)(next() % 4u);
+          const double rx = 1.0 + (double)(next() % 6u), ry = (next() % 2u == 0u) ? rx : 1.0 + (double)(next() % 6u);
+          const double sweep = (double)(1 + (int)(next() % 8u)) * 45.0 * ((next() % 2u == 0u) ? 1.0 : -1.0);
+          GSHGEOM_Arc_Form f;
+          f.center.x = cur.x - (rx * quarter_cos[k]);
+          f.center.y = cur.y - (ry * quarter_sin[k]);
+          f.center.z = 0.0;
+          f.u.x = rx;
+          f.u.y = 0.0;
+          f.u.z = 0.0;
+          f.v.x = 0.0;
+          f.v.y = ry;
+          f.v.z = 0.0;
+          f.unit = GSHGEOM_ANGLE_DEGREES;
+          f.t0 = (double)k * 90.0;
+          f.sweep = sweep;
+          f.flags = rx == ry ? GSHGEOM_ARC_CIRCULAR : 0u;
+          r = gshgeom_path_arc_conjugate_to(path, &f, NULL);
+        } else if (pick <= 4) {
+          r = gshgeom_path_arc_endpoint_to(path, e, 1.0 + (double)(next() % 8u), 1.0 + (double)(next() % 8u),
+              (double)(next() % 4u) * 30.0, GSHGEOM_ANGLE_DEGREES, (int)(next() % 2u), (int)(next() % 2u), NULL);
+        } else if (pick == 5) {
+          r = gshgeom_path_arc_tangent_to(path, e, vertex_point(fine), (double)(1u + next() % 4u));
+        } else if (pick == 6) {
+          r = gshgeom_path_arc_bulge_to(path, e, (double)((int)(next() % 17u) - 8) / 4.0);
+        } else if (pick == 7) {
+          r = gshgeom_path_close(path);
+        } else {
+          r = gshgeom_path_line_to(path, cur); /* a line of no extent */
+        }
+        if (r != GSHGEOM_OK && r != GSHGEOM_ERR_LIMIT && r != GSHGEOM_ERR_INVALID) {
+          return fail("cannot build a path for the arc-vertex section");
+        }
+        cur = path_end(path);
+      }
+      if (gshgeom_path_vertices(path, vertex_feed, &vs) != GSHGEOM_OK) {
+        return fail("the arc-vertex walk failed");
+      }
+      gshgeom_path_destroy(path);
+    }
+    printf("shape-geometry.arc-vertex-hash %016" PRIx64 "\n", gshgeom_hash_value(&vs.total));
+    printf("shape-geometry.arc-vertex-count %lu\n", vs.count);
   }
   return 0;
 }

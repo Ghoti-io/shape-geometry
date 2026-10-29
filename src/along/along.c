@@ -41,6 +41,7 @@
 
 #include <ghoti.io/math/elementary.h>
 #include <ghoti.io/shape-geometry/along.h>
+#include <ghoti.io/shape-geometry/arc.h>
 #include <ghoti.io/shape-geometry/hash.h>
 
 #include "../core/grow.h"
@@ -338,6 +339,7 @@ GSHGEOM_Result gshgeom_measured_curve_length(
 typedef struct {
   GSHGEOM_Curve curve;
   size_t element;
+  size_t piece; /* for an arc, the index of the piece within its element */
 } Seg;
 
 struct GSHGEOM_Measured {
@@ -378,7 +380,7 @@ static GSHGEOM_Result open_subpath(GSHGEOM_Measured * m) {
   return GSHGEOM_OK;
 }
 
-static GSHGEOM_Result add_segment(GSHGEOM_Measured * m, size_t element,
+static GSHGEOM_Result add_segment(GSHGEOM_Measured * m, size_t element, size_t piece,
     const GSHGEOM_Curve * curve, double tolerance) {
   double poly = polygon_length(curve);
   if (poly == 0.0) {
@@ -393,6 +395,7 @@ static GSHGEOM_Result add_segment(GSHGEOM_Measured * m, size_t element,
   m->seg = grown;
   m->seg[m->seg_n].curve = *curve;
   m->seg[m->seg_n].element = element;
+  m->seg[m->seg_n].piece = piece;
   m->tab.cur = m->seg_n;
   m->seg_n++;
   return measure(curve, poly, tolerance, &m->tab);
@@ -425,6 +428,39 @@ GSHGEOM_Result gshgeom_measured_create(const GSHGEOM_Allocator * alloc,
   int need_sub = 1;
   size_t count = gshgeom_path_element_count(path);
   for (size_t i = 0; i < count && r == GSHGEOM_OK; i++) {
+    GSHGEOM_Verb verb;
+    r = gshgeom_path_verb(path, i, &verb);
+    if (r != GSHGEOM_OK) {
+      break;
+    }
+    if (verb == GSHGEOM_VERB_ARC) {
+      /* AR12: an arc is measured as its pieces, in order; a piece boundary is not a vertex here either */
+      GSHGEOM_Arc arc;
+      GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+      int np = 0;
+      r = gshgeom_path_arc(path, i, &arc);
+      if (r == GSHGEOM_OK) {
+        r = gshgeom_arc_pieces(&arc, pieces, &np);
+      }
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      if (need_sub) {
+        r = open_subpath(m);
+        need_sub = 0;
+        if (r != GSHGEOM_OK) {
+          break;
+        }
+      }
+      for (int k = 0; k < np && r == GSHGEOM_OK; k++) {
+        r = add_segment(m, i, (size_t)k, &pieces[k], tol);
+      }
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      m->sub[m->sub_n - 1].end = m->tab.sum;
+      continue;
+    }
     GSHGEOM_Element el;
     r = gshgeom_path_element(path, i, &el);
     if (r != GSHGEOM_OK) {
@@ -445,7 +481,7 @@ GSHGEOM_Result gshgeom_measured_create(const GSHGEOM_Allocator * alloc,
         break;
       }
     }
-    r = add_segment(m, i, &el.curve, tol);
+    r = add_segment(m, i, 0, &el.curve, tol);
     if (r != GSHGEOM_OK) {
       break;
     }
@@ -639,6 +675,7 @@ static GSHGEOM_Result query(const GSHGEOM_Measured * m, double s, int clamp,
     }
   }
   f.element = seg->element;
+  f.piece = seg->piece;
   f.t = u;
   *out = f;
   return GSHGEOM_OK;

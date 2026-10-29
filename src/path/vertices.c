@@ -26,6 +26,7 @@
  * only decides which segment a vertex looks to on each side, and adds the bisector.
  */
 
+#include <ghoti.io/shape-geometry/arc.h>
 #include <ghoti.io/shape-geometry/vertices.h>
 
 #include "../stroke/stroke_internal.h"
@@ -39,25 +40,72 @@ typedef struct Seg {
   GSHGEOM_SK_Vec end;
 } Seg;
 
-/** The segment of element @p el: a line, a curve or a close has one; a move has none. */
-static void read_seg(const GSHGEOM_Element * el, Seg * s) {
-  memset(s, 0, sizeof *s);
-  if (el->verb == GSHGEOM_VERB_MOVE) {
-    return;
-  }
+/** One element as the walk reads it: its verb, where it ends, and its segment. */
+typedef struct Elem {
+  GSHGEOM_Verb verb;
+  GSHGEOM_Point point;
+  Seg seg;
+} Elem;
+
+/** The segment of a curve: a line, a curve or a close has one. */
+static void curve_seg(const GSHGEOM_Curve * curve, Seg * s) {
   GSHGEOM_SK_Seg k;
   memset(&k, 0, sizeof k);
-  k.n = gshgeom_curve_point_count(el->curve.kind) - 1;
+  k.n = gshgeom_curve_point_count(curve->kind) - 1;
   for (int i = 0; i <= k.n; i++) {
-    k.p[i] = gshgeom_sk_v(el->curve.p[i].x, el->curve.p[i].y);
+    k.p[i] = gshgeom_sk_v(curve->p[i].x, curve->p[i].y);
   }
   s->extent = gshgeom_sk_start_dir(&k, &s->start) >= 0 && gshgeom_sk_end_dir(&k, &s->end) >= 0;
 }
 
-/** Element @p i, ::GSHGEOM_ERR_UNSUPPORTED for an arc (not yet read here: never the chord), or ::GSHGEOM_ERR_INTERNAL. */
-static GSHGEOM_Result element(const GSHGEOM_Path * path, size_t i, GSHGEOM_Element * el) {
-  GSHGEOM_Result r = gshgeom_path_element(path, i, el);
-  return r == GSHGEOM_OK ? GSHGEOM_OK : r == GSHGEOM_ERR_UNSUPPORTED ? r : GSHGEOM_ERR_INTERNAL;
+/**
+ * Element @p i.  An arc is one segment (AR9): it has extent when a piece of its decomposition has, its start direction is
+ * the first such piece's, read by the code the stroke reads it with (gshgeom_sk_start_dir over the piece's control
+ * polygon), and its end direction the last such piece's; the point is its authoritative end.  A boundary between two
+ * pieces is not a vertex.
+ */
+static GSHGEOM_Result element(const GSHGEOM_Path * path, size_t i, Elem * e) {
+  memset(e, 0, sizeof *e);
+  GSHGEOM_Result r = gshgeom_path_verb(path, i, &e->verb);
+  if (r != GSHGEOM_OK) {
+    return GSHGEOM_ERR_INTERNAL;
+  }
+  if (e->verb == GSHGEOM_VERB_ARC) {
+    GSHGEOM_Arc arc;
+    GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+    int n = 0;
+    r = gshgeom_path_arc(path, i, &arc);
+    if (r == GSHGEOM_OK) {
+      r = gshgeom_arc_pieces(&arc, pieces, &n);
+    }
+    if (r != GSHGEOM_OK) {
+      return GSHGEOM_ERR_INTERNAL;
+    }
+    e->point = arc.end;
+    for (int k = 0; k < n; k++) {
+      Seg s;
+      curve_seg(&pieces[k], &s);
+      if (!s.extent) {
+        continue;
+      }
+      if (!e->seg.extent) {
+        e->seg.start = s.start;
+      }
+      e->seg.end = s.end;
+      e->seg.extent = 1;
+    }
+    return GSHGEOM_OK;
+  }
+  GSHGEOM_Element el;
+  r = gshgeom_path_element(path, i, &el);
+  if (r != GSHGEOM_OK) {
+    return GSHGEOM_ERR_INTERNAL;
+  }
+  e->point = el.curve.p[gshgeom_curve_point_count(el.curve.kind) - 1];
+  if (e->verb != GSHGEOM_VERB_MOVE) {
+    curve_seg(&el.curve, &e->seg);
+  }
+  return GSHGEOM_OK;
 }
 
 static GSHGEOM_Point to_point(GSHGEOM_SK_Vec v) {
@@ -91,7 +139,7 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
   size_t sub = 0;
   while (sa < n) {
     /* The subpath: from sa to the element before the next move, or through the close that ends it. */
-    GSHGEOM_Element el;
+    Elem el;
     GSHGEOM_Result r = element(path, sa, &el);
     if (r != GSHGEOM_OK) {
       return r;
@@ -116,22 +164,20 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
     memset(&last, 0, sizeof last);
     if (closed) {
       for (size_t i = sa; i < sb && !have_first; i++) {
-        Seg s;
         if ((r = element(path, i, &el)) != GSHGEOM_OK) {
           return r;
         }
-        read_seg(&el, &s);
+        const Seg s = el.seg;
         if (s.extent) {
           first = s;
           have_first = 1;
         }
       }
       for (size_t i = sb; i > sa && !have_last; i--) {
-        Seg s;
         if ((r = element(path, i - 1, &el)) != GSHGEOM_OK) {
           return r;
         }
-        read_seg(&el, &s);
+        const Seg s = el.seg;
         if (s.extent) {
           last = s;
           have_last = 1;
@@ -153,10 +199,9 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
       memset(&v, 0, sizeof v);
       v.element = i;
       v.subpath = sub;
-      v.point = el.curve.p[gshgeom_curve_point_count(el.curve.kind) - 1];
+      v.point = el.point;
       v.point.z = 0.0;
-      Seg here;
-      read_seg(&el, &here);
+      const Seg here = el.seg;
       if (here.extent) {
         cur_in = here;
         have_in = 1;
@@ -166,11 +211,10 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
       if (nj <= i) {
         nj = sb;
         for (size_t j = i + 1; j < sb; j++) {
-          Seg s;
           if ((r = element(path, j, &el)) != GSHGEOM_OK) {
             return r;
           }
-          read_seg(&el, &s);
+          const Seg s = el.seg;
           if (s.extent) {
             next = s;
             nj = j;

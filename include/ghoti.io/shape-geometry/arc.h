@@ -177,6 +177,42 @@ GSHGEOM_API GSHGEOM_Result gshgeom_path_lower_arcs(const GSHGEOM_Path * path,
     const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Path ** out);
 
 /**
+ * @brief Map an arc: an affine map acts linearly on `P(t)`, so the ends and the centre move as points, the
+ * half-diameters as vectors, and the parameters stay.
+ *
+ * `start`, `end` and `center` go through ::gshgeom_map_apply_point and `u`, `v` through
+ * ::gshgeom_map_apply_vector, and nothing else is multiplied.  `unit`, `t0` and `sweep` are kept; a mirror
+ * flips the sign of `cross(u, v)` and with it the arc's direction.  The result is checked as
+ * ::gshgeom_path_append_arc checks a record (the ends are still the map's images of the ends, and the
+ * centre form still reproduces them).  ::GSHGEOM_ARC_CIRCULAR is kept if and only if the map's kind tag has
+ * none of ::GSHGEOM_MAP_SCALES_NONUNIFORM, ::GSHGEOM_MAP_SKEWS, ::GSHGEOM_MAP_SINGULAR and ::GSHGEOM_MAP_GENERAL
+ * (the similarities), and is cleared otherwise; a rotation by an arbitrary angle makes `u . v` a few ulps from
+ * zero, so the tag, not a test of the numbers, is the predicate.
+ *
+ * @param map A 2D map.
+ * @param arc The arc.
+ * @param out The mapped arc; written only on success.
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for a NULL, a map that is not 2D or invalid, a singular map (its
+ *   image is a segment; a consumer that needs one maps the arc's pieces, ::gshgeom_arc_pieces, instead) or an
+ *   arc that is not valid; ::GSHGEOM_ERR_LIMIT if a result is past ::GSHGEOM_COORD_LIMIT.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_arc_map(const GSHGEOM_Map * map, const GSHGEOM_Arc * arc, GSHGEOM_Arc * out);
+
+/**
+ * @brief The centre, radius and sense of a circular arc, for a toolpath or a writer.
+ *
+ * Refuses (::GSHGEOM_ERR_INVALID) an arc that does not carry ::GSHGEOM_ARC_CIRCULAR, never inferring a circle
+ * from the numbers.  The radius is `|u|` (::gmath_hypot).
+ *
+ * @param centre Receives the centre.
+ * @param radius Receives the radius.
+ * @param ccw Receives nonzero when the arc runs in the positive sense (`sign(sweep) * sign(cross(u, v))` is +1,
+ *   from +x toward +y), zero when it runs the other way.  May be NULL.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_arc_circle(
+    const GSHGEOM_Arc * arc, GSHGEOM_Point * centre, double * radius, int * ccw);
+
+/**
  * @brief Endpoint form (SVG 2's endpoint-to-centre conversion and radius correction).
  *
  * From the current point `S` to @p end: the same point adds nothing (`NOTHING`); a zero radius adds a

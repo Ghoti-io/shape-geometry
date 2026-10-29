@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -76,73 +77,88 @@ TEST(Walkers, ElementCountCountsAnArcOnce) {
   gshgeom_path_destroy(lowered);
 }
 
-static GSHGEOM_Result ignore_vertex(const GSHGEOM_Vertex *, void *) {
+static GSHGEOM_Result collect_vertex(const GSHGEOM_Vertex * v, void * ctx) {
+  static_cast<std::vector<GSHGEOM_Vertex> *>(ctx)->push_back(*v);
   return GSHGEOM_OK;
 }
 
-// vertices.c (read_seg, element, gshgeom_path_vertices) and vector's marker lowering that calls it: refused loudly
-TEST(Walkers, VerticesRefuseAnArcUntilItReadsOne) {
+// vertices.c (curve_seg, element, gshgeom_path_vertices) and vector's marker lowering that calls it (updated, AR14)
+TEST(Walkers, VerticesReadAnArcAsOneVertex) {
   GSHGEOM_Path * p = arc_path();
-  EXPECT_EQ(gshgeom_path_vertices(p, ignore_vertex, nullptr), GSHGEOM_ERR_UNSUPPORTED);
-  GSHGEOM_Path * lowered = nullptr;
-  ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
-  EXPECT_EQ(gshgeom_path_vertices(lowered, ignore_vertex, nullptr), GSHGEOM_OK);  // the lowered path is read
+  std::vector<GSHGEOM_Vertex> vs;
+  EXPECT_EQ(gshgeom_path_vertices(p, collect_vertex, &vs), GSHGEOM_OK);
+  ASSERT_EQ(vs.size(), 3u);
+  // the arc's vertex is its authoritative end, with the end direction of the quarter circle (+y turns to -x at (0, 10))
+  EXPECT_EQ(vs[1].point.x, 0.0);
+  EXPECT_EQ(vs[1].point.y, 10.0);
+  EXPECT_EQ(vs[1].in.x, -1.0);
+  EXPECT_EQ(vs[1].in.y, 0.0);
   gshgeom_path_destroy(p);
-  gshgeom_path_destroy(lowered);
 }
 
-// along.c: gshgeom_measured_create
-TEST(Walkers, MeasuredCreateRefusesAnArcAndMeasuresTheLoweredPath) {
+// along.c: gshgeom_measured_create (updated, AR12): the arc is measured as its pieces
+TEST(Walkers, MeasuredCreateMeasuresAnArcAsItsPieces) {
   GSHGEOM_Path * p = arc_path();
-  GSHGEOM_Measured * m = reinterpret_cast<GSHGEOM_Measured *>(0x1);
-  EXPECT_EQ(gshgeom_measured_create(nullptr, nullptr, p, 0.001, &m), GSHGEOM_ERR_UNSUPPORTED);
-  EXPECT_EQ(m, reinterpret_cast<GSHGEOM_Measured *>(0x1));
+  GSHGEOM_Measured * m = nullptr;
+  ASSERT_EQ(gshgeom_measured_create(nullptr, nullptr, p, 0.001, &m), GSHGEOM_OK);
   GSHGEOM_Path * lowered = nullptr;
   ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
   GSHGEOM_Measured * ml = nullptr;
   ASSERT_EQ(gshgeom_measured_create(nullptr, nullptr, lowered, 0.001, &ml), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_measured_hash(m) != 0, true);
+  EXPECT_EQ(gshgeom_measured_length(m), gshgeom_measured_length(ml));
+  EXPECT_NEAR(gshgeom_measured_length(m), 10.0 * 3.14159265358979323846 / 2 + 10.0, 1e-6);
+  gshgeom_measured_destroy(m);
   gshgeom_measured_destroy(ml);
   gshgeom_path_destroy(p);
   gshgeom_path_destroy(lowered);
 }
 
-// stroke/expand.c (read_centerline, build_clip, build_clip_curves) and stroke/dash.c (gshgeom_sk_dash_begin)
-TEST(Walkers, StrokeExpansionRefusesAnArcSolidOrDashed) {
+// stroke/expand.c (read_centerline, build_clip, build_clip_curves) and stroke/dash.c (gshgeom_sk_dash_begin): updated, AR13
+TEST(Walkers, StrokeExpansionTakesAnArcSolidOrDashed) {
   GSHGEOM_Path * p = arc_path();
+  GSHGEOM_Path * lowered = nullptr;
+  ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
   GSHGEOM_Map m;
   ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
   const double dashes[2] = {3.0, 2.0};
   for (int dashed = 0; dashed < 2; dashed++) {
-    GSHGEOM_Stroke s;
-    gshgeom_stroke_init(&s);
-    s.width = 2.0;
-    if (dashed) {
-      s.dashes = dashes;
-      s.dash_count = 2;
+    for (uint32_t space : {GSHGEOM_STROKE_WIDTH_LOCAL, GSHGEOM_STROKE_WIDTH_DEVICE}) {
+      GSHGEOM_Stroke s;
+      gshgeom_stroke_init(&s);
+      s.width = 2.0;
+      s.width_space = space;
+      if (dashed) {
+        s.dashes = dashes;
+        s.dash_count = 2;
+      }
+      GSHGEOM_Stroke_Outline * a = nullptr;
+      GSHGEOM_Stroke_Outline * b = nullptr;
+      ASSERT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &a), GSHGEOM_OK) << dashed;
+      ASSERT_EQ(gshgeom_stroke_expand(lowered, &s, &m, nullptr, nullptr, &b), GSHGEOM_OK) << dashed;
+      EXPECT_EQ(gshgeom_stroke_outline_hash(a), gshgeom_stroke_outline_hash(b)) << dashed;
+      gshgeom_stroke_outline_destroy(a);
+      gshgeom_stroke_outline_destroy(b);
     }
-    GSHGEOM_Stroke_Outline * out = reinterpret_cast<GSHGEOM_Stroke_Outline *>(0x1);
-    EXPECT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &out), GSHGEOM_ERR_UNSUPPORTED) << dashed;
-    EXPECT_EQ(out, reinterpret_cast<GSHGEOM_Stroke_Outline *>(0x1));
   }
-  GSHGEOM_Path * lowered = nullptr;
-  ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
-  GSHGEOM_Stroke s;
-  gshgeom_stroke_init(&s);
-  s.width = 2.0;
-  GSHGEOM_Stroke_Outline * out = nullptr;
-  ASSERT_EQ(gshgeom_stroke_expand(lowered, &s, &m, nullptr, nullptr, &out), GSHGEOM_OK);
-  gshgeom_stroke_outline_destroy(out);
   gshgeom_path_destroy(p);
   gshgeom_path_destroy(lowered);
 }
 
-// stroke_curves/lower.c: gshgeom_stroke_curves_lower_cubic
-TEST(Walkers, StrokeCurvesLowerRefusesAnArc) {
+// stroke_curves/lower.c: gshgeom_stroke_curves_lower_cubic (updated, AR8, AR15)
+TEST(Walkers, StrokeCurvesLowerTakesAnArc) {
   GSHGEOM_Path * p = arc_path();
-  GSHGEOM_Path * out = reinterpret_cast<GSHGEOM_Path *>(0x1);
-  EXPECT_EQ(gshgeom_stroke_curves_lower_cubic(p, 0.01, nullptr, nullptr, &out), GSHGEOM_ERR_UNSUPPORTED);
-  EXPECT_EQ(out, reinterpret_cast<GSHGEOM_Path *>(0x1));
+  GSHGEOM_Path * lowered = nullptr;
+  ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
+  GSHGEOM_Path * a = nullptr;
+  GSHGEOM_Path * b = nullptr;
+  ASSERT_EQ(gshgeom_stroke_curves_lower_cubic(p, 0.01, nullptr, nullptr, &a), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_stroke_curves_lower_cubic(lowered, 0.01, nullptr, nullptr, &b), GSHGEOM_OK);
+  EXPECT_TRUE(gshgeom_path_equal(a, b));
+  gshgeom_path_destroy(a);
+  gshgeom_path_destroy(b);
   gshgeom_path_destroy(p);
+  gshgeom_path_destroy(lowered);
 }
 
 // device/device.c (convert_element, gshgeom_device_path_from_model), flatten/flatten.c, shape-cpu's render/geometry.c

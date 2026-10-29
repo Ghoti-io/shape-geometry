@@ -294,6 +294,8 @@
 #define gshgeom_path_append_arc GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_append_arc)
 #define gshgeom_path_arc GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_arc)
 #define gshgeom_arc_pieces GHOTIIO_SHAPE_GEOMETRY(gshgeom_arc_pieces)
+#define gshgeom_arc_map GHOTIIO_SHAPE_GEOMETRY(gshgeom_arc_map)
+#define gshgeom_arc_circle GHOTIIO_SHAPE_GEOMETRY(gshgeom_arc_circle)
 #define gshgeom_path_lower_arcs GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_lower_arcs)
 #define gshgeom_path_arc_endpoint_to GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_arc_endpoint_to)
 #define gshgeom_path_arc_conjugate_to GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_arc_conjugate_to)

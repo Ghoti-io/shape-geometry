@@ -390,6 +390,67 @@ GSHGEOM_Result gshgeom_path_lower_arcs(const GSHGEOM_Path * path, const GSHGEOM_
 }
 
 /* ---------------------------------------------------------------------- */
+/* Maps and the circular flag (AR11)                                       */
+/* ---------------------------------------------------------------------- */
+
+GSHGEOM_Result gshgeom_arc_map(const GSHGEOM_Map * map, const GSHGEOM_Arc * arc, GSHGEOM_Arc * out) {
+  if (!map || !arc || !out || map->dim != 2) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  GSHGEOM_Result r = gshgeom_map_check(map);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if ((map->kind & GSHGEOM_MAP_SINGULAR) != 0u) {
+    return GSHGEOM_ERR_INVALID; /* the image is a segment: a consumer that needs it maps the pieces */
+  }
+  GSHGEOM_Arc a = *arc;
+  r = gshgeom_map_apply_point(map, arc->start, &a.start);
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_map_apply_point(map, arc->end, &a.end);
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_map_apply_point(map, arc->center, &a.center);
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_map_apply_vector(map, arc->u, &a.u);
+  }
+  if (r == GSHGEOM_OK) {
+    r = gshgeom_map_apply_vector(map, arc->v, &a.v);
+  }
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  const unsigned not_similar = GSHGEOM_MAP_SCALES_NONUNIFORM | GSHGEOM_MAP_SKEWS | GSHGEOM_MAP_SINGULAR | GSHGEOM_MAP_GENERAL;
+  if ((map->kind & not_similar) != 0u) {
+    a.flags &= ~GSHGEOM_ARC_CIRCULAR;
+  }
+  r = validate(&a, a.start, 1);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  *out = a;
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_arc_circle(const GSHGEOM_Arc * arc, GSHGEOM_Point * centre, double * radius, int * ccw) {
+  if (!arc || !centre || !radius || (arc->flags & GSHGEOM_ARC_CIRCULAR) == 0u) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  int sign = 0;
+  GSHGEOM_Point z = pt(0.0, 0.0);
+  if (gshgeom_orient2d(z, pt(arc->u.x, arc->u.y), pt(arc->v.x, arc->v.y), &sign) != GSHGEOM_OK || sign == 0) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  *centre = pt(arc->center.x, arc->center.y);
+  *radius = gmath_hypot(arc->u.x, arc->u.y);
+  if (ccw) {
+    *ccw = ((arc->sweep < 0.0) ? -1 : 1) * sign > 0;
+  }
+  return GSHGEOM_OK;
+}
+
+/* ---------------------------------------------------------------------- */
 /* Constructors                                                            */
 /* ---------------------------------------------------------------------- */
 
