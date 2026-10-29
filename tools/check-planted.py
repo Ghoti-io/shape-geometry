@@ -253,6 +253,11 @@ changes no result, cannot be seen by any test:
   width stepped by single units in the last place about the width that puts a vertex of the outline on such a half unit, with each of
   the three plants, beside the real code: the outlines were the same in every one.  So nothing here separates them from the code
   they replace, and none is shown equivalent.
+
+  The sweep after the dash-step limit (1155 plants, ``PLANT_ALL_TESTS=1`` on the 24 not caught at once, in ghoti-build:gcc16): 13
+  were seen by a test or the probe that their lists did not name, and their lists now do; ``sk-dash-precheck-removed`` did not
+  compile (it left ``certain`` set and unused) and now keeps it.  The 11 that remain unseen are exactly the eight and the three
+  above.
 """
 import concurrent.futures
 import os
@@ -1540,7 +1545,7 @@ STROKE_PLANTS = [
     ("sk-arcs-enclosing-as-apart", "src", SKA, "      int enclosing = dz < diff;", "      int enclosing = 0 * (int)dz;", STM),
     ("sk-arcs-clip-at-lw", "src", SKA, "  double dn = gshgeom_sk_norm(X), Lh = L * h;", "  double dn = gshgeom_sk_norm(X), Lh = 2.0 * L * h;", STM),
     ("sk-arcs-limit-along-chord", "src", SKA, "      if (2.0 * beta * rho > Lh) {", "      if (dn > Lh + 0.0 * beta * rho) {", STM),
-    ("sk-arcs-reversal-one-side", "src", SKJ, "        r = gshgeom_sk_arcs_join(c, in, out, 0, 1, &mc);", "        r = GSHGEOM_OK;", STM),
+    ("sk-arcs-reversal-one-side", "src", SKJ, "        r = gshgeom_sk_arcs_join(c, in, out, 0, 1, &mc);", "        r = GSHGEOM_OK;", STM + ["testStroke_curves_oracle"]),
     ("sk-arcs-sign-of-curvature", "src", SKA, "  e.kappa = inner_positive ? k : -k;", "  e.kappa = inner_positive ? -k : k;", STM),
     ("sk-arcs-grow-direction", "src", SKA, "    ea.nu = rr > 0.0 ? gshgeom_sk_scale(-1.0, oa) : oa;", "    ea.nu = rr > 0.0 ? oa : gshgeom_sk_scale(-1.0, oa);", STM),
     ("sk-arcs-fan-from-vertex", "src", SKA, "  size_t n = b->n;\n  GSHGEOM_Result res = GSHGEOM_OK;\n  double * ys = NULL;",
@@ -1552,7 +1557,7 @@ STROKE_PLANTS = [
     ("sk-arcs-closer-the-other-way", "src", SKA, "      pick = side > 0.0 ? 1 : 0;", "      pick = side > 0.0 ? 0 : 1;", STM),
     ("sk-arcs-reversal-tie-last", "src", SKA, "      if (along_key(&ea, cand[1]) < along_key(&ea, cand[0])) {", "      if (along_key(&ea, cand[1]) > along_key(&ea, cand[0])) {", STM),
     ("sk-arcs-arc-not-clipped", "src", SKA, "          if (clip_f(b, m) > 0.0) {", "          if (clip_f(b, m) > 1e300) {", STM),
-    ("sk-arcs-chords-uncancelled", "src", SKA, "    for (int rep = 0; rep < (net < 0 ? -net : net); rep++) {", "    net = net != 0 ? (net > 0 ? 1 : -1) : 0;\n    for (int rep = 0; rep < (net < 0 ? -net : net); rep++) {", STM),
+    ("sk-arcs-chords-uncancelled", "src", SKA, "    for (int rep = 0; rep < (net < 0 ? -net : net); rep++) {", "    net = net != 0 ? (net > 0 ? 1 : -1) : 0;\n    for (int rep = 0; rep < (net < 0 ? -net : net); rep++) {", STO),
     ("sk-arcs-polyline-unbounded", "src", SKA, "  bd.allowed = room * 0.999 - eps;", "  bd.allowed = room * 4.0;", STM),
     ("sk-body-coincident-end-ignored", "src", SKB, "  p.zn = s->p[s->n].x == s->p[s->n - 1].x && s->p[s->n].y == s->p[s->n - 1].y && s->w[s->n] == s->w[s->n - 1];", "  p.zn = 0;", STM),
     ("sk-body-coincident-start-ignored", "src", SKB, "  p.z0 = s->p[1].x == s->p[0].x && s->p[1].y == s->p[0].y && s->w[1] == s->w[0];", "  p.z0 = 0;", STM + ["probe"]),
@@ -1560,7 +1565,7 @@ STROKE_PLANTS = [
     ("sk-band-fold-test", "src", SKB, '  int fold = !(kappa * c->h < bi->cosb);', '  int fold = !(kappa * c->h < 4.0 * bi->cosb);', STM + ["probe"]),
     ("sk-band-delta-halved", "src", SKB, "  double delta = 0.5 * lambda * sind * UP;", "  double delta = 0.01 * lambda * sind * UP;", STM),
     ("sk-cusp-disc-dropped", "src", SKB, "  if (gshgeom_sk_dot(t0, t1) < 0.0) {", "  if (0) {", STM),
-    ("sk-fan-overshoot-ignored", "src", SKB, '        double extra = (dm + hh * over) * UP;', '        double extra = (dm + 0.0 * over) * UP;', STM),
+    ("sk-fan-overshoot-ignored", "src", SKB, '        double extra = (dm + hh * over) * UP;', '        double extra = (dm + 0.0 * over) * UP;', STM + ["probe"]),
     ("sk-fan-sector-one-side", "src", SKB, "          *r = gshgeom_sk_sector(c, centre, gshgeom_sk_scale(-1.0, na), gshgeom_sk_scale(-1.0, nb), d_in, extra);", "          *r = GSHGEOM_OK;", STM),
     ("sk-depth-cap-accepts", "src", SKB, "    return GSHGEOM_ERR_LIMIT; /* a forced piece is refused, never drawn coarser */", "    return GSHGEOM_OK; /* a forced piece is refused, never drawn coarser */", STK),
     ("sk-line-normal-right", "src", SKB, "    GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h, gshgeom_sk_left(gshgeom_sk_unit(a)));", "    GSHGEOM_SK_Vec hn = gshgeom_sk_scale(c->h / 2, gshgeom_sk_left(gshgeom_sk_unit(a)));", STM),
@@ -1570,7 +1575,7 @@ STROKE_PLANTS = [
     ("sk-arc-inscribed", "src", SKA, "      double k = r / (1.0 + cpq);", "      double k = r / 2.0;", STM + ["probe"]),
     ("sk-norm-unscaled", "src", SKM, "  double x = ax / m, y = ay / m;\n  return m * gmath_sqrt(x * x + y * y);", "  return gmath_sqrt(a.x * a.x + a.y * a.y);", STK),
     ("sk-build-min-dropped", "src", SKE, "        if (dm != 0.0 && dm < GSHGEOM_SK_BUILD_MIN) {\n          return 0;\n        }", "        (void)dm;", STK),
-    ("sk-inflation-dropped", "src", SKM, "  double rc = (d_in + c->rho) * 1.0824;", "  double rc = d_in * 1.0824;", ["testStroke"]),
+    ("sk-inflation-dropped", "src", SKM, "  double rc = (d_in + c->rho) * 1.0824;", "  double rc = d_in * 1.0824;", STO),
     ("sk-ring-wound-backwards", "src", SKM, "    if (whole) {\n      r = write_ring(c->part, v, h);",
      "    if (whole) {\n      for (size_t i = 0; i < h / 2; i++) {\n        GSHGEOM_Device_Point tmp = v[i];\n        v[i] = v[h - 1 - i];\n        v[h - 1 - i] = tmp;\n      }\n      r = write_ring(c->part, v, h);", STM),
     ("sk-truncate-not-round", "src", SKM, "    r = gshgeom_round_26_6(hull[i].x, &v[i].x);\n    if (r == GSHGEOM_OK) {\n      r = gshgeom_round_26_6(hull[i].y, &v[i].y);\n    }",
@@ -1621,12 +1626,12 @@ STROKE_PLANTS = [
     ('sk-dash-start-cap-forward', "src", SKD, '  GSHGEOM_Result r = gshgeom_sk_cap(c, first.p[0], gshgeom_sk_scale(-1.0, seg_dir(&segs[kfirst], ta)));\n', '  GSHGEOM_Result r = gshgeom_sk_cap(c, first.p[0], seg_dir(&segs[kfirst], ta));\n', STM),
     ('sk-dash-end-cap-backward', "src", SKD, '    r = gshgeom_sk_cap(c, lastp.p[lastp.n], seg_dir(&segs[klast], tb));\n', '    r = gshgeom_sk_cap(c, lastp.p[lastp.n], gshgeom_sk_scale(-1.0, seg_dir(&segs[klast], tb)));\n', STM),
     ('sk-dash-dot-dropped-under-omit', "src", SKD, '  return gshgeom_sk_degenerate(cb->c, seg_point(s, t), seg_dir(s, t));\n', '  if (cb->c->st.degenerate == (uint32_t)GSHGEOM_STROKE_DEGENERATE_OMIT) {\n    return GSHGEOM_OK;\n  }\n  return gshgeom_sk_degenerate(cb->c, seg_point(s, t), seg_dir(s, t));\n', STM),
-    ('sk-dash-degenerate-ignores-omit', "src", SKD, '  if (sub->seg_count == 0 && c->st.degenerate == (uint32_t)GSHGEOM_STROKE_DEGENERATE_OMIT) {\n    return GSHGEOM_OK;\n  }\n', '', STM),
+    ('sk-dash-degenerate-ignores-omit', "src", SKD, '  if (sub->seg_count == 0 && c->st.degenerate == (uint32_t)GSHGEOM_STROKE_DEGENERATE_OMIT) {\n    return GSHGEOM_OK;\n  }\n', '', STO),
     ('sk-dash-dir-end-at-start', "src", SKD, '  if (t <= 0.0) {\n    (void)gshgeom_sk_start_dir(s, &d);\n    return d;\n  }\n  if (t >= 1.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n', '  if (t <= 0.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n  if (t >= 1.0) {\n    (void)gshgeom_sk_end_dir(s, &d);\n    return d;\n  }\n', STM),
     ('sk-dash-split-weights', "src", SKD, '        W[i] = u * W[i] + t * W[i + 1];\n', '        W[i] = W[i];\n', STM),
     ('sk-dash-cut-at-half', "src", SKD, '    double u = a > 0.0 ? (b - a) / (1.0 - a) : b;\n', '    double u = b;\n', STM),
-    ('sk-dash-gate-removed', "src", SKD, '  if (!(eps * c->norm <= 0x1p-20)) {\n', '  (void)eps;\n  if (0) {\n', STM),
-    ('sk-dash-gate-measurer-term', "src", SKD, 'double eps = (0x1p-46 * poly', 'double eps = (0x1p-60 * poly', STM),
+    ('sk-dash-gate-removed', "src", SKD, '  if (!(eps * c->norm <= 0x1p-20)) {\n', '  (void)eps;\n  if (0) {\n', STO),
+    ('sk-dash-gate-measurer-term', "src", SKD, 'double eps = (0x1p-46 * poly', 'double eps = (0x1p-60 * poly', STO),
     ('sk-dash-measure-loose', "src", SKD, 'GSHGEOM_MEASURE_TOLERANCE_MIN, &D->m', 'GSHGEOM_MEASURE_TOLERANCE_MAX, &D->m', STM),
     ('sk-dxf-no-cyclic-merge', "src", SKX, '  } else if (k > 1 && first_down == last_down) {\n', '  } else if (0) {\n', STD),
     ('sk-dxf-offset-lost', "src", SKX, '  double off = lead;\n', '  double off = 0.0;\n', STD),
@@ -1680,7 +1685,7 @@ STROKE_PLANTS += [
     ("sk-dash-cap-ignored", "src", SKX, "c.limits.max_dash_steps && c.limits.max_dash_steps < (uint64_t)SIZE_MAX ? (size_t)c.limits.max_dash_steps : c.work_cap;", "c.work_cap;", STL),
     ("sk-dash-cap-not-read", "src", SKX, "    c.limits.max_dash_steps = limits->max_dash_steps;\n", "", STL),
     ("sk-dash-walk-uncapped", "src", SKD, "&D->steps, c->dash_cap, on_dash, &cb);", "&D->steps, c->work_cap, on_dash, &cb);", STL),
-    ("sk-dash-precheck-removed", "src", SKD, "    if (certain > (double)c->dash_cap) {\n      return GSHGEOM_ERR_LIMIT;\n    }\n", "", STL),
+    ("sk-dash-precheck-removed", "src", SKD, "    if (certain > (double)c->dash_cap) {\n      return GSHGEOM_ERR_LIMIT;\n    }\n", "    (void)certain;\n", STL),
     ("sk-dash-precheck-over", "src", SKD, "gmath_floor((ms.end - ms.begin) / D->period) - 1.0;", "gmath_floor((ms.end - ms.begin) / D->period) + 1.0;", STL),
     ("sk-dash-precheck-width", "src", SKD, "certain += periods * (double)n;", "certain += periods * (double)n * 2.0;", STL),
     ("sk-dash-precheck-last-only", "src", SKD, "      if (periods > 0.0) {\n        certain += periods * (double)n;", "      if (periods > 0.0) {\n        certain = periods * (double)n;", STL),
@@ -1720,7 +1725,7 @@ CURVE_PLANTS = [
     ('cv-line-polygon-dropped', "src", SCC, '  GSHGEOM_Result r = gshgeom_path_move_to(path, gp(pts[0]));\n  for (size_t i = 1; i < n', '  GSHGEOM_Result r = gshgeom_path_move_to(path, gp(pts[1]));\n  for (size_t i = 1; i < n', TCB),
     ('cv-fan-not-inflated', "src", SKB, '          *r = gshgeom_skc_fan_sector(c, centre, na, nb, d_in * UP);', '          *r = gshgeom_skc_fan_sector(c, centre, na, nb, 0.0);', TCO),
     ('cv-cusp-disc-dropped', "src", SKB, '        *r = gshgeom_skc_disc(c, centre, c->h + d_in * UP);', '        *r = GSHGEOM_OK;', TCO),
-    ('cv-fan-back-line-dropped', "src", SCC, '  double la = (-r - gshgeom_sk_dot(oa, u)) / gshgeom_sk_dot(p, u);', '  double la = (-100.0 * r - gshgeom_sk_dot(oa, u)) / gshgeom_sk_dot(p, u);', TCO),
+    ('cv-fan-back-line-dropped', "src", SCC, '  double la = (-r - gshgeom_sk_dot(oa, u)) / gshgeom_sk_dot(p, u);', '  double la = (-100.0 * r - gshgeom_sk_dot(oa, u)) / gshgeom_sk_dot(p, u);', TCO + ["probe"]),
     # SG37, SG38: the curved offsets
     ('cv-rails-swapped', "src", SKB, '    double sgn = side == 0 ? 1.0 : -1.0;\n    GSHGEOM_SK_Vec b0', '    double sgn = side == 0 ? -1.0 : 1.0;\n    GSHGEOM_SK_Vec b0', TCB),
     ('cv-fold-band-accepted', "src", SKB, '  int fold = !(kappa * c->h < bi->cosb);', '  int fold = 0;', TCO),
@@ -1729,20 +1734,20 @@ CURVE_PLANTS = [
     ('cv-fit-error-bound-too-small', "src", SKB, '  double eps = o4 / 384.0 * UP;', '  double eps = o4 / 384.0e6 * UP;', TCO),
     ('cv-fit-error-fourth-derivative-dropped', "src", SKB, '  return (G[4] + h * F[4]) * UP;', '  return (h * F[4]) * UP * 1e-6;', TCO),
     ('cv-chord-bound-too-small', "src", SKB, '  double d2 = second_bound(G, m, h) / 8.0 * UP;\n', '  double d2 = second_bound(G, m, h) / 8.0e6 * UP;\n', TCO),
-    ('cv-chord-lobes-dropped', "src", SKB, '  if (s1 * s2 < 0 && s3 * s4 < 0) {', '  if (0 && s1 * s2 < 0 && s3 * s4 < 0) {', TCO),
-    ('cv-chord-wrong-diagonal', "src", SKB, '  if (a1 * a2 > 0 || (a1 == 0 && a2 == 0)) {', '  if (a1 * a2 <= 0) {', TCO),
+    ('cv-chord-lobes-dropped', "src", SKB, '  if (s1 * s2 < 0 && s3 * s4 < 0) {', '  if (0 && s1 * s2 < 0 && s3 * s4 < 0) {', TCO + ["probe"]),
+    ('cv-chord-wrong-diagonal', "src", SKB, '  if (a1 * a2 > 0 || (a1 == 0 && a2 == 0)) {', '  if (a1 * a2 <= 0) {', TCO + ["probe"]),
     ('cv-rail-start-moved', "src", SKB, '    GSHGEOM_SK_Vec b0 = gshgeom_sk_add(P0, gshgeom_sk_scale(sgn * h, gshgeom_sk_left(t0)));', '    GSHGEOM_SK_Vec b0 = gshgeom_sk_add(P0, gshgeom_sk_scale(sgn * h * 1.05, gshgeom_sk_left(t0)));', TCO),
     ('cv-rail-handle-sign', "src", SKB, '    rail[side][1] = gshgeom_sk_add(b0, gshgeom_sk_scale(1.0 / 3.0, o0));', '    rail[side][1] = gshgeom_sk_sub(b0, gshgeom_sk_scale(1.0 / 3.0, o0));', TCO),
     ('cv-tangent-turning-dropped', "src", SKB, '    GSHGEOM_SK_Vec o0 = gshgeom_sk_add(c1s, gshgeom_sk_scale(sgn * h, gshgeom_sk_left(tp0)));', '    (void)tp0;\n    GSHGEOM_SK_Vec o0 = c1s;', TCO),
     ('cv-shared-tangent-from-one-side', "src", SKB, '      l->dir1 = r->dir0 = dv;', '      l->dir1 = dv;\n      r->dir0 = gshgeom_sk_v(dv.x, dv.y + 1e-3 * dv.x);', TCO),
-    ('cv-arcs-join-monotone-unchecked', "src", SCC, '  if (!side_monotone(&ea, sigma, A, B) || !side_monotone(&eb, sigma, A, B)) {', '  if (0) {', TCO),
+    ('cv-arcs-join-monotone-unchecked', "src", SCC, '  if (!side_monotone(&ea, sigma, A, B) || !side_monotone(&eb, sigma, A, B)) {', '  if (0) {', TCO + ["probe"]),
     ('cv-arcs-join-orientation-ignored', "src", SCC, '  if (sigma < 0.0) {\n    reverse_elements(c->cv);\n  }', '', TCO),
     ('cv-arcs-join-arc-as-chord', "src", SCC, '    r = gshgeom_skc_conic(c, dev(c, anchor, 1.0, p0), dev(c, anchor, 1.0, p1), dev(c, anchor, 1.0, p2),\n        gmath_sqrt((1.0 + cpq) / 2.0));', '    (void)p1;\n    r = gshgeom_skc_line(c, dev(c, anchor, 1.0, p0), dev(c, anchor, 1.0, p2));', TCC),
     ('cv-hulls-not-apart-ignored', "src", SKB, '  if (!hulls_apart(rail[0], rail[1], 0x1p-30 * scale + 4.0 * eps)) {', '  if (0) {', TCO),
     ('cv-band-run-never-flushed', "src", SCC, '  size_t n = cv->run_n;\n  cv->run_n = 0;\n  if (n == 0) {', '  size_t n = cv->run_n;\n  cv->run_n = 0;\n  if (1) {', TCO),
     ('cv-depth-cap-truncated', "src", SKB, '  if (depth >= sg->c->depth_cap) {\n    return GSHGEOM_ERR_LIMIT;', '  if (depth >= sg->c->depth_cap) {\n    return GSHGEOM_OK;', TCB),
     # SG32 to SG36, SG41: the parts, the forms, the hash
-    ('cv-clip-flattened', "src", SKE, '      case GSHGEOM_VERB_CUBIC:\n        r = gshgeom_path_cubic_to(mp, p[1], p[2], p[3]);\n        break;\n      case GSHGEOM_VERB_RATIONAL_QUADRATIC:\n        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);', '      case GSHGEOM_VERB_CUBIC:\n        r = gshgeom_path_line_to(mp, p[3]);\n        break;\n      case GSHGEOM_VERB_RATIONAL_QUADRATIC:\n        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);', TCC),
+    ('cv-clip-flattened', "src", SKE, '      case GSHGEOM_VERB_CUBIC:\n        r = gshgeom_path_cubic_to(mp, p[1], p[2], p[3]);\n        break;\n      case GSHGEOM_VERB_RATIONAL_QUADRATIC:\n        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);', '      case GSHGEOM_VERB_CUBIC:\n        r = gshgeom_path_line_to(mp, p[3]);\n        break;\n      case GSHGEOM_VERB_RATIONAL_QUADRATIC:\n        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);', TCC + ["probe"]),
     ('cv-clip-not-mapped', "src", SKE, '      r = gshgeom_map_apply_curve(&c->map, &el.curve, &cv);\n      if (r != GSHGEOM_OK) {\n        break;\n      }\n      const GSHGEOM_Point * p = cv.p;\n      switch (el.verb) {\n      case GSHGEOM_VERB_LINE:\n        r = gshgeom_path_line_to(mp, p[1]);\n        break;\n      case GSHGEOM_VERB_QUADRATIC:\n        r = gshgeom_path_quadratic_to(mp, p[1], p[2]);\n        break;\n      case GSHGEOM_VERB_CUBIC:\n        r = gshgeom_path_cubic_to(mp, p[1], p[2], p[3]);\n        break;\n      case GSHGEOM_VERB_RATIONAL_QUADRATIC:\n        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);', '      cv = el.curve;\n      const GSHGEOM_Point * p = cv.p;\n      switch (el.verb) {\n      case GSHGEOM_VERB_LINE:\n        r = gshgeom_path_line_to(mp, p[1]);\n        break;\n      case GSHGEOM_VERB_QUADRATIC:\n        r = gshgeom_path_quadratic_to(mp, p[1], p[2]);\n        break;\n      case GSHGEOM_VERB_CUBIC:\n        r = gshgeom_path_cubic_to(mp, p[1], p[2], p[3]);\n        break;\n      case GSHGEOM_VERB_RATIONAL_QUADRATIC:\n        r = gshgeom_path_rational_quadratic_to(mp, p[1], p[2], cv.w);', TCC),
     ('cv-clip-rule-ignored', "src", SKE, '    cu->rule = c.st.alignment_rule;', '    cu->rule = GSHGEOM_FILL_NONZERO;', TCC),
     ('cv-clip-complement-ignored', "src", SKE, '    cu->complement = c.st.alignment == GSHGEOM_STROKE_ALIGN_OUTSIDE;', '    cu->complement = 0;', TCC),
