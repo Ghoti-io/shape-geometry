@@ -328,6 +328,98 @@ for row, flat, exact, exactw, sc in zz:
     w("    {" + ", ".join(f) + ", {" + ", ".join(pcs) + "}, %d, %d, %s}," % (exact, exactw, hexf(sc)))
 w("};")
 w("static const size_t decomp_count = sizeof decomps / sizeof decomps[0];")
+# ---- bounds, lengths and mapped ellipses (AR10 to AR12) --------------------------
+w("")
+w("/** The exact box of an arc (the ends and every interior extremum of the ellipse). */")
+w("struct Box {")
+w("  double cx, cy, ux, uy, vx, vy;")
+w("  int unit;")
+w("  double t0, sweep;")
+w("  double minx, miny, maxx, maxy;")
+w("  double scale;")
+w("};")
+w("/** The length of an arc: the oracle's quadrature, and the scale of the radii it is relative to. */")
+w("struct Length {")
+w("  double ux, uy, vx, vy;")
+w("  int unit;")
+w("  double t0, sweep;")
+w("  double length;")
+w("};")
+w("/** An ellipse under the affine map `x -> M x + t` and the oracle's mapped points at five parameters, t0 + k sweep / 4. */")
+w("struct Mapped {")
+w("  double cx, cy, ux, uy, vx, vy;")
+w("  int unit;")
+w("  double t0, sweep;")
+w("  double m00, m01, m10, m11, tx, ty;")
+w("  double pts[5][2];")
+w("  double scale;")
+w("};")
+boxes, lengths, mappeds = [], [], []
+ELL = ((10.0, -20.0), (30.0, 5.0), (-2.5, 10.0))
+CIR = ((1.5, -2.0), (4.0, 0.0), (0.0, 4.0))
+THIN = ((0.0, 0.0), (50.0, 0.0), (0.0, 1.0))
+ROT = ((-3.0, 4.0), (5.0 * 0.8660254037844386, 5.0 * 0.5), (-3.0 * 0.5, 3.0 * 0.8660254037844386))
+for (c, u, v) in (ELL, CIR, THIN, ROT):
+    for unit, q in (("degrees", 90.0), ("radians", 1.5707963267948966), ("gradians", 100.0), ("turns", 0.25)):
+        for t0, mult in ((0.0, 1.0), (0.3 * q, 0.5), (-0.7 * q, 1.0), (0.9 * q, 2.0), (q, 4.0), (-2.2 * q, 3.3), (0.1 * q, 0.01)):
+            for sg in (1.0, -1.0):
+                sw = sg * mult * q
+                box = O.ellipse_box(c, u, v, unit, t0, sw)
+                p0 = O.ellipse_point(c, u, v, unit, t0)
+                p1 = O.ellipse_point(c, u, v, unit, t0 + sw)
+                sc = scale_of([(float(p0[0]), float(p0[1])), (float(p1[0]), float(p1[1])), c], (u, v))
+                boxes.append([c[0], c[1], u[0], u[1], v[0], v[1], UNIT_ID[unit], t0, sw] + [box[0], box[1], box[2], box[3]] + [sc])
+                if unit in ("degrees", "radians"):
+                    lengths.append([u[0], u[1], v[0], v[1], UNIT_ID[unit], t0, sw, O.arc_length(u, v, unit, t0, sw)])
+MAPS = (
+    ((1.0, 0.0, 0.0, 1.0), (7.0, -3.0)),            # translate
+    ((2.0, 0.0, 0.0, 2.0), (0.0, 0.0)),             # uniform scale
+    ((1.0, 0.0, 0.0, -1.0), (0.0, 0.0)),            # the y flip
+    ((0.0, -1.0, 1.0, 0.0), (1.0, 2.0)),            # a quarter turn
+    ((0.8660254037844386, -0.5, 0.5, 0.8660254037844386), (0.0, 0.0)),  # a rotation by 30
+    ((3.0, 0.0, 0.0, 0.5), (1.0, 1.0)),             # non-uniform scale
+    ((1.0, 0.75, 0.0, 1.0), (0.0, 0.0)),            # a skew
+    ((0.6, 0.8, 0.8, -0.6), (0.5, -0.5)),           # a mirror (reflection) with a translation
+)
+for (c, u, v) in (ELL, CIR, ROT):
+    for unit, q in (("degrees", 90.0), ("radians", 1.5707963267948966), ("turns", 0.25)):
+        for t0, mult in ((0.0, 1.0), (-0.7 * q, 3.0), (0.3 * q, 4.0)):
+            for sg in (1.0, -1.0):
+                sw = sg * mult * q
+                for (m, t) in MAPS:
+                    M = ((m[0], m[1]), (m[2], m[3]))
+                    mc, mu, mv = O.map_ellipse(M, t, c, u, v)
+                    pts = []
+                    for k in range(5):
+                        tk = t0 + sw * k / 4.0
+                        pts.append(O.ellipse_point((float(mc[0]), float(mc[1])), (float(mu[0]), float(mu[1])), (float(mv[0]), float(mv[1])), unit, tk))
+                    # the oracle's points use the exact mapped half-diameters, not their doubles: recompute exactly
+                    exact_pts = []
+                    for k in range(5):
+                        tk = t0 + sw * k / 4.0
+                        cs, sn = O.sincos_unit(tk, unit)
+                        exact_pts.append((mc[0] + mu[0] * cs + mv[0] * sn, mc[1] + mu[1] * cs + mv[1] * sn))
+                    sc = max(scale_of([(float(x), float(y)) for (x, y) in exact_pts], ((float(mu[0]), float(mu[1])), (float(mv[0]), float(mv[1])))), 1.0)
+                    mappeds.append([c[0], c[1], u[0], u[1], v[0], v[1], UNIT_ID[unit], t0, sw, m[0], m[1], m[2], m[3], t[0], t[1],
+                                    exact_pts, sc])
+w("static const Box boxes[] = {")
+for r in boxes:
+    w("    {" + ", ".join(str(int(x)) if i == 6 else hexf(x) for i, x in enumerate(r)) + "},")
+w("};")
+w("static const size_t box_count = sizeof boxes / sizeof boxes[0];")
+w("static const Length lengths[] = {")
+for r in lengths:
+    w("    {" + ", ".join(str(int(x)) if i == 4 else hexf(x) for i, x in enumerate(r)) + "},")
+w("};")
+w("static const size_t length_count = sizeof lengths / sizeof lengths[0];")
+w("static const Mapped mappeds[] = {")
+for r in mappeds:
+    head = [str(int(x)) if i == 6 else hexf(x) for i, x in enumerate(r[:15])]
+    pts = "{" + ", ".join("{%s, %s}" % (hexf(x), hexf(y)) for (x, y) in r[15]) + "}"
+    w("    {" + ", ".join(head) + ", " + pts + ", " + hexf(r[16]) + "},")
+w("};")
+w("static const size_t mapped_count = sizeof mappeds / sizeof mappeds[0];")
+
 w("")
 w("} // namespace arc_vectors")
 w("")

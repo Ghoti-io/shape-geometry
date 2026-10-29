@@ -33,6 +33,7 @@ Run `python3 tools/arc-oracle.py` to check the oracle against itself: that the e
 ellipse it returns to 1e-100, that the flags select the four arcs, and the identities of the
 pieces.
 """
+import math
 from decimal import Decimal, getcontext
 from fractions import Fraction
 
@@ -352,6 +353,101 @@ def sincos_unit_dec(t, unit):
     return c, s
 
 
+# --- bounds, length and mapped ellipses (AR10 to AR12) -------------------------
+
+def ellipse_box(c, u, v, unit, t0, sweep):
+    """The exact box of the arc c + u cos t + v sin t, t from t0 to t0 + sweep: the ends and every interior extremum.
+
+    x'(t) = -u.x sin t + v.x cos t is zero at t = atan2(v.x, u.x) + k pi (and y likewise)."""
+    ta = to_radians(t0, unit)
+    tb = to_radians(t0 + sweep, unit) if unit != "radians" else D(t0) + D(sweep)
+    lo, hi = min(ta, tb), max(ta, tb)
+    ts = [ta, tb]
+    for a, b in ((u[0], v[0]), (u[1], v[1])):
+        if a == 0 and b == 0:
+            continue
+        base = atan2(D(b), D(a))
+        k = int(((lo - base) / PI).to_integral_value(rounding="ROUND_FLOOR")) - 1
+        while base + PI * k <= hi:
+            t = base + PI * k
+            if lo <= t <= hi:
+                ts.append(t)
+            k += 1
+    pts = []
+    for t in ts:
+        sn, cs = sincos_rad(t)
+        pts.append((D(c[0]) + D(u[0]) * cs + D(v[0]) * sn, D(c[1]) + D(u[1]) * cs + D(v[1]) * sn))
+    return (min(q[0] for q in pts), min(q[1] for q in pts), max(q[0] for q in pts), max(q[1] for q in pts))
+
+
+_GL_NODES = None
+
+
+def _gauss_legendre(n=16):
+    """The nodes and weights on [-1, 1], by Newton's method on the Legendre polynomial, in 130 digits."""
+    global _GL_NODES
+    if _GL_NODES is not None:
+        return _GL_NODES
+    nodes = []
+    for i in range(1, n + 1):
+        x = D(math.cos(math.pi * (i - 0.25) / (n + 0.5)))
+        for _ in range(12):
+            p0, p1 = ONE, x
+            for k in range(2, n + 1):
+                p0, p1 = p1, ((2 * k - 1) * x * p1 - (k - 1) * p0) / k
+            dp = n * (x * p1 - p0) / (x * x - 1)
+            x = x - p1 / dp
+        p0, p1 = ONE, x
+        for k in range(2, n + 1):
+            p0, p1 = p1, ((2 * k - 1) * x * p1 - (k - 1) * p0) / k
+        dp = n * (x * p1 - p0) / (x * x - 1)
+        nodes.append((x, 2 / ((1 - x * x) * dp * dp)))
+    _GL_NODES = nodes
+    return nodes
+
+
+def arc_length(u, v, unit, t0, sweep):
+    """The length of the arc: the integral of |-u sin t + v cos t| over the parameter in radians, adaptive
+    16-point Gauss-Legendre, each panel accepted when it agrees with its two halves to 1e-40 of the total."""
+    ta = to_radians(t0, unit)
+    tb = to_radians(t0 + sweep, unit) if unit != "radians" else D(t0) + D(sweep)
+    uu = (D(u[0]), D(u[1]))
+    vv = (D(v[0]), D(v[1]))
+    nodes = _gauss_legendre()
+
+    def speed(t):
+        sn, cs = sincos_rad(t)
+        return ((-uu[0] * sn + vv[0] * cs) ** 2 + (-uu[1] * sn + vv[1] * cs) ** 2).sqrt()
+
+    def panel(a, b):
+        half, mid = (b - a) / 2, (a + b) / 2
+        return half * sum(w * speed(mid + half * x) for x, w in nodes)
+
+    total = ZERO
+    stack = [(ta, tb, 0)]
+    # a first pass to scale the tolerance
+    scale = abs(tb - ta) * max(abs(uu[0]), abs(uu[1]), abs(vv[0]), abs(vv[1]))
+    tol = scale * D(10) ** -40
+    while stack:
+        a, b, depth = stack.pop()
+        m = (a + b) / 2
+        whole, l, r = panel(a, b), panel(a, m), panel(m, b)
+        if abs(whole - l - r) <= tol * abs(b - a) / abs(tb - ta) or depth > 40:
+            total += l + r
+        else:
+            stack.append((a, m, depth + 1))
+            stack.append((m, b, depth + 1))
+    return total if tb >= ta else -total
+
+
+def map_ellipse(M, t, c, u, v):
+    """The ellipse under the affine map x -> M x + t, exactly: the centre as a point, u and v as vectors."""
+    def vec(q):
+        return (D(M[0][0]) * D(q[0]) + D(M[0][1]) * D(q[1]), D(M[1][0]) * D(q[0]) + D(M[1][1]) * D(q[1]))
+    mc = vec(c)
+    return ((mc[0] + D(t[0]), mc[1] + D(t[1])), vec(u), vec(v))
+
+
 # --- self check -----------------------------------------------------------------
 
 def _close(a, b, tol=D(10) ** -100):
@@ -389,6 +485,11 @@ def _self_check():
     assert len(ps) == 4 and all(_close(p[3], D("0.5").sqrt()) for p in ps)
     assert ps[0][0] == (D(2), D(0)) and ps[0][2] == (D(0), D(2))
     assert _close(ps[0][1][0], D(2)) and _close(ps[0][1][1], D(2))
+    # bounds: the unit circle's quarter from 10 to 100 degrees contains the top; its length is r * sweep
+    bx = ellipse_box((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), "degrees", 10.0, 90.0)
+    assert _close(bx[3], ONE) and _close(bx[2], sincos_unit(10.0, "degrees")[0]) and _close(bx[0], sincos_unit(100.0, "degrees")[0])
+    ln = arc_length((2.0, 0.0), (0.0, 2.0), "degrees", 10.0, 120.0)
+    assert _close(ln, 2 * 2 * PI / 3, D(10) ** -30), ln
     print("arc-oracle: self check ok")
 
 
