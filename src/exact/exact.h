@@ -101,4 +101,12 @@ void gshgeom_exact_sum_add(GSHGEOM_ExactSum * s, int neg, int n, const double * 
 /** The sign of the sum: -1, 0 or +1, exactly (0 after a bad term). */
 int gshgeom_exact_sum_sign(const GSHGEOM_ExactSum * s);
 
+/**
+ * The sum rounded once to the nearest `double` (ties to even), exactly: the accumulator is a
+ * whole number times a power of two, so the rounding is that of one integer.  The result is
+ * correctly rounded while it is a normal number; a result below the smallest normal (or past
+ * the largest) is the product of two roundings and is not claimed exact.
+ */
+double gshgeom_exact_sum_to_double(const GSHGEOM_ExactSum * s);
+
 #endif /* GHOTI_IO_GSHGEOM_EXACT_H */

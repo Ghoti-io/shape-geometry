@@ -255,7 +255,7 @@ TESTFLAGS := `PKG_CONFIG_PATH=$(PKG_CONFIG_LOOKUP_PATH) pkg-config --libs --cfla
 
 # coverage clears this: --coverage links the gcov runtime, whose mangle_path
 # check-symbols is right to reject in a shipping library.
-TEST_GATES ?= check-symbols check-aliasing check-stamps check-fp-contract check-edges check-libm check-libm-o0 check-no-x87 check-gates check-corpus-hash check-fuzz-corpus fuzz-replay run-examples
+TEST_GATES ?= check-symbols check-aliasing check-stamps check-fp-contract check-edges check-libm check-libm-o0 check-no-x87 check-gates check-verb-walkers check-corpus-hash check-fuzz-corpus fuzz-replay run-examples
 
 PLANT_JOBS ?= 4
 
@@ -385,7 +385,7 @@ $(HASH_PROBE): tools/corpus-hash.c $(APP_DIR)/$(STATIC_TARGET) \
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: run-examples
 .PHONY: check-corpus-hash check-planted check-resvg-stroke check-resvg-zoom
-.PHONY: check-fp-contract check-edges check-libm check-libm-o0 check-no-x87 check-gates libver-gen
+.PHONY: check-verb-walkers check-fp-contract check-edges check-libm check-libm-o0 check-no-x87 check-gates libver-gen
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
 .PHONY: fuzz fuzz-clean check-fuzz-corpus fuzz-replay
@@ -564,6 +564,10 @@ check-planted: $(HASH_PROBE) $(LIBOBJECTS) $(TEST_EXECUTABLES) ## Fail unless ea
 	 PLANT_TESTS='$(TEST_NAMES)' PLANT_APP_DIR='$(APP_DIR)' PLANT_OBJ_DIR='$(OBJ_DIR)' \
 	 PLANT_LD_PATH='$(TEST_LD_PATH)' PLANT_WORK='$(BUILD_DIR)/planted' PLANT_JOBS='$(PLANT_JOBS)' \
 	 python3 tools/check-planted.py
+
+check-verb-walkers: ## Every site that reads a path by verb is audited (tools/verb-walkers.audit), and the gate is seen to fail
+	@tools/check-verb-walkers.sh
+	@tools/check-walker-gate.sh
 
 check-gates: ## Prove each gate fails on its planted violation and passes its control
 	@CC='$(CC)' GATE_PROJECT='$(PROJECT)' GATE_ALLOWED='$(EDGES_ALLOWED)' GATE_LIBM_EXEMPT='$(LIBM_EXEMPT)' tools/check-gates.sh

@@ -29,6 +29,7 @@
 
 #include <ghoti.io/shape-geometry/allocator.h>
 #include <ghoti.io/shape-geometry/along.h>
+#include <ghoti.io/shape-geometry/arc.h>
 #include <ghoti.io/shape-geometry/core.h>
 #include <ghoti.io/shape-geometry/curve.h>
 #include <ghoti.io/shape-geometry/device.h>

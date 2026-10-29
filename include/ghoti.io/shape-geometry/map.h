@@ -98,6 +98,24 @@ typedef enum GSHGEOM_Axis {
 } GSHGEOM_Axis;
 
 /**
+ * @brief The cosine and sine of an angle in a unit, with the quarter turns exact.
+ *
+ * In degrees, gradians and turns a multiple of a quarter turn gives exactly 0 and +-1 (never
+ * `-0`); the rest goes through `gmath_cos` and `gmath_sin` after one multiplication by the
+ * radians per unit.  Radians go to `gmath_cos` and `gmath_sin` whole.  This is the code
+ * ::gshgeom_map_rotate uses.
+ *
+ * @param unit The unit.
+ * @param angle The angle, finite.
+ * @param c Receives the cosine; written only on success.
+ * @param s Receives the sine; written only on success.
+ * @return ::GSHGEOM_OK, ::GSHGEOM_ERR_INVALID (unit, non-finite angle, NULL) or
+ *   ::GSHGEOM_ERR_LIMIT (more than ::GSHGEOM_MAP_MAX_QUARTERS quarter turns in degrees, gradians or turns).
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_sincos(
+    GSHGEOM_Angle_Unit unit, double angle, double * c, double * s);
+
+/**
  * The classes a map was built from, as a bit set (the kind tag).  Zero is the
  * identity.
  */

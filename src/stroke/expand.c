@@ -78,7 +78,7 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
     GSHGEOM_Element el;
     GSHGEOM_Result r = gshgeom_path_element(path, i, &el);
     if (r != GSHGEOM_OK) {
-      return GSHGEOM_ERR_INTERNAL;
+      return r == GSHGEOM_ERR_UNSUPPORTED ? r : GSHGEOM_ERR_INTERNAL; /* an arc is refused, never drawn as its chord */
     }
     GSHGEOM_Curve cv = el.curve;
     if (!c->local) {

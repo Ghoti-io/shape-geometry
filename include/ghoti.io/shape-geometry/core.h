@@ -49,7 +49,7 @@ typedef enum {
   GSHGEOM_OK = 0,          ///< The operation succeeded.
   GSHGEOM_ERR_IO,          ///< A write to a caller's stream failed.
   GSHGEOM_ERR_FORMAT,      ///< Not returned by this library.
-  GSHGEOM_ERR_UNSUPPORTED, ///< A stroke this library does not define yet (stroke.h: a 3D centerline, a width profile, a DXF pattern that cannot be lowered).
+  GSHGEOM_ERR_UNSUPPORTED, ///< A stroke this library does not define yet (stroke.h: a 3D centerline, a width profile, a DXF pattern that cannot be lowered; path.h: reading an arc element as a curve, and a consumer that does not yet take arcs).
   GSHGEOM_ERR_LIMIT,       ///< A stated cap was exceeded; nothing was truncated.
   GSHGEOM_ERR_CORRUPT,     ///< Not returned by this library.
   GSHGEOM_ERR_OOM,         ///< The allocator returned NULL.

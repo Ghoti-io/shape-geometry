@@ -173,3 +173,81 @@ int gshgeom_exact_sum_sign(const GSHGEOM_ExactSum * s) {
   }
   return 0;
 }
+
+double gshgeom_exact_sum_to_double(const GSHGEOM_ExactSum * s) {
+  if (s->bad) {
+    return 0.0;
+  }
+  uint32_t mag[GSHGEOM_EXACT_SUM_WORDS];
+  int neg = (s->w[GSHGEOM_EXACT_SUM_WORDS - 1] & 0x80000000u) != 0;
+  if (neg) {
+    /* two's complement negation: invert and add one */
+    uint64_t carry = 1;
+    for (unsigned i = 0; i < GSHGEOM_EXACT_SUM_WORDS; i++) {
+      uint64_t cur = (uint64_t)(uint32_t)~s->w[i] + carry;
+      mag[i] = (uint32_t)(cur & 0xffffffffu);
+      carry = cur >> 32;
+    }
+  } else {
+    memcpy(mag, s->w, sizeof mag);
+  }
+  long hi = -1; /* index of the highest nonzero word */
+  for (long i = GSHGEOM_EXACT_SUM_WORDS - 1; i >= 0; i--) {
+    if (mag[i]) {
+      hi = i;
+      break;
+    }
+  }
+  if (hi < 0) {
+    return 0.0;
+  }
+  unsigned lead = 31u;
+  while (!((mag[hi] >> lead) & 1u)) {
+    lead--;
+  }
+  long top = hi * 32 + (long)lead; /* the position of the leading bit */
+  /* the 64 bits from the leading bit down (zero-filled below bit 0), and whether anything lies below them */
+  uint64_t m64 = 0;
+  int sticky = 0;
+  for (int k = 0; k < 64; k++) {
+    long b = top - k;
+    m64 <<= 1;
+    if (b >= 0 && ((mag[b / 32] >> (b % 32)) & 1u)) {
+      m64 |= 1u;
+    }
+  }
+  for (long b = top - 64; b >= 0 && !sticky; b--) {
+    if ((mag[b / 32] >> (b % 32)) & 1u) {
+      sticky = 1;
+    }
+  }
+  uint64_t m = m64 >> 11;
+  uint64_t rest = m64 & 0x7ffu;
+  if (rest > 0x400u || (rest == 0x400u && (sticky || (m & 1u)))) {
+    m++;
+  }
+  long e2 = top - 52 - SUM_BASE; /* the value is m * 2^e2 */
+  if (m == (UINT64_C(1) << 53)) {
+    m >>= 1;
+    e2++;
+  }
+  double v = (double)(int64_t)m;
+  /* scale by 2^e2 in steps that are themselves exact powers of two */
+  while (e2 > 0) {
+    long st = e2 > 1000 ? 1000 : e2;
+    uint64_t bits = (uint64_t)(st + 1023) << 52;
+    double p;
+    memcpy(&p, &bits, sizeof p);
+    v *= p;
+    e2 -= st;
+  }
+  while (e2 < 0) {
+    long st = e2 < -1000 ? -1000 : e2;
+    uint64_t bits = (uint64_t)(st + 1023) << 52;
+    double p;
+    memcpy(&p, &bits, sizeof p);
+    v *= p;
+    e2 -= st;
+  }
+  return neg ? -v : v;
+}

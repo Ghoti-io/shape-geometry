@@ -54,9 +54,10 @@ static void read_seg(const GSHGEOM_Element * el, Seg * s) {
   s->extent = gshgeom_sk_start_dir(&k, &s->start) >= 0 && gshgeom_sk_end_dir(&k, &s->end) >= 0;
 }
 
-/** Element @p i, or ::GSHGEOM_ERR_INTERNAL. */
+/** Element @p i, ::GSHGEOM_ERR_UNSUPPORTED for an arc (not yet read here: never the chord), or ::GSHGEOM_ERR_INTERNAL. */
 static GSHGEOM_Result element(const GSHGEOM_Path * path, size_t i, GSHGEOM_Element * el) {
-  return gshgeom_path_element(path, i, el) == GSHGEOM_OK ? GSHGEOM_OK : GSHGEOM_ERR_INTERNAL;
+  GSHGEOM_Result r = gshgeom_path_element(path, i, el);
+  return r == GSHGEOM_OK ? GSHGEOM_OK : r == GSHGEOM_ERR_UNSUPPORTED ? r : GSHGEOM_ERR_INTERNAL;
 }
 
 static GSHGEOM_Point to_point(GSHGEOM_SK_Vec v) {

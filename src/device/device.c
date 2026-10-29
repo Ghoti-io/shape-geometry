@@ -477,6 +477,8 @@ static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
   }
   case GSHGEOM_VERB_CLOSE:
     return gshgeom_device_path_close(dp);
+  case GSHGEOM_VERB_ARC:
+    return GSHGEOM_ERR_UNSUPPORTED; /* the device route of an arc is not defined yet; never its chord */
   case GSHGEOM_VERB_COUNT:
     break;
   }
@@ -506,7 +508,7 @@ GSHGEOM_Result gshgeom_device_path_from_model(const GSHGEOM_Path * path,
     GSHGEOM_Element el;
     r = gshgeom_path_element(path, i, &el);
     if (r != GSHGEOM_OK) {
-      r = GSHGEOM_ERR_INTERNAL;
+      r = r == GSHGEOM_ERR_UNSUPPORTED ? r : GSHGEOM_ERR_INTERNAL; /* an arc is refused, never drawn as its chord */
       break;
     }
     r = convert_element(dp, map, &el);

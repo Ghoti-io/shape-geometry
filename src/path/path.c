@@ -36,33 +36,14 @@
 #include <ghoti.io/shape-geometry/hash.h>
 #include <ghoti.io/shape-geometry/path.h>
 
+#include "path_internal.h"
+
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct Elem {
-  uint8_t verb;
-  size_t point;  /* index of its first stored point */
-  size_t weight; /* index of its first weight (rational verbs) */
-} Elem;
-
-struct GSHGEOM_Path {
-  GSHGEOM_Allocator alloc;
-  size_t max_elements;
-  int dim;
-  Elem * el;
-  size_t el_n, el_cap;
-  GSHGEOM_Point * pt;
-  size_t pt_n, pt_cap;
-  double * wt;
-  size_t wt_n, wt_cap;
-  int has_current; /* a move has been made */
-  GSHGEOM_Point current;
-  GSHGEOM_Point start;
-};
-
 /* Points stored with a verb (the control points after the start, and the end),
  * and weights. */
-static size_t verb_points(int verb) {
+size_t gshgeom_path_verb_points(int verb) {
   switch (verb) {
   case GSHGEOM_VERB_MOVE:
   case GSHGEOM_VERB_LINE:
@@ -74,16 +55,22 @@ static size_t verb_points(int verb) {
   case GSHGEOM_VERB_CUBIC:
   case GSHGEOM_VERB_RATIONAL_CUBIC:
     return 3;
+  case GSHGEOM_VERB_ARC:
+    return 4;
   default:
     return 0;
   }
 }
 
-static size_t verb_weights(int verb) {
+size_t gshgeom_path_verb_weights(int verb) {
   return verb == GSHGEOM_VERB_RATIONAL_QUADRATIC ? 3
-      : verb == GSHGEOM_VERB_RATIONAL_CUBIC     ? 4
-                                                : 0;
+      : verb == GSHGEOM_VERB_RATIONAL_CUBIC      ? 4
+      : verb == GSHGEOM_VERB_ARC                 ? 2
+                                                 : 0;
 }
+
+#define verb_points gshgeom_path_verb_points
+#define verb_weights gshgeom_path_verb_weights
 
 GSHGEOM_Result gshgeom_path_create(const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, int dim, GSHGEOM_Path ** out) {
@@ -151,10 +138,15 @@ static GSHGEOM_Result reserve(const GSHGEOM_Allocator * alloc, void * array,
   return GSHGEOM_OK;
 }
 
-/* Add one element: the limit first, then every reservation, and only then the
- * stores, so a failure changes nothing but capacity. */
 static GSHGEOM_Result append(GSHGEOM_Path * path, int verb,
     const GSHGEOM_Point * pts, const double * weights) {
+  return gshgeom_path_append_raw(path, verb, 0, 0, pts, weights);
+}
+
+/* Add one element: the limit first, then every reservation, and only then the
+ * stores, so a failure changes nothing but capacity. */
+GSHGEOM_Result gshgeom_path_append_raw(GSHGEOM_Path * path, int verb, unsigned unit,
+    unsigned flags, const GSHGEOM_Point * pts, const double * weights) {
   size_t np = verb_points(verb);
   size_t nw = verb_weights(verb);
   if (path->el_n >= path->max_elements) {
@@ -181,6 +173,8 @@ static GSHGEOM_Result append(GSHGEOM_Path * path, int verb,
   path->wt = grown;
   Elem * e = &path->el[path->el_n];
   e->verb = (uint8_t)verb;
+  e->unit = (uint8_t)unit;
+  e->flags = (uint8_t)flags;
   e->point = path->pt_n;
   e->weight = path->wt_n;
   for (size_t i = 0; i < np; i++) {
@@ -332,6 +326,9 @@ GSHGEOM_Result gshgeom_path_element(
     return GSHGEOM_ERR_INVALID;
   }
   const Elem * e = &path->el[index];
+  if (e->verb == GSHGEOM_VERB_ARC) {
+    return GSHGEOM_ERR_UNSUPPORTED; /* a walker that does not know arcs must fail, not draw the chord */
+  }
   size_t np = verb_points(e->verb);
   GSHGEOM_Element el = {0};
   el.verb = (GSHGEOM_Verb)e->verb;
@@ -379,6 +376,86 @@ GSHGEOM_Result gshgeom_path_element(
   return GSHGEOM_OK;
 }
 
+GSHGEOM_Point gshgeom_path_element_start(const GSHGEOM_Path * path, size_t i) {
+  if (i > 0) {
+    const Elem * prev = &path->el[i - 1];
+    return path->pt[prev->point + verb_points(prev->verb) - 1];
+  }
+  return path->pt[path->el[i].point];
+}
+
+GSHGEOM_Result gshgeom_path_verb(const GSHGEOM_Path * path, size_t index, GSHGEOM_Verb * out) {
+  if (!path || !out || index >= path->el_n) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  *out = (GSHGEOM_Verb)path->el[index].verb;
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_path_copy(const GSHGEOM_Path * path, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Path ** out) {
+  if (!path || !out) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  GSHGEOM_Path * dst;
+  GSHGEOM_Result r = gshgeom_path_create(alloc, limits, path->dim, &dst);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  /* The stored numbers go over raw: they were checked when they were stored, and a copy must not
+   * change a bit.  The move's and the close's bookkeeping is what the builders would have set. */
+  for (size_t i = 0; i < path->el_n && r == GSHGEOM_OK; i++) {
+    const Elem * e = &path->el[i];
+    r = gshgeom_path_append_raw(
+        dst, e->verb, e->unit, e->flags, &path->pt[e->point], &path->wt[e->weight]);
+    if (r == GSHGEOM_OK && e->verb == GSHGEOM_VERB_MOVE) {
+      dst->has_current = 1;
+      dst->start = path->pt[e->point];
+    }
+  }
+  if (r != GSHGEOM_OK) {
+    gshgeom_path_destroy(dst);
+    return r;
+  }
+  dst->has_current = path->has_current;
+  dst->current = path->current;
+  dst->start = path->start;
+  *out = dst;
+  return GSHGEOM_OK;
+}
+
+static int same_point(const GSHGEOM_Point * a, const GSHGEOM_Point * b) {
+  return gshgeom_f64_bits(a->x) == gshgeom_f64_bits(b->x) && gshgeom_f64_bits(a->y) == gshgeom_f64_bits(b->y)
+      && gshgeom_f64_bits(a->z) == gshgeom_f64_bits(b->z);
+}
+
+int gshgeom_path_equal(const GSHGEOM_Path * a, const GSHGEOM_Path * b) {
+  if (!a || !b) {
+    return a == b;
+  }
+  if (a->dim != b->dim || a->el_n != b->el_n) {
+    return 0;
+  }
+  for (size_t i = 0; i < a->el_n; i++) {
+    const Elem * x = &a->el[i];
+    const Elem * y = &b->el[i];
+    if (x->verb != y->verb || x->unit != y->unit || x->flags != y->flags) {
+      return 0;
+    }
+    for (size_t k = 0; k < verb_points(x->verb); k++) {
+      if (!same_point(&a->pt[x->point + k], &b->pt[y->point + k])) {
+        return 0;
+      }
+    }
+    for (size_t k = 0; k < verb_weights(x->verb); k++) {
+      if (gshgeom_f64_bits(a->wt[x->weight + k]) != gshgeom_f64_bits(b->wt[y->weight + k])) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 GSHGEOM_Result gshgeom_path_bounds(
     const GSHGEOM_Path * path, GSHGEOM_Bounds * out) {
   if (!path || !out) {
@@ -391,25 +468,41 @@ GSHGEOM_Result gshgeom_path_bounds(
     if (verb == GSHGEOM_VERB_MOVE || verb == GSHGEOM_VERB_CLOSE) {
       continue;
     }
-    GSHGEOM_Element el;
-    GSHGEOM_Bounds b;
-    GSHGEOM_Result r = gshgeom_path_element(path, i, &el);
-    if (r == GSHGEOM_OK) {
-      r = gshgeom_curve_bounds(&el.curve, &b);
+    GSHGEOM_Curve curves[GSHGEOM_ARC_MAX_PIECES];
+    int nc = 1;
+    GSHGEOM_Result r = GSHGEOM_OK;
+    if (verb == GSHGEOM_VERB_ARC) {
+      /* the union of the boxes of the pieces (their ends include the arc's own) */
+      GSHGEOM_Arc arc;
+      r = gshgeom_path_arc(path, i, &arc);
+      if (r == GSHGEOM_OK) {
+        r = gshgeom_arc_pieces(&arc, curves, &nc);
+      }
+    } else {
+      GSHGEOM_Element el;
+      r = gshgeom_path_element(path, i, &el);
+      curves[0] = el.curve;
+    }
+    for (int k = 0; k < nc && r == GSHGEOM_OK; k++) {
+      GSHGEOM_Bounds b;
+      r = gshgeom_curve_bounds(&curves[k], &b);
+      if (r != GSHGEOM_OK) {
+        break;
+      }
+      if (box.empty) {
+        box = b;
+      } else {
+        if (b.min.x < box.min.x) box.min.x = b.min.x;
+        if (b.min.y < box.min.y) box.min.y = b.min.y;
+        if (b.min.z < box.min.z) box.min.z = b.min.z;
+        if (b.max.x > box.max.x) box.max.x = b.max.x;
+        if (b.max.y > box.max.y) box.max.y = b.max.y;
+        if (b.max.z > box.max.z) box.max.z = b.max.z;
+      }
     }
     if (r != GSHGEOM_OK) {
       /* Every stored segment was validated, so this is our own invariant. */
       return GSHGEOM_ERR_INTERNAL;
-    }
-    if (box.empty) {
-      box = b;
-    } else {
-      if (b.min.x < box.min.x) box.min.x = b.min.x;
-      if (b.min.y < box.min.y) box.min.y = b.min.y;
-      if (b.min.z < box.min.z) box.min.z = b.min.z;
-      if (b.max.x > box.max.x) box.max.x = b.max.x;
-      if (b.max.y > box.max.y) box.max.y = b.max.y;
-      if (b.max.z > box.max.z) box.max.z = b.max.z;
     }
   }
   *out = box;
@@ -446,6 +539,24 @@ uint64_t gshgeom_path_hash(const GSHGEOM_Path * path) {
     if (e->verb == GSHGEOM_VERB_CLOSE) {
       continue;
     }
+    if (e->verb == GSHGEOM_VERB_ARC) {
+      /* flags, unit, then start, end, centre, u, v, t0, sweep (path.h's comment, arc.h) */
+      GSHGEOM_Point st = gshgeom_path_element_start(path, i);
+      const GSHGEOM_Point * q = &path->pt[e->point]; /* center, u, v, end */
+      gshgeom_hash_u8(&h, e->flags);
+      gshgeom_hash_u8(&h, e->unit);
+      gshgeom_hash_f64(&h, st.x);
+      gshgeom_hash_f64(&h, st.y);
+      gshgeom_hash_f64(&h, q[3].x);
+      gshgeom_hash_f64(&h, q[3].y);
+      for (int k = 0; k < 3; k++) {
+        gshgeom_hash_f64(&h, q[k].x);
+        gshgeom_hash_f64(&h, q[k].y);
+      }
+      gshgeom_hash_f64(&h, path->wt[e->weight]);
+      gshgeom_hash_f64(&h, path->wt[e->weight + 1]);
+      continue;
+    }
     for (size_t k = 0; k < verb_points(e->verb); k++) {
       hash_point(&h, &path->pt[e->point + k], path->dim);
     }
@@ -469,7 +580,7 @@ static int put_point(FILE * out, const GSHGEOM_Point * p, int dim) {
 
 GSHGEOM_Result gshgeom_path_dump(const GSHGEOM_Path * path, FILE * out) {
   static const char * const names[GSHGEOM_VERB_COUNT] = {
-      "M", "L", "Q", "C", "RQ", "RC", "Z"};
+      "M", "L", "Q", "C", "RQ", "RC", "Z", "A"};
   if (!path || !out) {
     return GSHGEOM_ERR_INVALID;
   }
@@ -485,7 +596,22 @@ GSHGEOM_Result gshgeom_path_dump(const GSHGEOM_Path * path, FILE * out) {
     if (fputs(names[e->verb], out) < 0) {
       return GSHGEOM_ERR_IO;
     }
-    if (e->verb != GSHGEOM_VERB_CLOSE) {
+    if (e->verb == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Point st = gshgeom_path_element_start(path, i);
+      const GSHGEOM_Point * q = &path->pt[e->point];
+      if (fprintf(out, " %u %u", (unsigned)e->flags, (unsigned)e->unit) < 0 || put_f64(out, st.x) < 0
+          || put_f64(out, st.y) < 0 || put_f64(out, q[3].x) < 0 || put_f64(out, q[3].y) < 0) {
+        return GSHGEOM_ERR_IO;
+      }
+      for (int k = 0; k < 3; k++) {
+        if (put_f64(out, q[k].x) < 0 || put_f64(out, q[k].y) < 0) {
+          return GSHGEOM_ERR_IO;
+        }
+      }
+      if (put_f64(out, path->wt[e->weight]) < 0 || put_f64(out, path->wt[e->weight + 1]) < 0) {
+        return GSHGEOM_ERR_IO;
+      }
+    } else if (e->verb != GSHGEOM_VERB_CLOSE) {
       for (size_t k = 0; k < verb_weights(e->verb); k++) {
         if (put_f64(out, path->wt[e->weight + k]) < 0) {
           return GSHGEOM_ERR_IO;

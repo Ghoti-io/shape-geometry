@@ -176,6 +176,16 @@ static GSHGEOM_Result vertex_feed(const GSHGEOM_Vertex * v, void * ctx) {
   return GSHGEOM_OK;
 }
 
+static void feed_arc_int(int v, GSHGEOM_Hash * h, unsigned long * n) {
+  (*n)++;
+  gshgeom_hash_u32(h, (uint32_t)v);
+}
+
+static void feed_arc_u64(uint64_t v, GSHGEOM_Hash * h, unsigned long * n) {
+  (*n)++;
+  gshgeom_hash_u64(h, v);
+}
+
 int main(void) {
   gshgeom_hash_init(&total);
 
@@ -1075,6 +1085,79 @@ int main(void) {
     }
     printf("shape-geometry.vertex-hash %016" PRIx64 "\n", gshgeom_hash_value(&vs.total));
     printf("shape-geometry.vertex-count %lu\n", vs.count);
+  }
+
+  /* The arc section (arc.h): random arcs from every constructor and their pieces, bit for bit.  The inputs are doubles
+   * with short fractions (so that quarter-aligned and near-degenerate cases are common) and fine ones (so that the
+   * sines, cosines, arctangents and square roots of math, the exact sums and the rounding of the radicand all show a
+   * difference between targets).  Its own pair after the others, so they never move. */
+  {
+    GSHGEOM_Hash arc_total;
+    unsigned long arc_count = 0;
+    gshgeom_hash_init(&arc_total);
+    static const GSHGEOM_Angle_Unit units[4] = {
+        GSHGEOM_ANGLE_RADIANS, GSHGEOM_ANGLE_DEGREES, GSHGEOM_ANGLE_GRADIANS, GSHGEOM_ANGLE_TURNS};
+    static const double phis[8] = {0.0, 90.0, 45.5, -30.0, 180.0, 360.0, 720.0, 12.25};
+    for (unsigned round = 0; round < 500; round++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("cannot make a path for the arc section");
+      }
+      const unsigned fine = round % 2u;
+      GSHGEOM_Point s = vertex_point(fine);
+      if (gshgeom_path_move_to(path, s) != GSHGEOM_OK) {
+        return fail("cannot begin a path for the arc section");
+      }
+      for (unsigned step = 0; step < 4; step++) {
+        const unsigned form = (unsigned)(next() % 6u);
+        GSHGEOM_Result r = GSHGEOM_OK;
+        GSHGEOM_Point e = vertex_point(fine);
+        if (form <= 2) {
+          const double rx = fine ? 0.25 + (double)(next() % 4096u) / 256.0 : (double)(1u + next() % 12u);
+          const double ry = (next() % 3u == 0u) ? rx : (fine ? 0.25 + (double)(next() % 4096u) / 256.0 : (double)(1u + next() % 12u));
+          GSHGEOM_Arc_Kind kind = GSHGEOM_ARC_KIND_NOTHING;
+          r = gshgeom_path_arc_endpoint_to(path, e, rx, ry, phis[next() % 8u], GSHGEOM_ANGLE_DEGREES,
+              (int)(next() % 2u), (int)(next() % 2u), &kind);
+          feed_arc_int((int)kind, &arc_total, &arc_count);
+        } else if (form == 3) {
+          const double t0 = (double)((int)(next() % 721u) - 360);
+          const double sw = (double)((int)(next() % 719u) - 359) + (fine ? (double)(next() % 8u) / 8.0 : 0.0);
+          const unsigned u = (unsigned)(next() % 4u);
+          const double scale = u == 1u ? 1.0 : u == 2u ? 400.0 / 360.0 : u == 3u ? 1.0 / 360.0 : 3.14159265358979323846 / 180.0;
+          /* the centre form begins its own subpath (no current point), so it goes into a path of its own */
+          GSHGEOM_Path * own = NULL;
+          if (gshgeom_path_create(NULL, NULL, 2, &own) != GSHGEOM_OK) {
+            return fail("cannot make a path for a centre-form arc");
+          }
+          r = gshgeom_path_arc_center_to(own, e, 2.0 + (double)(next() % 9u), 1.0 + (double)(next() % 9u),
+              phis[next() % 8u] * scale, units[u], t0 * scale, sw == 0.0 ? scale : sw * scale, NULL);
+          feed_arc_u64(gshgeom_path_hash(own), &arc_total, &arc_count);
+          gshgeom_path_destroy(own);
+          r = r == GSHGEOM_OK ? GSHGEOM_OK : r;
+        } else if (form == 4) {
+          r = gshgeom_path_arc_tangent_to(path, e, vertex_point(fine), (double)(next() % 5u) * 0.75);
+        } else {
+          r = gshgeom_path_arc_bulge_to(path, e, (double)((int)(next() % 41u) - 20) / 8.0);
+        }
+        feed_arc_int((int)r, &arc_total, &arc_count);
+      }
+      feed_arc_u64(gshgeom_path_hash(path), &arc_total, &arc_count);
+      GSHGEOM_Path * lowered = NULL;
+      if (gshgeom_path_lower_arcs(path, NULL, NULL, &lowered) != GSHGEOM_OK) {
+        return fail("cannot lower the paths of the arc section");
+      }
+      feed_arc_u64(gshgeom_path_hash(lowered), &arc_total, &arc_count);
+      GSHGEOM_Bounds b;
+      if (gshgeom_path_bounds(path, &b) != GSHGEOM_OK) {
+        return fail("the bounds of an arc path failed");
+      }
+      feed_arc_u64(gshgeom_f64_bits(b.min.x), &arc_total, &arc_count);
+      feed_arc_u64(gshgeom_f64_bits(b.max.y), &arc_total, &arc_count);
+      gshgeom_path_destroy(lowered);
+      gshgeom_path_destroy(path);
+    }
+    printf("shape-geometry.arc-hash %016" PRIx64 "\n", gshgeom_hash_value(&arc_total));
+    printf("shape-geometry.arc-count %lu\n", arc_count);
   }
   return 0;
 }

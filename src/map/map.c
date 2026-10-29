@@ -266,7 +266,7 @@ GSHGEOM_Result gshgeom_map_flip_y(int dim, GSHGEOM_Map * out) {
  * radians per unit, and the quarter turns are applied by swapping and negating
  * `(c, s)`, which is exact.
  */
-static GSHGEOM_Result angle_cs(GSHGEOM_Angle_Unit unit, double angle, double * c, double * s) {
+GSHGEOM_Result gshgeom_sincos(GSHGEOM_Angle_Unit unit, double angle, double * c, double * s) {
   if ((unsigned)unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(angle)) {
     return GSHGEOM_ERR_INVALID;
   }
@@ -345,7 +345,7 @@ GSHGEOM_Result gshgeom_map_rotate(
   }
   double c;
   double s;
-  GSHGEOM_Result r = angle_cs(unit, angle, &c, &s);
+  GSHGEOM_Result r = gshgeom_sincos(unit, angle, &c, &s);
   if (r != GSHGEOM_OK) {
     return r;
   }
@@ -362,7 +362,7 @@ GSHGEOM_Result gshgeom_map_rotate_axis(
   }
   double c;
   double s;
-  GSHGEOM_Result r = angle_cs(unit, angle, &c, &s);
+  GSHGEOM_Result r = gshgeom_sincos(unit, angle, &c, &s);
   if (r != GSHGEOM_OK) {
     return r;
   }

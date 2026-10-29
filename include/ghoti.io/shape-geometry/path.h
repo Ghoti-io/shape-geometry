@@ -43,7 +43,7 @@
  * coordinates of its points as `f64` (`x`, `y`, and `z` in 3D): for
  * ::GSHGEOM_VERB_MOVE the point, for a drawing verb its control points after
  * the start and then the end, and for a rational verb the weights (3 or 4,
- * the start's first) as `f64` after the points; a close adds nothing.  The
+ * the start's first) as `f64` after the points; a close adds nothing; an arc is described in arc.h.  The
  * limits and the allocator are not part of it.
  *
  * ### The fixed-point builder (story 14a, AD-5)
@@ -86,11 +86,16 @@ typedef enum GSHGEOM_Verb {
   GSHGEOM_VERB_RATIONAL_QUADRATIC = 4, ///< A rational quadratic curve.
   GSHGEOM_VERB_RATIONAL_CUBIC = 5,    ///< A rational cubic curve.
   GSHGEOM_VERB_CLOSE = 6,             ///< A line back to the subpath's start.
+  GSHGEOM_VERB_ARC = 7,               ///< An elliptical arc (arc.h); 2D paths only.
   GSHGEOM_VERB_COUNT                  ///< Closes the enum.
 } GSHGEOM_Verb;
 
 /**
  * @brief One element as read back.
+ *
+ * An arc element cannot be held here: ::gshgeom_path_element returns ::GSHGEOM_ERR_UNSUPPORTED for
+ * one, so that a walker that does not know arcs fails instead of drawing the chord.  A walker
+ * that does reads ::gshgeom_path_verb and ::gshgeom_path_arc (arc.h).
  *
  * For a drawing verb, `curve` is the segment, its first control point the
  * start.  For ::GSHGEOM_VERB_CLOSE it is the line from the current point to the
@@ -199,10 +204,37 @@ GSHGEOM_API GSHGEOM_Result gshgeom_path_cubic_to_fixed(GSHGEOM_Path * path,
  * @param path The path.
  * @param index From 0 to the element count minus one.
  * @param out The element; written only on success.
- * @return ::GSHGEOM_OK or ::GSHGEOM_ERR_INVALID (NULL, index out of range).
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID (NULL, index out of range); ::GSHGEOM_ERR_UNSUPPORTED
+ *   for an arc element (see ::gshgeom_path_verb).
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_path_element(
     const GSHGEOM_Path * path, size_t index, GSHGEOM_Element * out);
+
+/**
+ * @brief The verb of element @p index, whatever it is (an arc included).
+ *
+ * @return ::GSHGEOM_OK or ::GSHGEOM_ERR_INVALID (NULL, index out of range).
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_path_verb(
+    const GSHGEOM_Path * path, size_t index, GSHGEOM_Verb * out);
+
+/**
+ * @brief A copy of the path, bit for bit, arcs included.
+ *
+ * @param alloc The allocator of the copy, or NULL for the default.
+ * @param limits The limits of the copy, or NULL for the defaults; the path must fit them.
+ * @param out The copy; written only on success.
+ * @return ::GSHGEOM_OK, ::GSHGEOM_ERR_INVALID, ::GSHGEOM_ERR_LIMIT or ::GSHGEOM_ERR_OOM.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_path_copy(const GSHGEOM_Path * path,
+    const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Path ** out);
+
+/**
+ * @brief Whether two paths are equal bit for bit: dimension, verbs, every stored number
+ * (`-0` and `+0` differ, as in the hash) and, for an arc, its unit and flags.  The limits and
+ * allocators are not compared.  NULL equals only NULL.
+ */
+GSHGEOM_API int gshgeom_path_equal(const GSHGEOM_Path * a, const GSHGEOM_Path * b);
 
 /**
  * @brief The box of the path: the union of the boxes of its segments.
