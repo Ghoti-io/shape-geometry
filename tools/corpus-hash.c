@@ -129,6 +129,53 @@ static GSHGEOM_Point random_point(int dim) {
   return p;
 }
 
+/* The vertex section's accumulator. */
+typedef struct VertexSink {
+  GSHGEOM_Hash total;
+  unsigned long count;
+} VertexSink;
+
+/* A coordinate for the vertex section: a multiple of 2 on a small grid, or the finer ones of coord(). */
+static GSHGEOM_Point vertex_point(unsigned fine) {
+  GSHGEOM_Point p;
+  if (fine) {
+    p.x = coord();
+    p.y = coord();
+  } else {
+    p.x = (double)((int)(next() % 5u) - 2) * 2.0;
+    p.y = (double)((int)(next() % 5u) - 2) * 2.0;
+  }
+  p.z = 0.0;
+  return p;
+}
+
+static void vertex_f64(VertexSink * vs, double v) {
+  uint64_t bits = gshgeom_f64_bits(v);
+#ifdef SHAPE_GEOM_PLANT_BIT_VERTEX
+  if (vs->count == 300) {
+    bits ^= 1u;
+  }
+#endif
+  vs->count++;
+  gshgeom_hash_u64(&vs->total, bits);
+}
+
+static GSHGEOM_Result vertex_feed(const GSHGEOM_Vertex * v, void * ctx) {
+  VertexSink * vs = (VertexSink *)ctx;
+  gshgeom_hash_u64(&vs->total, (uint64_t)v->element);
+  gshgeom_hash_u64(&vs->total, (uint64_t)v->subpath);
+  gshgeom_hash_u32(&vs->total, v->flags);
+  vertex_f64(vs, v->point.x);
+  vertex_f64(vs, v->point.y);
+  vertex_f64(vs, v->in.x);
+  vertex_f64(vs, v->in.y);
+  vertex_f64(vs, v->out.x);
+  vertex_f64(vs, v->out.y);
+  vertex_f64(vs, v->direction.x);
+  vertex_f64(vs, v->direction.y);
+  return GSHGEOM_OK;
+}
+
 int main(void) {
   gshgeom_hash_init(&total);
 
@@ -980,5 +1027,54 @@ int main(void) {
   }
   printf("shape-geometry.predicate-hash %016" PRIx64 "\n", gshgeom_hash_value(&predicate_total));
   printf("shape-geometry.predicate-count %lu\n", predicate_count);
+
+  /* The vertex section (vertices.h): the vertices of random paths and the directions at them, bit for bit. The paths
+   * mix coordinates on a coarse grid (so that segments without extent, reversals and closed corners are common) with
+   * the fine ones above (so that the unit vectors and the bisectors are irrational, and a square root, a quotient or a
+   * contraction that differs between targets shows).  Its own pair, so the first two never move. */
+  {
+    VertexSink vs;
+    gshgeom_hash_init(&vs.total);
+    vs.count = 0;
+    for (unsigned round = 0; round < 500; round++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("cannot make a path for the vertex section");
+      }
+      const unsigned fine = round % 2u;
+      const unsigned len = 1u + (unsigned)(next() % 12u);
+      for (unsigned i = 0; i < len; i++) {
+        const unsigned pick = i == 0 ? 0u : (unsigned)(next() % 9u);
+        GSHGEOM_Point a = vertex_point(fine), b = vertex_point(fine), c = vertex_point(fine);
+        GSHGEOM_Result r = GSHGEOM_OK;
+        if (pick == 0) {
+          r = gshgeom_path_move_to(path, a);
+        } else if (pick <= 3) {
+          r = gshgeom_path_line_to(path, a);
+        } else if (pick == 4) {
+          r = gshgeom_path_quadratic_to(path, a, b);
+        } else if (pick == 5 || pick == 6) {
+          r = gshgeom_path_cubic_to(path, a, b, c);
+        } else if (pick == 7) {
+          r = gshgeom_path_close(path);
+        } else {
+          GSHGEOM_Element last;
+          size_t n = gshgeom_path_element_count(path);
+          (void)gshgeom_path_element(path, n - 1, &last);
+          GSHGEOM_Point q = last.curve.p[gshgeom_curve_point_count(last.curve.kind) - 1];
+          r = gshgeom_path_line_to(path, q); /* a line of no extent */
+        }
+        if (r != GSHGEOM_OK) {
+          return fail("cannot build a path for the vertex section");
+        }
+      }
+      if (gshgeom_path_vertices(path, vertex_feed, &vs) != GSHGEOM_OK) {
+        return fail("the vertex walk failed");
+      }
+      gshgeom_path_destroy(path);
+    }
+    printf("shape-geometry.vertex-hash %016" PRIx64 "\n", gshgeom_hash_value(&vs.total));
+    printf("shape-geometry.vertex-count %lu\n", vs.count);
+  }
   return 0;
 }

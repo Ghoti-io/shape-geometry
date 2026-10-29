@@ -1691,6 +1691,47 @@ STROKE_PLANTS += [
     ("sk-dash-precheck-last-only", "src", SKD, "      if (periods > 0.0) {\n        certain += periods * (double)n;", "      if (periods > 0.0) {\n        certain = periods * (double)n;", STL),
 ]
 
+# The vertices of a path and the directions at them (vertices.h).  Not planted, as equivalent: the move's branch of
+# read_seg (a move's line has no extent either way), the `>= 0` of `gshgeom_sk_start_dir` (it returns the index of a
+# point after the first, so 1 or more), the first-segment search of a closed subpath starting one element later (the
+# element it skips is a move or a close-started subpath's first segment, and a move has no segment), and
+# `v.point.z = 0.0` (the library's curves are zero in z in 2D).
+SKV = "src/path/vertices.c"
+VT = ["testVertices"]
+VERTEX_PLANTS = [
+    ('v-end-dir-index-zero-dropped', "src", SKV, "&& gshgeom_sk_end_dir(&k, &s->end) >= 0;", "&& gshgeom_sk_end_dir(&k, &s->end) > 0;", VT),
+    ('v-degree-off', "src", SKV, "k.n = gshgeom_curve_point_count(el->curve.kind) - 1;", "k.n = gshgeom_curve_point_count(el->curve.kind);", VT),
+    ('v-reversal-left', "src", SKV, "return gshgeom_normal_right(a);", "return gshgeom_normal_left(a);", VT),
+    ('v-reversal-test-or', "src", SKV, "if (sum.x == 0.0 && sum.y == 0.0) {", "if (sum.x == 0.0 || sum.y == 0.0) {", VT),
+    ('v-bisector-not-unit', "src", SKV, "return to_point(gshgeom_sk_unit(sum));", "return to_point(sum);", VT),
+    ('v-direction-both-takes-in', "src", SKV, "v.direction = bisector(in, out);", "v.direction = in;", VT),
+    ('v-direction-in-only-takes-out', "src", SKV, "} else if (in_seg) {\n        v.direction = in;", "} else if (in_seg) {\n        v.direction = out;", VT),
+    ('v-direction-neither-is-y', "src", SKV, "v.direction.x = 1.0;", "v.direction.y = 1.0;", VT),
+    ('v-in-not-round', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : NULL);", "const Seg * in_seg = have_in ? &cur_in : NULL;", VT),
+    ('v-out-not-round', "src", SKV, "const Seg * out_seg = have_next ? &next : (have_first ? &first : NULL);", "const Seg * out_seg = have_next ? &next : NULL;", VT),
+    ('v-in-round-first', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : NULL);", "const Seg * in_seg = have_last ? &last : (have_in ? &cur_in : NULL);", VT),
+    ('v-out-round-first', "src", SKV, "const Seg * out_seg = have_next ? &next : (have_first ? &first : NULL);", "const Seg * out_seg = have_first ? &first : (have_next ? &next : NULL);", VT),
+    ('v-in-from-start', "src", SKV, "in = to_point(gshgeom_sk_unit(in_seg->end));", "in = to_point(gshgeom_sk_unit(in_seg->start));", VT),
+    ('v-out-from-end', "src", SKV, "out = to_point(gshgeom_sk_unit(out_seg->start));", "out = to_point(gshgeom_sk_unit(out_seg->end));", VT),
+    ('v-in-takes-no-extent', "src", SKV, "if (here.extent) {\n        cur_in = here;", "if (1) {\n        cur_in = here;", VT),
+    ('v-next-scan-from-start', "src", SKV, "for (size_t j = i + 1; j < sb; j++) {\n          Seg s;", "for (size_t j = sa; j < sb; j++) {\n          Seg s;", VT),
+    ('v-next-rescanned-per-vertex', "src", SKV, "if (nj <= i) {", "if (1) {", VT),
+    ('v-closed-flag-inverted', "src", SKV, "if (closed) {\n        v.flags |= GSHGEOM_VERTEX_CLOSED;", "if (!closed) {\n        v.flags |= GSHGEOM_VERTEX_CLOSED;", VT),
+    ('v-subpath-end-off', "src", SKV, "if (i + 1 == sb) {\n        v.flags |= GSHGEOM_VERTEX_SUBPATH_END;", "if (i == sb) {\n        v.flags |= GSHGEOM_VERTEX_SUBPATH_END;", VT),
+    ('v-path-end-off', "src", SKV, "if (i + 1 == n) {", "if (i == n) {", VT),
+    ('v-path-start-off', "src", SKV, "if (i == 0) {\n        v.flags |= GSHGEOM_VERTEX_PATH_START;", "if (i == 1) {\n        v.flags |= GSHGEOM_VERTEX_PATH_START;", VT),
+    ('v-subpath-start-by-index', "src", SKV, "if (verb == GSHGEOM_VERB_MOVE) {\n        v.flags |= GSHGEOM_VERTEX_SUBPATH_START;", "if (i == sa && verb != GSHGEOM_VERB_COUNT) {\n        v.flags |= GSHGEOM_VERTEX_SUBPATH_START;", VT),
+    ('v-subpath-index-stuck', "src", SKV, "    sa = sb;\n    sub++;", "    sa = sb;", VT),
+    ('v-close-does-not-end', "src", SKV, "      sb++;\n      closed = el.verb == GSHGEOM_VERB_CLOSE;", "      sb++;\n      closed = 0;", VT),
+    ('v-move-does-not-split', "src", SKV, "if (el.verb == GSHGEOM_VERB_MOVE) {\n        break;", "if (0) {\n        break;", VT),
+    ('v-point-is-first-control', "src", SKV, "v.point = el.curve.p[gshgeom_curve_point_count(el.curve.kind) - 1];", "v.point = el.curve.p[0];", VT),
+    ('v-walk-dimension-unchecked', "src", SKV, "if (!path || !fn || gshgeom_path_dimension(path) != 2) {", "if (!path || !fn) {", VT),
+    ('v-count-dimension-unchecked', "src", SKV, "if (!path || !count || gshgeom_path_dimension(path) != 2) {", "if (!path || !count) {", VT),
+    ('v-callback-result-dropped', "src", SKV, "      r = fn(&v, ctx);\n      if (r != GSHGEOM_OK) {\n        return r;\n      }\n", "      r = fn(&v, ctx);\n", VT),
+    ('v-count-off', "src", SKV, "*count = gshgeom_path_element_count(path);", "*count = gshgeom_path_element_count(path) + 1;", VT),
+]
+STROKE_PLANTS += VERTEX_PLANTS
+
 PLANTS += STROKE_PLANTS
 
 # Strokes story S6: the curve outline for writers (stroke_curves.h, SG32 to SG43).  The ids start with cv-.

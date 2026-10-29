@@ -122,6 +122,8 @@
 #define gshgeom_path_bounds GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_bounds)
 #define gshgeom_path_hash GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_hash)
 #define gshgeom_path_dump GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_dump)
+#define gshgeom_path_vertex_count GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_vertex_count)
+#define gshgeom_path_vertices GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_vertices)
 #define gshgeom_orient2d GHOTIIO_SHAPE_GEOMETRY(gshgeom_orient2d)
 #define gshgeom_orient2d_exact GHOTIIO_SHAPE_GEOMETRY(gshgeom_orient2d_exact)
 #define gshgeom_orient3d GHOTIIO_SHAPE_GEOMETRY(gshgeom_orient3d)

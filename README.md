@@ -20,6 +20,9 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   distance along it, the point, the unit tangent and the left normal. The arc
   length of a curve is adaptive eight-point Gauss-Legendre to a stated
   tolerance; the table and every answer are bit-identical on every target.
+- Path vertices (`vertices.h`): each vertex of a 2D path with its position, the unit incoming and outgoing directions
+  (segments without extent are looked past; a closed subpath is read round) and the direction an `orient="auto"` marker
+  takes (the bisector, bit-exact on every target).
 - The fill rules (`fill.h`: nonzero 0, even-odd 1, pinned), which `shape-cpu`
   fills under and `font`'s `GFNT_FillRule` is the type of.
 - Strokes (`stroke.h`): the region a stroke covers, stated once as rules SG1 to

@@ -280,6 +280,36 @@ table, every query, the hash and the dump are the same bits on every target; the
 cross-target probe measures 90 random paths of every kind at three tolerances and
 hashes every number of every answer.
 
+## Path vertices and the directions at them
+
+`vertices.h` gives a 2D path's vertices in element order, each with its position, the unit incoming and outgoing
+directions and the direction an `orient="auto"` marker takes. A vertex is the end point of an element (a move's point,
+a segment's last control point, a close's subpath start); a drawing verb after a close starts a subpath without a move
+and has no vertex of its own.
+
+The directions are the stroke expansion's (SG5), read by the same code: the start direction of a segment is
+`P_k - P_0` for the least `k` with `P_k != P_0`, the end direction `P_n - P_k` for the greatest with `P_k != P_n`, and a
+segment with neither has no extent. The rule for a segment without extent is that it is looked past on both sides: the
+incoming direction of a vertex is that of the nearest segment with extent at or before it in its subpath, the outgoing
+that of the nearest after it, so a run of zero-length segments belongs to neither the vertices around it nor the corner
+they sit at. A closed subpath is read round: what lies before its first segment with extent is its last, and after its
+last is its first, which gives the start's corner (the move's vertex and the close's, one point) the closing line's end
+direction coming in and the first segment's start direction going out, and does the same for any vertex inside a run of
+zero-length segments at the start or end.
+
+The marker direction is the outgoing direction at a vertex with no incoming one, the incoming at one with no outgoing, the
+bisector at one with both, and `(1, 0)` at one with neither. The bisector is the unit vector of the sum of the two unit
+directions, and at an exact reversal, where the sum is zero, the incoming direction turned by `gshgeom_normal_right`
+(SVG leaves the side open; this is the one a browser takes for a reversal along +x). The angle is the caller's:
+`gmath_atan2` of the components is bit-exact on every target.
+
+The unit vector divides by the length computed after scaling by the larger coordinate, so a vector of 1e-300 or 1e99 is as
+good as any other. Everything is `+ - * /` and one square root (`gmath_sqrt`), computed without contraction, so a vertex
+has the same bits on every target: the cross-target probe hashes 500 random paths (a coarse grid, where zero-length
+segments, reversals and closed corners are common, and a fine one, where the bisectors are irrational) as the committed
+`vertex-hash`. The walk allocates nothing and is linear in the elements: the search for the next segment with extent only
+moves forward.
+
 ## The fill rules
 
 `fill.h` holds the two fill rules of the family and nothing else, so that a
