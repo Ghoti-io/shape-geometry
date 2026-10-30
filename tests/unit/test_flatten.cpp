@@ -190,7 +190,7 @@ TEST(FlattenAgainstFont, TheThresholdIsWhereFontPutsIt) {
 }
 
 TEST(FlattenRevision, TheFunctionTheMacroAndTheVectorsAgree) {
-  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 2);
+  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 3);
   EXPECT_EQ(gshgeom_flatten_revision(), GSHGEOM_FLATTEN_REVISION);
   EXPECT_EQ(kFlattenVectorsRevision, gshgeom_flatten_revision())
       << "tests/flatten_vectors.h was recorded from another revision";

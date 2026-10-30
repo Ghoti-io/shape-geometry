@@ -97,6 +97,33 @@ inline P2 eval(const Elem & e, Real t) {
   return {x[0] / w[0], y[0] / w[0]};
 }
 
+/**
+ * The point of an arc's centre form (the ellipse itself, not its pieces) at the fraction @p tau of its sweep, in `long double`:
+ * `c + u cos(theta) + v sin(theta)` with `theta = t0 + tau sweep` converted from the arc's unit to radians.  Shares nothing with
+ * src/ (the library's own evaluation is gshgeom_arc_point, which rounds as the constructors do).
+ */
+inline P2 arc_point(const GSHGEOM_Arc & a, Real tau) {
+  const Real pi = std::acos(-1.0L);
+  Real per_unit = 1.0L;
+  switch (a.unit) {
+  case GSHGEOM_ANGLE_RADIANS:
+    per_unit = 1.0L;
+    break;
+  case GSHGEOM_ANGLE_DEGREES:
+    per_unit = pi / 180.0L;
+    break;
+  case GSHGEOM_ANGLE_GRADIANS:
+    per_unit = pi / 200.0L;
+    break;
+  default:
+    per_unit = 2.0L * pi;
+    break;
+  }
+  const Real theta = ((Real)a.t0 + tau * (Real)a.sweep) * per_unit;
+  const Real c = std::cos(theta), s = std::sin(theta);
+  return {(Real)a.center.x + (Real)a.u.x * c + (Real)a.v.x * s, (Real)a.center.y + (Real)a.u.y * c + (Real)a.v.y * s};
+}
+
 inline void split(const Elem & e, Elem & l, Elem & r) {
   Real x[4], y[4], w[4];
   for (int k = 0; k <= e.n; k++) {

@@ -1160,7 +1160,7 @@ TEST(DeviceRational, AllocationFailureAtEveryCallLeavesNoPartialResult) {
     elements = gshgeom_device_path_element_count(dp);
     gshgeom_device_path_destroy(dp);
   }
-  ASSERT_GT(elements, 300u) << "enough lines for the arrays to grow more than once";
+  ASSERT_GT(elements, 200u) << "enough lines for the arrays to grow more than once";
   ASSERT_GT(count.calls, 4);
   for (long k = 0; k < count.calls; k++) {
     for (int persistent = 0; persistent < 2; persistent++) {

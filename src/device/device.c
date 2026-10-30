@@ -33,10 +33,13 @@
 #include <ghoti.io/shape-geometry/macros.h>
 
 #include <ghoti.io/math/basic.h>
+#include <ghoti.io/shape-geometry/arc.h>
 #include <ghoti.io/shape-geometry/device.h>
+#include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/hash.h>
 
 #include "../core/grow.h"
+#include "conic_internal.h"
 
 #include <string.h>
 
@@ -302,10 +305,146 @@ GSHGEOM_Result gshgeom_device_path_element(const GSHGEOM_Device_Path * path,
 /* A model path under a map                                                */
 /* ---------------------------------------------------------------------- */
 
-#define RATIONAL_MAX_DEPTH 16
-/* A piece of a rational curve is flat when its control points are within 2
- * units (1/32 pixel) of its chord; squared. */
-#define RATIONAL_TOLERANCE_SQ 4.0
+/*
+ * ## The conic route: the definition (flatten.h, revision 3)
+ *
+ * Every rational curve of a model path is treated by this one route: a
+ * rational quadratic, a rational cubic and each piece of an arc.  The control
+ * points are mapped in `double` by ::gshgeom_map_apply_point and scaled by 64
+ * (exact), so they are the curve's definition in 26.6 units (X_i); the weights
+ * W_i are unchanged (an affine map keeps them).  The homogeneous curve
+ * (W_i X_i, W_i) is split at the parameter 1/2 by de Casteljau in `double`
+ * until the piece is flat, which is when every interior control point of the
+ * projected piece is within `delta = t - 1` units of the piece's chord, a
+ * segment; a flat piece becomes a line to its end, rounded once to 26.6 (to
+ * nearest, ties upward).  The ends of the whole curve are the mapped control
+ * points themselves, rounded once, so the device ends of an arc are its
+ * authoritative ends and a closed arc closes in device space.  A split point is
+ * the quotient of its homogeneous point, clamped into the box of the control
+ * points (which holds the exact point): the same value ends the left piece and
+ * starts the right one.  The pieces are visited left to right, and a piece
+ * deeper than the cap is ended as it stands.
+ *
+ * The tolerance `t` is the flattener's (flatten.h), at least
+ * ::GSHGEOM_FLATTEN_MIN_TOLERANCE and the default ::GSHGEOM_FLATTEN_TOLERANCE
+ * for the calls without one; `t` is the whole budget and `delta` is `t - 1`
+ * because the vertex rounding takes 0.7072 of the unit that remains.  The cap
+ * is ::GSHGEOM_CONIC_MAX_DEPTH, 240.  Everything is one `double` operation in
+ * the written order: no `long double`, no fused multiply-add, no library
+ * function (`-ffp-contract=off`), so the same bits on every target.
+ *
+ * ## The theorem
+ *
+ * Let the curve be a rational Bezier of degree 2 or 3 whose control points X_i
+ * (26.6 units, after the map) each round into `int32` (so |coordinate| <=
+ * 2^31 + 1/2) and whose weights W_i are in [2^-100, 2^100] (the range the path
+ * accepts), and let `t >= 2`.  Then every point of the exact curve (the
+ * rational Bezier of the X_i and W_i in real arithmetic) is within `t - 0.29`
+ * units of the emitted polyline (so within the `t - 0.12` of the integer
+ * flattener's headline), and the depth cap never ends a piece that is not flat.
+ *
+ * ## The proof
+ *
+ * Units are 26.6 units.  u = 2^-53.  Xmax = 2^31 + 1 bounds every coordinate
+ * of every control point, and hence of every point of the hull.  "Exact" means
+ * real arithmetic on the doubles X_i and W_i.
+ *
+ * **(a) The hull.**  A rational Bezier curve with positive weights is the
+ * convex combination sum_i lambda_i(s) X_i with lambda_i = b_i W_i / sum_j
+ * b_j W_j >= 0.  The piece of it over a parameter interval [a, b] is again a
+ * rational Bezier curve, on the exact control points P_i that de Casteljau (or
+ * the blossom) gives, whose weights are positive (convex combinations of the
+ * W_i).  So the exact piece lies in the convex hull of its exact projected
+ * control points P_i, and, by the same token, so do the P_i in the box of the
+ * X_i.
+ *
+ * **(b) The computed pieces are near the exact ones.**  Let k <= 240 be the
+ * number of halvings.  Every new homogeneous point is the average of two
+ * parents, at most three averages deep (a cubic's middle point; a quadratic's
+ * is two deep), each computed as 0.5 * (a + b), the sum rounded and the
+ * halving exact.  Write e_w and e_x for the error of a computed weight and
+ * of a computed `W X` against the exact ones.  The root's weights are exact,
+ * and its `W X` is rounded once: |e_x| <= u W Xmax.  An average of two points
+ * averages their errors, and a rounded sum of terms of one sign adds a relative
+ * error of at most u (and, for `W X`, of at most u (|W_a X_a| + |W_b X_b|) / 2
+ * <= u W Xmax in absolute terms, W being the average's weight).  So after
+ * one halving, with the relative-to-weight errors c_w = |e_w| / (u W) and
+ * c_x = |e_x| / (u W Xmax), c_w grows by at most 3 and c_x by at most 3, from 0
+ * and 1: c_w <= 3k and c_x <= 1 + 3k, each times 1.01 for the second-order
+ * terms.  The projection is (W X + e_x) / (W + e_w) against W X / W, so each
+ * coordinate is off by at most (c_x + c_w) u Xmax (1 + 10^-9) plus the
+ * division's rounding u Xmax: at k = 240, (1 + 720 + 720) 1.01 + 1 <= 1457
+ * u Xmax = 3.47 * 10^-4 per axis, and E <= 2^-10 units (0.00098) as a
+ * distance.  The same bound holds for a clamped split point, which is nearer
+ * to the exact one than the unclamped.  An underflow adds at most 2^-900
+ * (the products W X cannot overflow: |W X| < 2^132).  So every computed
+ * projected control point Q_i, and every computed vertex, is within E = 2^-10
+ * of the exact one at every depth up to the cap.
+ *
+ * **(c) The test measures what it measures.**  The distance of Q_i to the
+ * chord is computed from differences of values below 2^32 in magnitude, a
+ * parameter clamped to [0, 1] and a squared comparison with `delta^2`; each
+ * operation is one rounding, and the result is within 7 u |Q_i - S| <= 2^-16
+ * units of the true distance (an operand pair with a chord shorter than 2^-500
+ * adds at most that length, since the parameter is clamped).  So a piece the test
+ * calls flat has every Q_i within delta + 2^-16 of its chord.
+ *
+ * **(d) The vertex rounding** moves each end of a chord by at most 1/2 unit per
+ * axis, so any point of the chord by at most sqrt(2)/2 <= 0.7072 units.
+ *
+ * **(e) Together.**  For a point of the exact curve, take the piece that
+ * contains its parameter.  By (a) the point is in the hull of that piece's exact
+ * P_i.  The P_i are within E of the computed Q_i by (b), and the Q_i are within
+ * delta + 2^-16 of the computed chord S-S' (c) (and the ends P_0 and P_n are
+ * within E of S and S', by (b)), so the hull is within delta + 2^-16 + E of the
+ * segment S-S' (the neighbourhood of a convex set is convex), and the emitted
+ * segment, between the rounded S and S' (d), is 0.7072 further:
+ * `delta + 2^-16 + 2^-10 + 0.7072 = t - 1 + 0.7072 + 0.00099 = t - 0.2918`.
+ * QED, given that the cap never ends a piece that is not flat:
+ *
+ * **(f) The cap never binds.**  Take a piece of exact control points P_i from
+ * a parameter interval of length h = 2^-k, with the translation X_0 taken as
+ * the origin in the proof (nothing in the code depends on it): every
+ * |X_j - X_0|, and every projected point of the hull, is at most B = 2^32 + 1.
+ * The Bernstein points of the piece's homogeneous polynomial F(s) = (W X, W)
+ * on [a, a + h] are values of its blossom f, and two neighbours differ by
+ * f(a.., b, ..) - f(a.., a, ..) = h g(..), where g is the blossom of F' / m
+ * (m the degree), at arguments in [0, 1]: a convex combination of the
+ * Bernstein coefficients of F' / m, which are the differences of the original
+ * homogeneous points.  So neighbouring homogeneous points of the piece differ,
+ * in each of the three components, by at most h times the largest difference
+ * of two neighbours of the original: |Delta (W X)| <= h (W_max B + W_max B) =
+ * h 2^101 B and |Delta W| <= h 2^100.  The projected points then differ by
+ * Delta Q = (Delta (W X) - Q Delta W) / W' with W' >= 2^-100, so by at most
+ * (2^101 B + B 2^100) h 2^100 = 3 B 2^200 h per axis.  An interior control
+ * point of the piece is at most two neighbours from the start of the chord,
+ * so it is within 2 sqrt(2) 3 B 2^200 h <= 2^235.1 h of S.  At the cap, k =
+ * 240, that is 2^-4.9 = 0.034 units; the computed Q_i and the computed S differ from
+ * the exact ones by E each, so the test sees at most 0.034 + 2 E + 2^-16 <
+ * 0.04 units, which is less than delta >= 1: the piece is flat.  (236 levels
+ * would do, at 0.54; the cap has margin.)  The same holds for any `t`, since
+ * delta only grows.  So the cap is never what ends a piece, and the theorem
+ * holds with the cap in place.  (A weight ratio of 2^200 is what makes the
+ * proof need 236 levels rather than 20: a uniform split of such a curve spends
+ * about a hundred levels before it divides the curve's length at all, and each of
+ * them emits one line, which is the price of an input no one writes.)
+ *
+ * ## What checks the proof
+ *
+ * tests/unit/test_conic.cpp evaluates conics and arcs densely and exactly (the
+ * Bernstein form in `long double` at dyadic parameters, which are exact in the
+ * type) at thirty-three parameters inside every piece the route made, and, where
+ * the weights are far apart, at 2^-k and 1 - 2^-k for every depth the proof
+ * allows, on every size class up to the whole `int32` range and at tolerances
+ * from 2 up; it asserts the bound, the piece count and a zero cap count.  A
+ * variant of the route with a smaller cap (gshgeom_conic_route_capped) does
+ * bind on a curve of extreme weights, the count says so and the bound is lost,
+ * which shows that the check sees a violation.
+ */
+
+/* The cap (flatten.h) bounds the explicit stack: a pending right half exists at
+ * each depth below the piece being worked on. */
+#define CONIC_STACK (GSHGEOM_CONIC_MAX_DEPTH + 1)
 
 /* A point in homogeneous coordinates: (w X, w Y, w). */
 typedef struct Hp {
@@ -342,56 +481,136 @@ static double dist2_to_segment(
   return qx * qx + qy * qy;
 }
 
-/* Lines for the rational piece h[0..n-1] (n is 3 or 4) whose projected end
- * points are (sx, sy) and (ex, ey): the caller's exact values. */
-static GSHGEOM_Result rational_lines(GSHGEOM_Device_Path * dp, int n,
-    const Hp * h, double sx, double sy, double ex, double ey, int depth) {
-  int flat = 1;
-  for (int i = 1; i < n - 1; i++) {
-    double px = h[i].x / h[i].w;
-    double py = h[i].y / h[i].w;
-    if (dist2_to_segment(px, py, sx, sy, ex, ey) > RATIONAL_TOLERANCE_SQ) {
-      flat = 0;
-      break;
-    }
-  }
-  if (depth <= 0 || flat) {
-    GSHGEOM_Device_Point d;
-    GSHGEOM_Result r = round_scaled(ex, &d.x);
-    if (r == GSHGEOM_OK) {
-      r = round_scaled(ey, &d.y);
-    }
-    return r != GSHGEOM_OK ? r : gshgeom_device_path_line_to(dp, d);
-  }
-  Hp left[4], right[4];
-  if (n == 3) {
-    Hp a = hp_mid(h[0], h[1]);
-    Hp b = hp_mid(h[1], h[2]);
-    Hp m = hp_mid(a, b);
-    left[0] = h[0]; left[1] = a; left[2] = m;
-    right[0] = m; right[1] = b; right[2] = h[2];
-    double mx = m.x / m.w;
-    double my = m.y / m.w;
-    GSHGEOM_Result r = rational_lines(dp, 3, left, sx, sy, mx, my, depth - 1);
-    return r != GSHGEOM_OK
-        ? r
-        : rational_lines(dp, 3, right, mx, my, ex, ey, depth - 1);
-  }
-  Hp a = hp_mid(h[0], h[1]);
-  Hp b = hp_mid(h[1], h[2]);
-  Hp c = hp_mid(h[2], h[3]);
-  Hp d = hp_mid(a, b);
-  Hp e = hp_mid(b, c);
-  Hp m = hp_mid(d, e);
-  left[0] = h[0]; left[1] = a; left[2] = d; left[3] = m;
-  right[0] = m; right[1] = e; right[2] = c; right[3] = h[3];
-  double mx = m.x / m.w;
-  double my = m.y / m.w;
-  GSHGEOM_Result r = rational_lines(dp, 4, left, sx, sy, mx, my, depth - 1);
-  return r != GSHGEOM_OK
-      ? r
-      : rational_lines(dp, 4, right, mx, my, ex, ey, depth - 1);
+/* One piece of the curve, with its chord (the computed, clamped ends) and where it is
+ * on the parameter interval: [leaf / 2^depth, (leaf + 1) / 2^depth], with leaf
+ * exact only while depth <= 32. */
+typedef struct Piece {
+  Hp h[4];
+  double sx, sy, ex, ey;
+  int depth;
+  uint32_t leaf;
+} Piece;
+
+static double clamp_to(double v, double lo, double hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
 }
+
+GSHGEOM_Result gshgeom_conic_route_capped(int n, const double * sx, const double * sy,
+    const double * w, int32_t tolerance, int levels, GSHGEOM_Flatten_Emit emit,
+    void * user, int * forced, int * deepest) {
+  if ((n != 3 && n != 4) || !sx || !sy || !w || !emit || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE ||
+      levels < 0 || levels > GSHGEOM_CONIC_MAX_DEPTH) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  if (forced) {
+    *forced = 0;
+  }
+  if (deepest) {
+    *deepest = 0;
+  }
+  const double delta = (double)(tolerance - 1);
+  const double delta_sq = delta * delta;
+  double xlo = sx[0], xhi = sx[0], ylo = sy[0], yhi = sy[0];
+  for (int i = 1; i < n; i++) {
+    xlo = sx[i] < xlo ? sx[i] : xlo;
+    xhi = sx[i] > xhi ? sx[i] : xhi;
+    ylo = sy[i] < ylo ? sy[i] : ylo;
+    yhi = sy[i] > yhi ? sy[i] : yhi;
+  }
+  Piece stack[CONIC_STACK];
+  size_t sp = 0;
+  Piece cur;
+  for (int i = 0; i < n; i++) {
+    cur.h[i].x = w[i] * sx[i];
+    cur.h[i].y = w[i] * sy[i];
+    cur.h[i].w = w[i];
+  }
+  cur.sx = sx[0];
+  cur.sy = sy[0];
+  cur.ex = sx[n - 1];
+  cur.ey = sy[n - 1];
+  cur.depth = 0;
+  cur.leaf = 0;
+  for (;;) {
+    int flat = 1;
+    for (int i = 1; i < n - 1; i++) {
+      double px = cur.h[i].x / cur.h[i].w;
+      double py = cur.h[i].y / cur.h[i].w;
+      if (dist2_to_segment(px, py, cur.sx, cur.sy, cur.ex, cur.ey) > delta_sq) {
+        flat = 0;
+        break;
+      }
+    }
+    if (flat || cur.depth >= levels) {
+      if (!flat && forced) {
+        (*forced)++;
+      }
+      if (deepest && cur.depth > *deepest) {
+        *deepest = cur.depth;
+      }
+      GSHGEOM_Device_Point d;
+      GSHGEOM_Result r = round_scaled(cur.ex, &d.x);
+      if (r == GSHGEOM_OK) {
+        r = round_scaled(cur.ey, &d.y);
+      }
+      if (r == GSHGEOM_OK) {
+        r = emit(user, d, cur.leaf, cur.depth);
+      }
+      if (r != GSHGEOM_OK) {
+        return r;
+      }
+      if (sp == 0) {
+        return GSHGEOM_OK;
+      }
+      cur = stack[--sp];
+      continue;
+    }
+    Piece left, right;
+    Hp m;
+    if (n == 3) {
+      Hp a = hp_mid(cur.h[0], cur.h[1]);
+      Hp b = hp_mid(cur.h[1], cur.h[2]);
+      m = hp_mid(a, b);
+      left.h[0] = cur.h[0]; left.h[1] = a; left.h[2] = m;
+      right.h[0] = m; right.h[1] = b; right.h[2] = cur.h[2];
+    } else {
+      Hp a = hp_mid(cur.h[0], cur.h[1]);
+      Hp b = hp_mid(cur.h[1], cur.h[2]);
+      Hp c = hp_mid(cur.h[2], cur.h[3]);
+      Hp d = hp_mid(a, b);
+      Hp e = hp_mid(b, c);
+      m = hp_mid(d, e);
+      left.h[0] = cur.h[0]; left.h[1] = a; left.h[2] = d; left.h[3] = m;
+      right.h[0] = m; right.h[1] = e; right.h[2] = c; right.h[3] = cur.h[3];
+    }
+    double mx = clamp_to(m.x / m.w, xlo, xhi);
+    double my = clamp_to(m.y / m.w, ylo, yhi);
+    left.sx = cur.sx; left.sy = cur.sy; left.ex = mx; left.ey = my;
+    right.sx = mx; right.sy = my; right.ex = cur.ex; right.ey = cur.ey;
+    left.depth = right.depth = cur.depth + 1;
+    left.leaf = cur.leaf * 2u;
+    right.leaf = cur.leaf * 2u + 1u;
+    stack[sp++] = right;
+    cur = left;
+  }
+}
+
+GSHGEOM_Result gshgeom_conic_route(int n, const double * sx, const double * sy,
+    const double * w, int32_t tolerance, GSHGEOM_Flatten_Emit emit, void * user) {
+  int forced = 0;
+  GSHGEOM_Result r = gshgeom_conic_route_capped(n, sx, sy, w, tolerance,
+      GSHGEOM_CONIC_MAX_DEPTH, emit, user, &forced, NULL);
+  /* The proof is that the cap never ends a piece that is not flat. */
+  return r == GSHGEOM_OK && forced ? GSHGEOM_ERR_INTERNAL : r;
+}
+
+static GSHGEOM_Result emit_line(
+    void * user, GSHGEOM_Device_Point to, uint32_t leaf, int level) {
+  (void)leaf;
+  (void)level;
+  return gshgeom_device_path_line_to((GSHGEOM_Device_Path *)user, to);
+}
+
 
 /* Map a model point to device units, scaled but not rounded (x * 64 is exact),
  * and check that it rounds into range. */
@@ -429,8 +648,35 @@ static GSHGEOM_Result map_rounded(const GSHGEOM_Map * map, GSHGEOM_Point p,
   return r;
 }
 
+/* The conic route (above) for one rational curve of @p n control points. */
+static GSHGEOM_Result convert_conic(GSHGEOM_Device_Path * dp, const GSHGEOM_Map * map,
+    int n, const GSHGEOM_Point * p, const double * w, int32_t tolerance) {
+  double sx[4], sy[4];
+  for (int i = 0; i < n; i++) {
+    GSHGEOM_Result r = map_scaled(map, p[i], &sx[i], &sy[i]);
+    if (r != GSHGEOM_OK) {
+      return r;
+    }
+  }
+  return gshgeom_conic_route(n, sx, sy, w, tolerance, emit_line, dp);
+}
+
+/* An arc is its pieces, each a rational quadratic: the same route, so that the pieces
+ * meet at the same device point (a shared control point is mapped to the same bits), the
+ * ends are the arc's own ends rounded once and a closed arc closes. */
+static GSHGEOM_Result convert_arc(GSHGEOM_Device_Path * dp, const GSHGEOM_Map * map,
+    const GSHGEOM_Arc * arc, int32_t tolerance) {
+  GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+  int count = 0;
+  GSHGEOM_Result r = gshgeom_arc_pieces(arc, pieces, &count);
+  for (int k = 0; k < count && r == GSHGEOM_OK; k++) {
+    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);
+  }
+  return r;
+}
+
 static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
-    const GSHGEOM_Map * map, const GSHGEOM_Element * el) {
+    const GSHGEOM_Map * map, const GSHGEOM_Element * el, int32_t tolerance) {
   const GSHGEOM_Curve * c = &el->curve;
   GSHGEOM_Device_Point q[3];
   GSHGEOM_Result r = GSHGEOM_OK;
@@ -459,26 +705,12 @@ static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
         ? r
         : gshgeom_device_path_cubic_to(dp, q[0], q[1], q[2]);
   case GSHGEOM_VERB_RATIONAL_QUADRATIC:
-  case GSHGEOM_VERB_RATIONAL_CUBIC: {
-    int n = el->verb == GSHGEOM_VERB_RATIONAL_QUADRATIC ? 3 : 4;
-    Hp h[4];
-    double sx[4], sy[4];
-    for (int i = 0; i < n && r == GSHGEOM_OK; i++) {
-      r = map_scaled(map, c->p[i], &sx[i], &sy[i]);
-      h[i].x = c->w[i] * sx[i];
-      h[i].y = c->w[i] * sy[i];
-      h[i].w = c->w[i];
-    }
-    if (r != GSHGEOM_OK) {
-      return r;
-    }
-    return rational_lines(dp, n, h, sx[0], sy[0], sx[n - 1], sy[n - 1],
-        RATIONAL_MAX_DEPTH);
-  }
+    return convert_conic(dp, map, 3, c->p, c->w, tolerance);
+  case GSHGEOM_VERB_RATIONAL_CUBIC:
+    return convert_conic(dp, map, 4, c->p, c->w, tolerance);
   case GSHGEOM_VERB_CLOSE:
     return gshgeom_device_path_close(dp);
-  case GSHGEOM_VERB_ARC:
-    return GSHGEOM_ERR_UNSUPPORTED; /* the device route of an arc is not defined yet; never its chord */
+  case GSHGEOM_VERB_ARC: /* never reached: an arc is not an element (gshgeom_path_element), see the loop below */
   case GSHGEOM_VERB_COUNT:
     break;
   }
@@ -488,7 +720,15 @@ static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
 GSHGEOM_Result gshgeom_device_path_from_model(const GSHGEOM_Path * path,
     const GSHGEOM_Map * map, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, GSHGEOM_Device_Path ** out) {
-  if (!path || !map || !out || gshgeom_path_dimension(path) != 2) {
+  return gshgeom_device_path_from_model_with_tolerance(
+      path, map, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);
+}
+
+GSHGEOM_Result gshgeom_device_path_from_model_with_tolerance(const GSHGEOM_Path * path,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Device_Path ** out) {
+  if (!path || !map || !out || gshgeom_path_dimension(path) != 2 ||
+      tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
     return GSHGEOM_ERR_INVALID;
   }
   GSHGEOM_Result r = gshgeom_map_check(map);
@@ -505,13 +745,25 @@ GSHGEOM_Result gshgeom_device_path_from_model(const GSHGEOM_Path * path,
   }
   size_t n = gshgeom_path_element_count(path);
   for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {
+    GSHGEOM_Verb verb;
+    r = gshgeom_path_verb(path, i, &verb);
+    if (r != GSHGEOM_OK) {
+      r = GSHGEOM_ERR_INTERNAL;
+      break;
+    }
+    if (verb == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Arc arc;
+      r = gshgeom_path_arc(path, i, &arc);
+      r = r != GSHGEOM_OK ? GSHGEOM_ERR_INTERNAL : convert_arc(dp, map, &arc, tolerance);
+      continue;
+    }
     GSHGEOM_Element el;
     r = gshgeom_path_element(path, i, &el);
     if (r != GSHGEOM_OK) {
-      r = r == GSHGEOM_ERR_UNSUPPORTED ? r : GSHGEOM_ERR_INTERNAL; /* an arc is refused, never drawn as its chord */
+      r = GSHGEOM_ERR_INTERNAL;
       break;
     }
-    r = convert_element(dp, map, &el);
+    r = convert_element(dp, map, &el, tolerance);
   }
   if (r != GSHGEOM_OK) {
     gshgeom_device_path_destroy(dp);

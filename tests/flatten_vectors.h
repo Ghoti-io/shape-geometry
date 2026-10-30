@@ -11,7 +11,7 @@
 #include <cstdint>
 
 // The flattener revision these vertices are those of.
-static const int kFlattenVectorsRevision = 2;
+static const int kFlattenVectorsRevision = 3;
 
 struct FlattenVector {
   int kind;

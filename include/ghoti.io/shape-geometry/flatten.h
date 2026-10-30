@@ -31,7 +31,7 @@
  * sink with its own tolerance option (`font`'s) does, through the curve
  * functions or ::gshgeom_device_path_flatten_with_tolerance.
  *
- * ## The guarantee (flattener revision 2)
+ * ## The guarantee (flattener revision 3)
  *
  * For every curve whose control points are any `int32` values, every point of
  * the curve is within the tolerance less 0.12 units of the emitted polyline: at
@@ -41,6 +41,19 @@
  * in documentation/design.md, and tests/unit/test_flatten.cpp checks the bound
  * against dense exact evaluation on every size class up to the whole `int32`
  * range.
+ *
+ * Rational curves are part of the same definition (revision 3).  A rational quadratic, a rational
+ * cubic and each piece of an arc reach the device path by one route (::gshgeom_device_path_from_model):
+ * the control points are mapped in `double` and the weights kept, the homogeneous curve is split at the
+ * parameter 1/2 until every interior control point of the projected piece is within `t - 1` units of
+ * the piece's chord (`t` being the tolerance, ::GSHGEOM_FLATTEN_TOLERANCE unless
+ * ::gshgeom_device_path_from_model_with_tolerance states another), and each flat piece becomes a line to
+ * its end, rounded once to 26.6.  For control points that round into `int32` and weights in
+ * [::GSHGEOM_WEIGHT_MIN, ::GSHGEOM_WEIGHT_MAX], every point of the exact curve is within `t - 0.29` units
+ * of the polyline (so within `t - 0.12`), and the depth cap, ::GSHGEOM_CONIC_MAX_DEPTH, is never what
+ * ends a piece.  The proof is stated above the code (src/device/device.c).  A device path holds the
+ * lines of a rational curve to the tolerance it was made with, so flattening it with a smaller one
+ * (::gshgeom_device_path_flatten_with_tolerance) does not tighten them.
  *
  * The proof holds for every tolerance from ::GSHGEOM_FLATTEN_MIN_TOLERANCE, 2
  * units (1/32 pixel), up to INT32_MAX, with the flatness threshold derived from
@@ -75,6 +88,7 @@
  * |---|---|
  * | 1 | `font`'s flattener as ported in story 7: every midpoint floored to 26.6, flat at `4 * t` units, depth 16.  Its error against the exact curve reached 13 units on a large curve (13.1 over the `int32` range), 2 to 4 on a tiny one. |
  * | 2 | The above: widened by eight bits, a vertex rounded once, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12` units. |
+ * | 3 | Rational curves routed by one rule, proved: the control points within `t - 1` units of the chord, depth 240, within `t - 0.29` units (an arc's pieces among them). Revision 2 flattened them to a fixed 2 units in `double` at depth 16, with no proof. The integer flattener's polyline is unchanged. |
  *
  */
 
@@ -112,8 +126,15 @@ extern "C" {
  */
 #define GSHGEOM_FLATTEN_MAX_DEPTH 20
 
+/**
+ * How deep the conic route may subdivide a rational curve before a piece is used as it is.  The proof
+ * shows that every piece is flat well before it (a weight ratio of 2^200, which the path accepts, takes
+ * 236 levels; an ordinary curve takes about twenty); the stack of the route holds this many halves.
+ */
+#define GSHGEOM_CONIC_MAX_DEPTH 240
+
 /** The revision of the flattener's definition; see the table above. */
-#define GSHGEOM_FLATTEN_REVISION 2
+#define GSHGEOM_FLATTEN_REVISION 3
 
 /**
  * Receives one vertex of a flattened curve, in order.
@@ -217,6 +238,21 @@ GSHGEOM_API GSHGEOM_Result gshgeom_device_path_flatten_with_tolerance(
     const GSHGEOM_Device_Path * path, int32_t tolerance,
     const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
     GSHGEOM_Flat_Path ** out);
+
+/**
+ * @brief ::gshgeom_device_path_from_model with the conic route's tolerance stated.
+ *
+ * Lines, quadratics and cubics are as in ::gshgeom_device_path_from_model (the tolerance belongs to the
+ * flattener that later reads them); a rational curve and an arc are routed to @p tolerance (the header
+ * above: within `tolerance - 0.29` units of the exact curve).
+ *
+ * @param tolerance In 26.6 units, at least ::GSHGEOM_FLATTEN_MIN_TOLERANCE; less is ::GSHGEOM_ERR_INVALID,
+ *   as for ::gshgeom_device_path_flatten_with_tolerance.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_device_path_from_model_with_tolerance(
+    const GSHGEOM_Path * path, const GSHGEOM_Map * map, int32_t tolerance,
+    const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    GSHGEOM_Device_Path ** out);
 
 /**
  * @brief The whole of CAP-3 in one call: map a model path, round it to 26.6

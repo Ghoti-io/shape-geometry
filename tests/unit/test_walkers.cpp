@@ -161,19 +161,26 @@ TEST(Walkers, StrokeCurvesLowerTakesAnArc) {
   gshgeom_path_destroy(lowered);
 }
 
-// device/device.c (convert_element, gshgeom_device_path_from_model), flatten/flatten.c, shape-cpu's render/geometry.c
-TEST(Walkers, DevicePathFromModelAndFlattenRefuseAnArc) {
+// device/device.c (convert_element, convert_arc, gshgeom_device_path_from_model), flatten/flatten.c, shape-cpu's render/geometry.c
+// (updated, CV1): the device path of an arc is the conic route of its pieces, the same lines as the lowered path makes
+TEST(Walkers, DevicePathFromModelAndFlattenTakeAnArc) {
   GSHGEOM_Path * p = arc_path();
   GSHGEOM_Map m;
-  ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
-  GSHGEOM_Device_Path * dp = reinterpret_cast<GSHGEOM_Device_Path *>(0x1);
-  EXPECT_EQ(gshgeom_device_path_from_model(p, &m, nullptr, nullptr, &dp), GSHGEOM_ERR_UNSUPPORTED);
-  EXPECT_EQ(dp, reinterpret_cast<GSHGEOM_Device_Path *>(0x1));
+  ASSERT_EQ(gshgeom_map_scale(2, 8.0, 8.0, 1.0, &m), GSHGEOM_OK);
+  GSHGEOM_Device_Path * dp = nullptr;
+  ASSERT_EQ(gshgeom_device_path_from_model(p, &m, nullptr, nullptr, &dp), GSHGEOM_OK);
   GSHGEOM_Path * lowered = nullptr;
   ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
   GSHGEOM_Device_Path * ok = nullptr;
-  EXPECT_EQ(gshgeom_device_path_from_model(lowered, &m, nullptr, nullptr, &ok), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_device_path_from_model(lowered, &m, nullptr, nullptr, &ok), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_device_path_hash(dp), gshgeom_device_path_hash(ok));
+  EXPECT_GT(gshgeom_device_path_element_count(dp), 4u) << "a quarter circle of radius 80 pixels is several lines";
+  GSHGEOM_Flat_Path * flat = nullptr;
+  ASSERT_EQ(gshgeom_path_flatten(p, &m, nullptr, nullptr, &flat), GSHGEOM_OK);
+  EXPECT_GT(gshgeom_flat_path_point_count(flat), 4u);
+  gshgeom_flat_path_destroy(flat);
   gshgeom_device_path_destroy(ok);
+  gshgeom_device_path_destroy(dp);
   gshgeom_path_destroy(p);
   gshgeom_path_destroy(lowered);
 }

@@ -225,15 +225,18 @@ GSHGEOM_API GSHGEOM_Result gshgeom_device_path_element(
 /**
  * @brief Make the device path of a model path under a map (CAP-3).
  *
- * Every point of every segment is mapped in `double` by
- * ::gshgeom_map_apply_point and then rounded by ::gshgeom_round_26_6.  A line,
- * quadratic or cubic keeps its kind.  A rational curve has no 26.6 form: it is
- * subdivided in `double` after the map, in homogeneous coordinates at the
- * parameter 1/2, until every control point of the projected piece is within
- * 1/32 pixel of the piece's chord, at most 16 levels deep, and becomes a line
- * to the end of each piece (the ends of the whole curve are the mapped control
- * points themselves).  Every control point of every segment must round into
- * range.
+ * Every point of every segment is mapped in `double` by ::gshgeom_map_apply_point and then
+ * rounded by ::gshgeom_round_26_6.  A line, quadratic or cubic keeps its kind.  A rational curve
+ * has no 26.6 form, and neither has an arc, which is read as its pieces (::gshgeom_arc_pieces,
+ * rational quadratics): each is subdivided in `double` after the map, in homogeneous
+ * coordinates at the parameter 1/2, until every interior control point of the projected piece
+ * is within `t - 1` units of the piece's chord (`t` being ::GSHGEOM_FLATTEN_TOLERANCE, 4, so 3
+ * units, 3/64 pixel), at most ::GSHGEOM_CONIC_MAX_DEPTH levels deep, and becomes a line to the
+ * end of each piece (the ends of the whole curve are the mapped control points themselves, rounded
+ * once, so an arc's device ends are its own ends and a closed arc closes).  The route is part of the
+ * flattener's definition, its revision 3 and its proof (flatten.h): every point of the exact curve
+ * is within `t - 0.29` units of the polyline.  Every control point of every segment must round
+ * into range.
  *
  * @param path   A 2D model path.
  * @param map    A 2D map (model to device pixels).

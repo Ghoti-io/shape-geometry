@@ -176,6 +176,18 @@ static GSHGEOM_Result vertex_feed(const GSHGEOM_Vertex * v, void * ctx) {
   return GSHGEOM_OK;
 }
 
+/* 2^e for a small integer e, by doubling: exact, and no libm. */
+static double pow2(int e) {
+  double v = 1.0;
+  for (; e > 0; e--) {
+    v *= 2.0;
+  }
+  for (; e < 0; e++) {
+    v *= 0.5;
+  }
+  return v;
+}
+
 static void feed_arc_int(int v, GSHGEOM_Hash * h, unsigned long * n) {
   (*n)++;
   gshgeom_hash_u32(h, (uint32_t)v);
@@ -1253,6 +1265,127 @@ int main(void) {
     }
     printf("shape-geometry.arc-vertex-hash %016" PRIx64 "\n", gshgeom_hash_value(&vs.total));
     printf("shape-geometry.arc-vertex-count %lu\n", vs.count);
+  }
+
+  /* The conic section (flatten.h, revision 3; CV5): the device path of random rational curves and arcs, bit for bit, under maps
+   * that rotate, skew, mirror, stretch unevenly, collapse (a singular map) and scale from 2^-4 to 2^20, at tolerances 2, 4 and 37.
+   * The weights are short fractions (so the halving is exact), powers of two to 2^+-40 and, in a few rounds, the 2^+-100 the path
+   * accepts; the arcs are every sweep from a few degrees to a full turn, in the endpoint form and the centre form.  What is hashed is
+   * the result code, the element count and the device path's hash: every line of every conic is in it.  Its own pair after the
+   * others, so they never move. */
+  {
+    GSHGEOM_Hash conic_total;
+    unsigned long conic_count = 0;
+    gshgeom_hash_init(&conic_total);
+    static const int32_t tolerances[4] = {2, 4, 4, 37};
+    static const double sweeps[8] = {5.0, 45.0, 90.0, 91.0, 180.0, 270.0, -200.0, 360.0};
+    for (unsigned round = 0; round < 480; round++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("cannot make a path for the conic section");
+      }
+      const unsigned wclass = round % 4u;
+      GSHGEOM_Point s = vertex_point(1u);
+      if (gshgeom_path_move_to(path, s) != GSHGEOM_OK) {
+        return fail("cannot begin a path for the conic section");
+      }
+      GSHGEOM_Result r = GSHGEOM_OK;
+      for (unsigned step = 0; step < 3; step++) {
+        double w4[4];
+        for (unsigned k = 0; k < 4; k++) {
+          const uint64_t pick = next();
+          if (wclass == 0u) {
+            w4[k] = weight();
+          } else if (wclass == 1u) {
+            w4[k] = pow2((int)(pick % 81u) - 40);
+          } else if (wclass == 2u) {
+            w4[k] = (round % 24u == 2u) ? ((pick & 1u) ? 0x1p100 : 0x1p-100) : weight();
+          } else {
+            w4[k] = (pick & 1u) ? 1.0 : 0.5;
+          }
+        }
+        GSHGEOM_Point q1 = random_point(2);
+        GSHGEOM_Point q2 = random_point(2);
+        GSHGEOM_Point q3 = random_point(2);
+        if (step == 0u) {
+          r = gshgeom_path_rational_quadratic_to(path, q1, q2, w4);
+        } else if (step == 1u) {
+          r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4);
+        } else {
+          const double rx = 1.0 + (double)(next() % 9u);
+          const double ry = 1.0 + (double)(next() % 9u);
+          const double sweep = sweeps[next() % 8u];
+          GSHGEOM_Arc_Form f;
+          f.center = q1;
+          f.u.x = rx;
+          f.u.y = 0.0;
+          f.u.z = 0.0;
+          f.v.x = 0.0;
+          f.v.y = ry;
+          f.v.z = 0.0;
+          f.unit = GSHGEOM_ANGLE_DEGREES;
+          f.t0 = (double)(next() % 8u) * 45.0;
+          f.sweep = sweep;
+          f.flags = rx == ry ? GSHGEOM_ARC_CIRCULAR : 0u;
+          GSHGEOM_Path * own = NULL;
+          if (gshgeom_path_create(NULL, NULL, 2, &own) != GSHGEOM_OK) {
+            return fail("cannot make a path for a centre-form arc of the conic section");
+          }
+          /* the centre form begins its own subpath: lowered into this path it is a move and its pieces */
+          r = gshgeom_path_arc_conjugate_to(own, &f, NULL);
+          if (r == GSHGEOM_OK) {
+            GSHGEOM_Arc a;
+            r = gshgeom_path_arc(own, 1, &a);
+            if (r == GSHGEOM_OK) {
+              r = gshgeom_path_line_to(path, a.start);
+            }
+            if (r == GSHGEOM_OK) {
+              r = gshgeom_path_append_arc(path, &a);
+            }
+          }
+          gshgeom_path_destroy(own);
+        }
+        feed_arc_int((int)r, &conic_total, &conic_count);
+        if (r != GSHGEOM_OK && r != GSHGEOM_ERR_LIMIT && r != GSHGEOM_ERR_INVALID) {
+          return fail("cannot build a path for the conic section");
+        }
+      }
+      if (round % 3u == 0u) {
+        (void)gshgeom_path_close(path);
+      }
+      feed_arc_u64(gshgeom_path_hash(path), &conic_total, &conic_count);
+      GSHGEOM_Map map;
+      const unsigned mclass = round % 8u;
+      const int e = (int)(round / 8u % 7u) * 4 - 4; /* 2^-4 to 2^20 */
+      const double scale = pow2(e);
+      double m[4] = {scale, 0.0, 0.0, scale};
+      double t[2] = {coord() * scale, coord() * scale};
+      if (mclass == 1u) {
+        m[0] = scale; m[1] = scale * 0.5; m[2] = 0.0; m[3] = scale; /* a skew */
+      } else if (mclass == 2u) {
+        m[0] = -scale; /* a mirror */
+      } else if (mclass == 3u) {
+        m[0] = scale * 3.0; m[3] = scale * 0.25; /* uneven */
+      } else if (mclass == 4u) {
+        m[0] = scale; m[1] = 2.0 * scale; m[2] = 2.0 * scale; m[3] = 4.0 * scale; /* singular */
+      } else if (mclass == 5u) {
+        m[0] = scale * 0.8660254037844386; m[1] = -scale * 0.5; m[2] = scale * 0.5; m[3] = scale * 0.8660254037844386; /* a rotation */
+      }
+      if (gshgeom_map_from_matrix(2, m, t, &map) != GSHGEOM_OK) {
+        return fail("a map of the conic section was refused");
+      }
+      GSHGEOM_Device_Path * dp = NULL;
+      r = gshgeom_device_path_from_model_with_tolerance(path, &map, tolerances[round % 4u], NULL, NULL, &dp);
+      feed_arc_int((int)r, &conic_total, &conic_count);
+      if (r == GSHGEOM_OK) {
+        feed_arc_u64((uint64_t)gshgeom_device_path_element_count(dp), &conic_total, &conic_count);
+        feed_arc_u64(gshgeom_device_path_hash(dp), &conic_total, &conic_count);
+        gshgeom_device_path_destroy(dp);
+      }
+      gshgeom_path_destroy(path);
+    }
+    printf("shape-geometry.conic-hash %016" PRIx64 "\n", gshgeom_hash_value(&conic_total));
+    printf("shape-geometry.conic-count %lu\n", conic_count);
   }
   return 0;
 }

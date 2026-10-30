@@ -21,8 +21,9 @@
 /**
  * @file
  *
- * The integer flattener (flatten.h), revision 2, the proof that its polyline
- * stays within the tolerance of the curve, and the flattened path.
+ * The integer flattener (flatten.h), revision 2 of its recursion (revision 3 of the definition
+ * adds the conic route of rational curves and arcs, src/device/device.c, and leaves this polyline as
+ * it was), the proof that its polyline stays within the tolerance of the curve, and the flattened path.
  *
  * This was `font`'s private flattener (`src/raster/flatten.c` at `font` commit
  * 69d1860, whose recursion it keeps exactly: the tests compare its output with

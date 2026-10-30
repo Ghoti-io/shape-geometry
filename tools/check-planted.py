@@ -1105,8 +1105,8 @@ PLANTS += [
     ("fl-append-vertex-drops", "src", FL, "  return add_point(user, to);", "  (void)user;\n  (void)to;\n  return GSHGEOM_OK;", FT),
     ("fl-append-vertex-error-lost", "src", FL, "  return add_point(user, to);", "  add_point(user, to);\n  return GSHGEOM_OK;", FT),
     # The revision.
-    ("fl-revision-constant", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 2", "#define GSHGEOM_FLATTEN_REVISION 1", FT),
-    ("fl-revision-constant-3", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 2", "#define GSHGEOM_FLATTEN_REVISION 3", FT),
+    ("fl-revision-constant", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 3", "#define GSHGEOM_FLATTEN_REVISION 1", FT),
+    ("fl-revision-constant-4", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 3", "#define GSHGEOM_FLATTEN_REVISION 4", FT),
     ("fl-revision-function", "src", FL, "  return GSHGEOM_FLATTEN_REVISION;", "  return 1;", FT),
     ("fl-revision-in-hash", "src", FL, "  gshgeom_hash_u32(&h, FLAT_KIND);", "  gshgeom_hash_u32(&h, FLAT_KIND);\n  gshgeom_hash_u32(&h, (uint32_t)GSHGEOM_FLATTEN_REVISION);", FT),
     ("fl-revision-in-dump", "src", FL, "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION,", "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION + (unsigned)GSHGEOM_FLATTEN_REVISION - 1u,", FT),

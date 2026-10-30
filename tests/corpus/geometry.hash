@@ -1,4 +1,4 @@
-hash fb1af2975c01eed3
+hash 5b27c45e470e7211
 count 180964
 predicate-hash 9424b923b022edc4
 predicate-count 600
@@ -8,3 +8,5 @@ arc-hash ad1a5285faf33af7
 arc-count 5320
 arc-vertex-hash 3815761f25c33614
 arc-vertex-count 28192
+conic-hash e1efd39ede388ef6
+conic-count 3320
