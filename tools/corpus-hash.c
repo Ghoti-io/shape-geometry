@@ -1150,12 +1150,18 @@ int main(void) {
           const double rx = fine ? 0.25 + (double)(next() % 4096u) / 256.0 : (double)(1u + next() % 12u);
           const double ry = (next() % 3u == 0u) ? rx : (fine ? 0.25 + (double)(next() % 4096u) / 256.0 : (double)(1u + next() % 12u));
           GSHGEOM_Arc_Kind kind = GSHGEOM_ARC_KIND_NOTHING;
-          r = gshgeom_path_arc_endpoint_to(path, e, rx, ry, phis[next() % 8u], GSHGEOM_ANGLE_DEGREES,
-              (int)(next() % 2u), (int)(next() % 2u), &kind);
+          /* The order the draws are made in is spelled out (a call's arguments are evaluated in no stated order, and a
+           * target that takes them left to right draws another arc than one that takes them right to left): the
+           * order the committed hash was taken in, the last argument first. */
+          const int sweep_flag = (int)(next() % 2u);
+          const int large_flag = (int)(next() % 2u);
+          const double phi = phis[next() % 8u];
+          r = gshgeom_path_arc_endpoint_to(path, e, rx, ry, phi, GSHGEOM_ANGLE_DEGREES, large_flag, sweep_flag, &kind);
           feed_arc_int((int)kind, &arc_total, &arc_count);
         } else if (form == 3) {
           const double t0 = (double)((int)(next() % 721u) - 360);
-          const double sw = (double)((int)(next() % 719u) - 359) + (fine ? (double)(next() % 8u) / 8.0 : 0.0);
+          const double sw_whole = (double)((int)(next() % 719u) - 359);
+          const double sw = sw_whole + (fine ? (double)(next() % 8u) / 8.0 : 0.0);
           const unsigned u = (unsigned)(next() % 4u);
           const double scale = u == 1u ? 1.0 : u == 2u ? 400.0 / 360.0 : u == 3u ? 1.0 / 360.0 : 3.14159265358979323846 / 180.0;
           /* the centre form begins its own subpath (no current point), so it goes into a path of its own */
@@ -1163,13 +1169,17 @@ int main(void) {
           if (gshgeom_path_create(NULL, NULL, 2, &own) != GSHGEOM_OK) {
             return fail("cannot make a path for a centre-form arc");
           }
-          r = gshgeom_path_arc_center_to(own, e, 2.0 + (double)(next() % 9u), 1.0 + (double)(next() % 9u),
-              phis[next() % 8u] * scale, units[u], t0 * scale, sw == 0.0 ? scale : sw * scale, NULL);
+          const double phi = phis[next() % 8u] * scale; /* drawn in the order of the endpoint form above: last argument first */
+          const double ry = 1.0 + (double)(next() % 9u);
+          const double rx = 2.0 + (double)(next() % 9u);
+          r = gshgeom_path_arc_center_to(own, e, rx, ry, phi, units[u], t0 * scale, sw == 0.0 ? scale : sw * scale, NULL);
           feed_arc_u64(gshgeom_path_hash(own), &arc_total, &arc_count);
           gshgeom_path_destroy(own);
           r = r == GSHGEOM_OK ? GSHGEOM_OK : r;
         } else if (form == 4) {
-          r = gshgeom_path_arc_tangent_to(path, e, vertex_point(fine), (double)(next() % 5u) * 0.75);
+          const double radius = (double)(next() % 5u) * 0.75; /* drawn before the vertex, as above */
+          const GSHGEOM_Point corner = vertex_point(fine);
+          r = gshgeom_path_arc_tangent_to(path, e, corner, radius);
         } else {
           r = gshgeom_path_arc_bulge_to(path, e, (double)((int)(next() % 41u) - 20) / 8.0);
         }
@@ -1225,7 +1235,8 @@ int main(void) {
           /* a circle or an ellipse that begins at the current point, at a quarter turn of its parameter */
           const unsigned k = (unsigned)(next() % 4u);
           const double rx = 1.0 + (double)(next() % 6u), ry = (next() % 2u == 0u) ? rx : 1.0 + (double)(next() % 6u);
-          const double sweep = (double)(1 + (int)(next() % 8u)) * 45.0 * ((next() % 2u == 0u) ? 1.0 : -1.0);
+          const double sweep_size = (double)(1 + (int)(next() % 8u)) * 45.0;
+          const double sweep = sweep_size * ((next() % 2u == 0u) ? 1.0 : -1.0);
           GSHGEOM_Arc_Form f;
           f.center.x = cur.x - (rx * quarter_cos[k]);
           f.center.y = cur.y - (ry * quarter_sin[k]);
@@ -1242,10 +1253,16 @@ int main(void) {
           f.flags = rx == ry ? GSHGEOM_ARC_CIRCULAR : 0u;
           r = gshgeom_path_arc_conjugate_to(path, &f, NULL);
         } else if (pick <= 4) {
-          r = gshgeom_path_arc_endpoint_to(path, e, 1.0 + (double)(next() % 8u), 1.0 + (double)(next() % 8u),
-              (double)(next() % 4u) * 30.0, GSHGEOM_ANGLE_DEGREES, (int)(next() % 2u), (int)(next() % 2u), NULL);
+          const int sweep_flag = (int)(next() % 2u); /* the last argument first, as in the arc section */
+          const int large_flag = (int)(next() % 2u);
+          const double phi = (double)(next() % 4u) * 30.0;
+          const double ry = 1.0 + (double)(next() % 8u);
+          const double rx = 1.0 + (double)(next() % 8u);
+          r = gshgeom_path_arc_endpoint_to(path, e, rx, ry, phi, GSHGEOM_ANGLE_DEGREES, large_flag, sweep_flag, NULL);
         } else if (pick == 5) {
-          r = gshgeom_path_arc_tangent_to(path, e, vertex_point(fine), (double)(1u + next() % 4u));
+          const double radius = (double)(1u + next() % 4u);
+          const GSHGEOM_Point corner = vertex_point(fine);
+          r = gshgeom_path_arc_tangent_to(path, e, corner, radius);
         } else if (pick == 6) {
           r = gshgeom_path_arc_bulge_to(path, e, (double)((int)(next() % 17u) - 8) / 4.0);
         } else if (pick == 7) {
