@@ -478,6 +478,86 @@ the same text, so they could agree and be wrong about which of the four arcs a f
 renderer's behaviour (the four-arc minimal pair, and an elongated rotated ellipse, since a rotation sign error is invisible on
 a circle) is not part of `make test`.
 
+## Named primitives
+
+`shapes.h` builds the three shapes every front-end draws, so that each gets the same elements: a rectangle, a rounded rectangle and an
+ellipse. They are ordinary path elements (lines and quarter-turn arcs); a path carries no tag. Which shape the front-end meant is
+a fact kept above the path, where it cannot outlive an edit (the scene library's primitive tag), and the geometry here is what a
+sink that ignores the tag draws, so it is defined exactly. The rules keep the names the header and the tests cite.
+
+**PR2 What is valid.** Decided in this order, `ERR_INVALID` unless stated, a failed call leaving the path as it was: a NULL or 3D
+path; a flip that is not 0 or 1; a non-finite number; a negative width, height or radius component; for the ellipse, a radius that is
+not positive; for the rounded rectangle, an overlap of the corner curves on a side; then `ERR_LIMIT` for any coordinate the builder
+derives past `GSHGEOM_COORD_LIMIT` (`x + w`, `cx + rx`, each correctly rounded) or the path's element limit; then `ERR_OOM`. A corner
+with a zero radius component is square and counts as `{0, 0}`; the overlap rule sees the canonical radii, so a square corner
+never overlaps anything. The overlap is decided **exactly**: `r[0].rx + r[1].rx > w` (the top), `r[1].ry + r[2].ry > h` (the right),
+`r[2].rx + r[3].rx > w` (the bottom) and `r[3].ry + r[0].ry > h` (the left), each the sum of two doubles compared with a double in the
+reals. Equality is valid (a stadium, a circle). The sum `0.1 + 0.9` is `1.0` in `double` and a little over one in the reals, so
+a box of width `1` is refused for those radii and a box one ulp wider is not. The waist does not clamp or scale radii: each format has
+its own rule (SVG clamps each radius to half its side, CSS and Canvas scale all corners by one factor) and the front-end applies it.
+
+**Coordinates.** Every coordinate is the correctly rounded value of the real expression named: `x + w`, `x + w - r`, `cx - rx`, each a
+sum rounded once from the exact sum. A sum with a zero term is the other term bit for bit (`x + 0` is `x`, so a point at `-0` stays), and
+a sum that is exactly zero is `+0`.
+
+**PR3 Rect.** `M (x, y)`, `L (x + w, y)`, `L (x + w, y + h)`, `L (x, y + h)`, `Z`: SVG 2's `rect` and Canvas `rect` with a
+non-negative size: the top edge left to right, then down the right side and back: the positive direction (AD-6; clockwise on a y-down
+screen). A zero width or height is allowed and gives coincident points (Canvas strokes such a rect as a line; SVG's "disable
+rendering" is the front-end's decision to build nothing).
+
+**PR4 Rounded rect.** Radii `{rx, ry}` in the order top-left, top-right, bottom-right, bottom-left. The path starts after the top-left
+radius: `M (x + rTL.rx, y)`, `L (x + w - rTR.rx, y)`, the top-right arc (if that corner is round) to `(x + w, y + rTR.ry)`,
+`L (x + w, y + h - rBR.ry)`, the bottom-right arc to `(x + w - rBR.rx, y + h)`, `L (x + rBL.rx, y + h)`, the bottom-left arc to
+`(x, y + h - rBL.ry)`, `L (x, y + rTL.ry)`, the top-left arc to the start, `Z`. The four lines are **always** emitted, even when a side's
+radii sum to the side and the line has no length: the structure is a function of which corners are round and nothing else. Each arc
+is a positive quarter turn in degrees (exactly representable, so the control polygon of a quarter-aligned corner is exact, AR8), with
+the centre `C`, the half-diameters `u = (rx, 0)` and `v = (0, ry)` and `t0` of `-90`, `0`, `90`, `180` for the corners in that order; its
+start and end are the named points to the bit, so the subpath closes to the bit. It is circular iff `rx` and `ry` are bit equal. With no
+round corner the path is PR3's.
+
+**PR5 Ellipse.** `M (cx + rx, cy)`, then four arcs about `(cx, cy)` with `u = (rx, 0)`, `v = (0, ry)`, in degrees, sweep `+90`, `t0` of
+0, 90, 180, 270, ending at `(cx, cy + ry)`, `(cx - rx, cy)`, `(cx, cy - ry)` and the start, then `Z`: SVG 2's equivalent path for
+`ellipse` and `circle` (four quarter arcs from the "3 o'clock" point, clockwise). Circular iff `rx` and `ry` are bit equal.
+
+**PR13 The flips.** `flip_x` and `flip_y` (each 0 or 1) mirror the shape in the box's vertical and horizontal axis, the start corner
+and the turn following the mirror. They are the four sign cases of Canvas `rect(x, y, w, h)`: no flip is `w >= 0, h >= 0`, `flip_x` is `w < 0`,
+`flip_y` is `h < 0`, both is both negative. The mirror is one exchange: write each coordinate as a distance from the left edge (`x + a`) or
+the right (`x + w - a`), and from the top (`y + b`) or the bottom (`y + h - b`); `flip_x` swaps left with right and `flip_y` top with
+bottom. The elements, their order and the closing are the unflipped shape's. Every coordinate is rounded once after the exchange, never a mirror of a
+rounded coordinate.
+
+| flips | rect starts at | on screen | ellipse starts at | on screen |
+| --- | --- | --- | --- | --- |
+| none | top-left | clockwise | angle 0 (`cx + rx`) | clockwise |
+| `flip_x` | top-right | counter-clockwise | angle pi (`cx - rx`) | counter-clockwise |
+| `flip_y` | bottom-left | counter-clockwise | angle 0 | counter-clockwise |
+| both | bottom-right | clockwise | angle pi | clockwise |
+
+The direction is the parity of the flips. For the ellipse `flip_x` negates `u` and `flip_y` negates `v`, with `t0` and the sweep unchanged,
+so the arcs' orientation (AR3) is negative exactly when one flip is set. SVG uses no flip. A front-end maps Canvas `rect(x, y, w, h)` to the
+box `(x + min(w, 0), y + min(h, 0), |w|, |h|)` with `flip_x` iff `w < 0` and `flip_y` iff `h < 0`, and builds no untagged path for any sign case.
+
+**The rounded rectangle has no flipped form here.** A dashed Chromium run (below) shows Canvas `roundRect` with a negative size
+*not* following the `rect` cases: the radii go to the corners the mirror gives them (the first radius stays with the corner the
+box's corner order puts first) but the path starts after the top-left radius and turns clockwise for an even number of negative sizes and
+counter-clockwise for an odd one, whatever the signs: a reversal, not a mirror. The HTML Standard's `roundRect` steps, read literally for a
+negative width, start outside the box. Which of the two forms the waist means for a flipped rounded rectangle is not decided, so
+`gshgeom_path_add_rounded_rect` takes no flips; the scene library refuses a flipped rounded rectangle.
+
+**What was checked against a browser.** `tools/` does not run a browser; the minimal pairs were run once, by hand, in headless Chrome 156
+(Chromium), dashing a 2 px stroke with a dash of 4 to 40 px and a gap of 100000 so that the first dash marks where the path starts and
+which way it turns. Canvas `rect` with each of the four sign cases, Canvas `ellipse` from angle 0 and pi both ways round (a full
+turn), and SVG `<rect>`, `<rect rx ry>`, `<ellipse>`, `<circle>` all start and turn as the table and PR3 to PR5 say; the HTML Standard's
+`rect` and `ellipse` steps say the same. Canvas `roundRect` differs from the table as described above. Neither Firefox nor Safari was run.
+
+**What checks it.** `tools/gen-shapes-vectors.py` states PR2 to PR5 and PR13 in exact rationals (`fractions.Fraction`, rounded once),
+sharing no code with the library, and writes `tests/shapes_vectors.h`: boxes with a zero side, a negative zero, a sum that rounds, the
+coordinate limit and one ulp past it, by the four flips for the rect and the ellipse; rounded rectangles with one to four round corners,
+elliptical corners and radii summing exactly to a side; the overlap table decided on exact sums; and the refusals. The test compares every
+element bit for bit, reads each arc's piece back and requires the control polygon to be the corner of the box, and checks the refusals
+leave the path as it was. The cross-target value over random boxes, radii and flips is the `shapes-hash` pair of
+`tests/corpus/geometry.hash`.
+
 ## The fill rules
 
 `fill.h` holds the two fill rules of the family and nothing else, so that a

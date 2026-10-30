@@ -83,6 +83,7 @@ enum {
   OUT_MEASURED_OK, OUT_MEASURED_REFUSED, OUT_OOM, OUT_GRID_ALIGNED, OUT_MAP_INVALID, OUT_ORIENT_ZERO, OUT_CURVED,
   OUT_ARC, OUT_ARC_LINE, OUT_ARC_NOTHING, OUT_ARC_CIRCULAR, OUT_ARC_DISAGREE, OUT_ARC_MAPPED, OUT_ARC_MAP_REFUSED,
   OUT_ARC_LOWERED, OUT_ARC_VERTICES, OUT_ARC_COPIED, OUT_ARC_FULL_TURN, OUT_ARC_DEVICE,
+  OUT_SHAPE_RECT, OUT_SHAPE_ROUNDED, OUT_SHAPE_ELLIPSE, OUT_SHAPE_FLIPPED, OUT_SHAPE_OVERLAP, OUT_SHAPE_BAD_FLIP,
   OUT_COUNT
 };
 
@@ -93,7 +94,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a non-finite point refuse
     "a device path holding a curve", "an arc added", "an arc constructor's line", "an endpoint form that adds nothing",
     "a circular arc", "a record whose ends disagree with its centre form, refused", "a mapped arc", "a mapped arc refused",
     "a path with arcs lowered", "the vertices of a path with an arc", "a path with an arc copied", "a full-turn arc",
-    "a device path of an arc"};
+    "a device path of an arc", "a rect added", "a rounded rect with arcs added", "an ellipse added", "a flipped primitive added",
+    "a rounded rect refused for an overlap", "a flip that is not 0 or 1, refused"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -653,11 +655,84 @@ static void arc_added(const GSHGEOM_Path * path, size_t before) {
   }
 }
 
+
+/** A primitive of shapes.h from the input: the result is one of the four the path verbs have, a refusal changes nothing (the caller
+ *  checks), and an added primitive is a closed subpath of the elements the rules name, its arcs valid, positive or negative as
+ *  the parity of the flips says, and its copy equal. */
+static GSHGEOM_Result shape_op(Input * in, GSHGEOM_Path * path, int dim, size_t before) {
+  const unsigned kind = next(in) % 3u;
+  const uint8_t fl = next(in);
+  int fx = fl & 1;
+  int fy = (fl >> 1) & 1;
+  const int bad_flip = (fl & 0x10) != 0;
+  if (bad_flip) {
+    fx = (fl & 0x20) ? -1 : 2;
+  }
+  const double x = coordinate(in);
+  const double y = coordinate(in);
+  const double w = radius(in);
+  const double h = radius(in);
+  GSHGEOM_Corner c[4];
+  GSHGEOM_Result r;
+  int overlap = 0;
+  if (kind == 0u) {
+    r = gshgeom_path_add_rect(path, x, y, w, h, fx, fy);
+  } else if (kind == 1u) {
+    for (int i = 0; i < 4; i++) {
+      c[i].rx = radius(in);
+      c[i].ry = radius(in);
+    }
+    r = gshgeom_path_add_rounded_rect(path, x, y, w, h, c);
+    overlap = r == GSHGEOM_ERR_INVALID && finite(w) && finite(h) && w >= 0.0 && h >= 0.0;
+    for (int i = 0; i < 4; i++) {
+      overlap = overlap && finite(c[i].rx) && finite(c[i].ry) && c[i].rx >= 0.0 && c[i].ry >= 0.0;
+    }
+  } else {
+    r = gshgeom_path_add_ellipse(path, x, y, w, h, fx, fy);
+  }
+  CHECK(dim == 2 || r == GSHGEOM_ERR_INVALID);
+  outcomes[OUT_SHAPE_OVERLAP] += overlap;
+  outcomes[OUT_SHAPE_BAD_FLIP] += bad_flip && kind != 1u && r == GSHGEOM_ERR_INVALID;
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  const size_t n = gshgeom_path_element_count(path);
+  const size_t added = n - before;
+  CHECK(added >= 5u && added <= 10u);
+  GSHGEOM_Verb verb;
+  CHECK(gshgeom_path_verb(path, before, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_MOVE);
+  CHECK(gshgeom_path_verb(path, n - 1, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_CLOSE);
+  size_t arcs = 0;
+  for (size_t i = before; i < n; i++) {
+    CHECK(gshgeom_path_verb(path, i, &verb) == GSHGEOM_OK);
+    if (verb == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Arc a;
+      arcs++;
+      check_arc_at(path, i);
+      CHECK(gshgeom_path_arc(path, i, &a) == GSHGEOM_OK);
+      CHECK(a.unit == GSHGEOM_ANGLE_DEGREES && a.sweep == 90.0);
+      const double cross = a.u.x * a.v.y - a.u.y * a.v.x;
+      CHECK(kind == 1u ? cross > 0.0 : (cross < 0.0) == (fx != fy));
+      GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+      int np = 0;
+      CHECK(gshgeom_arc_pieces(&a, pieces, &np) == GSHGEOM_OK && np == 1);
+    }
+  }
+  CHECK(kind != 0u || (added == 5u && arcs == 0u));
+  CHECK(kind != 2u || (added == 6u && arcs == 4u));
+  CHECK(kind != 1u || (arcs == 0u ? added == 5u : added == 6u + arcs));
+  outcomes[OUT_SHAPE_RECT] += kind == 0u;
+  outcomes[OUT_SHAPE_ROUNDED] += kind == 1u && arcs > 0u;
+  outcomes[OUT_SHAPE_ELLIPSE] += kind == 2u;
+  outcomes[OUT_SHAPE_FLIPPED] += kind != 1u && (fx || fy);
+  return r;
+}
+
 /* --- the entry point ---------------------------------------------------------------------------------- */
 
 enum { OP_MOVE, OP_LINE, OP_QUAD, OP_CUBIC, OP_RQUAD, OP_RCUBIC, OP_CLOSE, OP_MOVE_FIXED, OP_LINE_FIXED,
        OP_QUAD_FIXED, OP_CUBIC_FIXED, OP_DEVICE, OP_MEASURE, OP_ORIENT, OP_BOUNDS, OP_ARC_ENDPOINT, OP_ARC_CENTER, OP_ARC_CONJUGATE,
-       OP_ARC_TANGENT, OP_ARC_BULGE, OP_ARC_RAW, OP_ARC_PASS, OP_ARC_MAP, OP_COUNT };
+       OP_ARC_TANGENT, OP_ARC_BULGE, OP_ARC_RAW, OP_ARC_PASS, OP_ARC_MAP, OP_SHAPE, OP_COUNT };
 
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
 
@@ -903,6 +978,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           arc_map(&in, path);
         }
         continue;
+      case OP_SHAPE:
+        r = shape_op(&in, path, dim, before);
+        break;
       case OP_DEVICE:
         if (dim == 2) {
           device_passes(&in, path, &alloc, &limits, sink);

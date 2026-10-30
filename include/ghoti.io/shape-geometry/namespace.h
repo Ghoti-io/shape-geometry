@@ -312,6 +312,11 @@
 #define gshgeom_path_verb_weights GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_verb_weights)
 #define gshgeom_path_append_raw GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_append_raw)
 #define gshgeom_path_element_start GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_element_start)
+#define GSHGEOM_Corner GHOTIIO_SHAPE_GEOMETRY(GSHGEOM_Corner)
+#define gshgeom_rounded_rect_check GHOTIIO_SHAPE_GEOMETRY(gshgeom_rounded_rect_check)
+#define gshgeom_path_add_rect GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_add_rect)
+#define gshgeom_path_add_rounded_rect GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_add_rounded_rect)
+#define gshgeom_path_add_ellipse GHOTIIO_SHAPE_GEOMETRY(gshgeom_path_add_ellipse)
 
 /// @endcond
 

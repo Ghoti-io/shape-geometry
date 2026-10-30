@@ -51,3 +51,5 @@ shape-scene|tools/sink-plants.json|*|support|builds or reads arc-free paths; arc
 vector|tests/lower_helpers.h|*|owner|the verb printer's default prints an unknown verb as ?n: the owner adds the arc verb; nothing in vector builds an arc yet|-
 shape-geometry|tests/unit/test_arc_rules.cpp|*|support|feeds the arc to the library, which is what it is for|-
 shape-geometry|examples/arc.c|*|support|builds a path of arcs and shows the element readback refusing one; feeds the arc to the library, which is what it is for|-
+shape-geometry|tests/unit/test_shapes.cpp|*|support|builds the primitives and reads them back, arcs included; feeds the arc to the library, which is what it is for|-
+shape-geometry|examples/shapes.c|*|support|builds the primitives and reads them back, arcs included; feeds the arc to the library, which is what it is for|-

@@ -33,13 +33,13 @@ import sys
 # Keep in step with the op enum in tests/fuzz/fuzz_path.c.
 OPS = ["MOVE", "LINE", "QUAD", "CUBIC", "RQUAD", "RCUBIC", "CLOSE", "MOVE_FIXED", "LINE_FIXED", "QUAD_FIXED",
        "CUBIC_FIXED", "DEVICE", "MEASURE", "ORIENT", "BOUNDS", "ARC_ENDPOINT", "ARC_CENTER", "ARC_CONJUGATE", "ARC_TANGENT",
-       "ARC_BULGE", "ARC_RAW", "ARC_PASS", "ARC_MAP"]
+       "ARC_BULGE", "ARC_RAW", "ARC_PASS", "ARC_MAP", "SHAPE"]
 OP = {name: i for i, name in enumerate(OPS)}
 
 BIASED = {"MOVE": 3, "LINE": 5, "QUAD": 5, "CUBIC": 6, "RQUAD": 4, "RCUBIC": 3, "CLOSE": 3, "MOVE_FIXED": 1,
           "LINE_FIXED": 2, "QUAD_FIXED": 2, "CUBIC_FIXED": 2, "DEVICE": 6, "MEASURE": 4, "ORIENT": 3, "BOUNDS": 1,
           "ARC_ENDPOINT": 4, "ARC_CENTER": 3, "ARC_CONJUGATE": 2, "ARC_TANGENT": 3, "ARC_BULGE": 3, "ARC_RAW": 3,
-          "ARC_PASS": 3, "ARC_MAP": 3}
+          "ARC_PASS": 3, "ARC_MAP": 3, "SHAPE": 4}
 
 BIASED_FILES = 120
 PLAIN_FILES = 40
@@ -184,10 +184,38 @@ def arc_scripted():
     return out
 
 
+def shape(kind, flags, x, y, w, h, radii=()):
+    """OP_SHAPE: the kind (0 rect, 1 rounded rect, 2 ellipse), the flip byte (bit 0 flip_x, bit 1 flip_y, 0x10 a flip that is not 0 or 1), the
+    box and, for a rounded rect, the eight radii (a byte below 16 is the table: 0 is a zero radius)."""
+    out = bytes([OP["SHAPE"], kind, flags]) + raw(x) + raw(y) + raw(w) + raw(h)
+    for r in radii:
+        out += raw(r) if r else bytes([0])
+    return out
+
+
+def shape_scripted():
+    """Primitive inputs: each kind, each flip pair, an overlap, a bad flip, a 3D path, the element cap and failed allocations."""
+    out = {}
+    for fl in range(4):
+        out["scripted-shape-rect-%d.bin" % fl] = bytes([0, 0]) + shape(0, fl, 160, 320, 1600, 960)
+        out["scripted-shape-ellipse-%d.bin" % fl] = bytes([0, 0]) + shape(2, fl, 160, 320, 1600, 960)
+    rr = (160, 96, 160, 96, 160, 96, 160, 96)
+    out["scripted-shape-rounded.bin"] = bytes([0, 0]) + shape(1, 0, 0, 0, 1600, 960, rr) + ARC_PASS + identity_device()
+    out["scripted-shape-rounded-two.bin"] = bytes([0, 0]) + shape(1, 0, 0, 0, 1600, 960, (160, 96, 0, 0, 0, 0, 96, 160)) + ARC_PASS
+    out["scripted-shape-overlap.bin"] = bytes([0, 0]) + shape(1, 0, 0, 0, 1600, 960, (1000, 96, 1000, 96, 0, 0, 0, 0))
+    out["scripted-shape-bad-flip.bin"] = bytes([0, 0]) + shape(0, 0x10, 0, 0, 1600, 960) + shape(2, 0x30, 0, 0, 1600, 960)
+    out["scripted-shape-3d.bin"] = bytes([1, 0]) + shape(0, 0, 0, 0, 1600, 960)
+    out["scripted-shape-element-cap.bin"] = bytes([2 | (3 << 2), 0]) + shape(0, 0, 0, 0, 1600, 960) + shape(2, 0, 0, 0, 1600, 960)
+    for k, fail in enumerate((1, 2, 4, 6, 9)):
+        out["scripted-shape-oom-%d.bin" % k] = bytes([128, fail]) + shape(1, 0, 0, 0, 1600, 960, rr) + shape(2, 3, 0, 0, 800, 800) + ARC_PASS
+    return out
+
+
 def scripted():
     """Inputs that reach, by construction, the outcomes that random bytes reach only by luck."""
     out = {}
     out.update(arc_scripted())
+    out.update(shape_scripted())
     out["scripted-nan.bin"] = bytes([0, 0, OP["MOVE"], NAN, 0])
     # options 2: max_elements 1, so the line after the move is refused by the cap.
     out["scripted-element-cap.bin"] = bytes([2, 0, OP["MOVE"], 0, 0, OP["LINE"], ONE, ONE])

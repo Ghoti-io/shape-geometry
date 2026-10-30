@@ -1387,5 +1387,56 @@ int main(void) {
     printf("shape-geometry.conic-hash %016" PRIx64 "\n", gshgeom_hash_value(&conic_total));
     printf("shape-geometry.conic-count %lu\n", conic_count);
   }
+
+  /* The named primitives (shapes.h; PR2 to PR5, PR13): random boxes, radii and flips through the three builders, the result code and
+   * the path's hash (every coordinate, every arc record).  Coordinates are sums that round (a 2^-19 grid plus offsets from 2^-3 to
+   * 2^40), a share of the radii are zero (square corners) and a share overlap or are negative, so the refusals are in it too.  Its own
+   * pair after the others, so they never move. */
+  {
+    GSHGEOM_Hash shapes_total;
+    unsigned long shapes_count = 0;
+    gshgeom_hash_init(&shapes_total);
+    for (unsigned round = 0; round < 1200; round++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("cannot make a path for the shapes section");
+      }
+      const uint64_t pick = next();
+      const double scale = (double)(UINT64_C(1) << (pick & 31u)) / 8.0;
+      const double x = coord() * scale;
+      const double y = coord() * scale;
+      double w = (coord() + 16.0) * scale / 32.0;
+      double h = (coord() + 16.0) * scale / 32.0;
+      if ((pick >> 8) % 23u == 0u) {
+        w = 0.0;
+      }
+      if ((pick >> 12) % 29u == 0u) {
+        h = -h;
+      }
+      const int fx = (int)((pick >> 20) & 1u);
+      const int fy = (int)((pick >> 21) & 1u);
+      GSHGEOM_Result r;
+      const unsigned kind = round % 3u;
+      if (kind == 0u) {
+        r = gshgeom_path_add_rect(path, x, y, w, h, fx, fy);
+      } else if (kind == 1u) {
+        GSHGEOM_Corner c[4];
+        for (unsigned k = 0; k < 4; k++) {
+          const uint64_t q = next();
+          c[k].rx = ((q & 7u) == 0u) ? 0.0 : w * (double)((q >> 8) & 255u) / 1024.0;
+          c[k].ry = ((q & 7u) == 1u) ? 0.0 : h * (double)((q >> 20) & 255u) / 1024.0;
+        }
+        r = gshgeom_path_add_rounded_rect(path, x, y, w, h, c);
+      } else {
+        r = gshgeom_path_add_ellipse(path, x, y, w, h < 0.0 ? -h : h, fx, fy);
+      }
+      feed_arc_int((int)r, &shapes_total, &shapes_count);
+      feed_arc_u64((uint64_t)gshgeom_path_element_count(path), &shapes_total, &shapes_count);
+      feed_arc_u64(gshgeom_path_hash(path), &shapes_total, &shapes_count);
+      gshgeom_path_destroy(path);
+    }
+    printf("shape-geometry.shapes-hash %016" PRIx64 "\n", gshgeom_hash_value(&shapes_total));
+    printf("shape-geometry.shapes-count %lu\n", shapes_count);
+  }
   return 0;
 }

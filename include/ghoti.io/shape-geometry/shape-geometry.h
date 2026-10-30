@@ -40,6 +40,7 @@
 #include <ghoti.io/shape-geometry/map.h>
 #include <ghoti.io/shape-geometry/orient.h>
 #include <ghoti.io/shape-geometry/path.h>
+#include <ghoti.io/shape-geometry/shapes.h>
 #include <ghoti.io/shape-geometry/stroke.h>
 #include <ghoti.io/shape-geometry/stroke_curves.h>
 #include <ghoti.io/shape-geometry/vertices.h>
