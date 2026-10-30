@@ -284,9 +284,11 @@ group has a cause, and none of the 118 is shown equivalent one by one; a defect 
      the record's; the flat-ellipse test of the endpoint form (``rx ry`` is never zero or negative once the radii are positive);
      a singular or invalid map, whose image the record's validation refuses; a ``GENERAL`` map, which carries a second bit of the
      non-similarity set; an argument pointer the callee would dereference anyway.
-  3. State that is set twice: a copy's current point, start and ``has_current`` (``gshgeom_path_append_raw`` of the last element sets them
+  3. State that is set twice, and a failure that cannot happen: a copy's current point, start and ``has_current`` (``gshgeom_path_append_raw`` of the last element sets them
      for every verb a builder can end on); the element limit checked before the move that begins a subpath, when the append that
-     follows is refused and rolled back to the same state.
+     follows is refused and rolled back to the same state; the release of the copy
+     when its append loop fails (``arw-copy-leaks-on-failure``), a loop that cannot fail since the copy sizes its arrays to the source
+     once and decides the element limit first.
   4. Numerically indistinguishable: ``(S + E) / 2`` against ``S / 2 + E / 2`` (a scale by a power of two); the double just below ``2 pi``
      against its neighbour as the clamp of a sweep; the radius check at exact equality, whose two branches give the same half ellipse;
      ``sqrt(x^2 + y^2)`` against ``hypot`` where the square cannot round; ``GSHGEOM_ARC_DECOMP`` and ``GSHGEOM_ARC_MAX_PIECES`` (the
@@ -2807,6 +2809,26 @@ ARC_UNSEEN = {'arw-copy-current-dropped', 'ar-tangent-p2y-unchecked', 'arw-dash-
 # the vectors that overflow (rect, rounded rect, ellipse, each flip pair) are what keep it.  A NaN centre is refused by the move that
 # stores it.  Shown by the argument above, not by a test.
 ARC_UNSEEN |= {'sh-rr-limit-centres-skipped', 'sh-ell-limit-skipped', 'sh-ell-rx-nan-first', 'sh-rr-radii-limit-via-arc-dropped'}
+# A plant of the copy's failure path: since the copy sizes its arrays to the source once (and decides the element limit first), the
+# append loop cannot fail, so `gshgeom_path_destroy(dst)` after it is a defence no input reaches.  Shown by the argument, not by a test.
+ARC_UNSEEN |= {'arw-copy-leaks-on-failure'}
+
+# Twenty-four arc plants that the sweep after the primitives found caught only by a test or the probe their lists did not name
+# (PLANT_ALL_TESTS=1 on the plants not caught at once); their lists now name the catcher.
+EXTRA_CATCHERS = {}
+for _n in ('ar-pieces-tangent-b-x', 'ar-pieces-tangent-b-y', 'ar-pieces-axis-rule-never', 'ar-pieces-axis-rule-second-never',
+           'arw-element-start-is-previous-first-point', 'ar-sum-double-negation-carry', 'ar-sum-double-negation-carry-lost'):
+    EXTRA_CATCHERS[_n] = ["testShapes"]
+for _n in ('ar-circle-null-radius', 'ar-circle-null-centre', 'ar-circle-flat-accepted', 'ar-circle-centre-y-lost', 'ar-circle-radius-v',
+           'ar-circle-radius-x-only', 'cvx-with-tolerance-below-minimum', 'cvx-with-tolerance-minimum-ignored'):
+    EXTRA_CATCHERS[_n] = ["testArc_rules"]
+for _n in ('ar-endpoint-fits-on-rounded-sums', 'ar-endpoint-radicand-on-rounded-sums', 'ar-endpoint-half-on-rounded-sum',
+           'ar-form-start-ignores-current', 'ar-form-turn-closes-to-p0', 'ar-tangent-sweep-by-difference',
+           'arw-stroke-clip-device-tolerance-doubled'):
+    EXTRA_CATCHERS[_n] = ["probe"]
+EXTRA_CATCHERS['arw-measure-arc-subpath-stays-needed'] = ["testWalkers"]
+EXTRA_CATCHERS['cvx-emit-line-leaf-level-lost'] = ["testStroke_curves_oracle"]
+ARC_PLANTS = [p if p[0] not in EXTRA_CATCHERS else p[:5] + (list(p[5]) + EXTRA_CATCHERS[p[0]],) for p in ARC_PLANTS]
 ARC_UNSEEN_PLANTS = [p for p in ARC_PLANTS if p[0] in ARC_UNSEEN]
 PLANTS += [p for p in ARC_PLANTS if p[0] not in ARC_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
