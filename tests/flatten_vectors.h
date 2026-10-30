@@ -1,4 +1,4 @@
-// Generated: known answers of font's flattener, revision 2 (libs/font/src/raster/
+// Generated: known answers of font's flattener (libs/font/src/raster/
 // flatten.c, gfnt_flatten_quad and gfnt_flatten_cubic at tolerance 4, font commit
 // 69d1860), recorded by tools/vectors-from-font (story 7a).  Do not edit.
 // Each vector is a quadratic (kind 2) or cubic (kind 3) in 26.6, the number of
@@ -11,7 +11,7 @@
 #include <cstdint>
 
 // The flattener revision these vertices are those of.
-static const int kFlattenVectorsRevision = 3;
+static const int kFlattenVectorsRevision = 1;
 
 struct FlattenVector {
   int kind;

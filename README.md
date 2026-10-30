@@ -11,7 +11,7 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   `orient2d` and `orient3d`, and the grid-aligned route predicate.
 - The 26.6 device path: the one rounding rule `floor(x * 64 + 0.5)`, a model
   path under a map converted to it, and the integer flattener (1/16 pixel by
-  default and any tolerance of 2 units and up on request, revision 2, proved
+  default and any tolerance of 2 units and up on request, proved
   within the tolerance for every `int32` curve; ported from `font`'s scan
   converter, which now calls it) producing a flattened path, or the vertices of
   one curve.
@@ -33,8 +33,7 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
 - Named primitives (`shapes.h`): a rectangle, a rounded rectangle and an ellipse as lines and quarter-turn arcs with SVG 2's start
   point and direction, the four Canvas `rect` sign cases as two flips (and `roundRect` with a negative size as Chromium draws it: the radii to the mirrored corners, the path reversed for one flip), radii that overlap refused on an exact sum, and every coordinate
   the correctly rounded value of its expression. `examples/shapes.c` builds them.
-- The conic route: the device path of a rational curve or an arc, proved within the tolerance less 0.29 units (flattener
-  revision 3).
+- The conic route: the device path of a rational curve or an arc, proved within the tolerance less 0.29 units.
 - The fill rules (`fill.h`: nonzero 0, even-odd 1, pinned), which `shape-cpu`
   fills under and `font`'s `GFNT_FillRule` is the type of.
 - Strokes (`stroke.h`): the region a stroke covers, stated once as rules SG1 to

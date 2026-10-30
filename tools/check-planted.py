@@ -1075,7 +1075,7 @@ PLANTS += [
     ("rat-conic-tolerance-off", "src", DV, "  return gshgeom_conic_route(n, sx, sy, w, tolerance, emit_line, dp);", "  return gshgeom_conic_route(n, sx, sy, w, tolerance + 1, emit_line, dp);", RT),
 
     # --- the flattener --------------------------------------------------------
-    # The floor division and the midpoint (revision 2: widened, half up).
+    # The floor division and the midpoint (widened, half up).
     ("fl-floordiv-truncates", "src", FL, "  if (a % b != 0 && a < 0) {\n    q -= 1;\n  }", "", FT),
     ("fl-floordiv-floors-positive", "src", FL, "  if (a % b != 0 && a < 0) {", "  if (a % b != 0 && a > 0) {", FT),
     ("fl-mid-floors-x", "src", FL, "  m.x = floor_div(a.x + b.x + 1, 2);", "  m.x = floor_div(a.x + b.x, 2);", FT),
@@ -1191,9 +1191,9 @@ PLANTS += [
     ("fl-append-vertex-drops", "src", FL, "  return add_point(user, to);", "  (void)user;\n  (void)to;\n  return GSHGEOM_OK;", FT),
     ("fl-append-vertex-error-lost", "src", FL, "  return add_point(user, to);", "  add_point(user, to);\n  return GSHGEOM_OK;", FT),
     # The revision.
-    ("fl-revision-constant", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 3", "#define GSHGEOM_FLATTEN_REVISION 1", FT),
-    ("fl-revision-constant-4", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 3", "#define GSHGEOM_FLATTEN_REVISION 4", FT),
-    ("fl-revision-function", "src", FL, "  return GSHGEOM_FLATTEN_REVISION;", "  return 1;", FT),
+    ("fl-revision-constant", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 1", "#define GSHGEOM_FLATTEN_REVISION 2", FT),
+    ("fl-revision-constant-4", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 1", "#define GSHGEOM_FLATTEN_REVISION 3", FT),
+    ("fl-revision-function", "src", FL, "  return GSHGEOM_FLATTEN_REVISION;", "  return 2;", FT),
     ("fl-revision-in-hash", "src", FL, "  gshgeom_hash_u32(&h, FLAT_KIND);", "  gshgeom_hash_u32(&h, FLAT_KIND);\n  gshgeom_hash_u32(&h, (uint32_t)GSHGEOM_FLATTEN_REVISION);", FT),
     ("fl-revision-in-dump", "src", FL, "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION,", "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION + (unsigned)GSHGEOM_FLATTEN_REVISION - 1u,", FT),
     ("fl-limit-off-by-one", "src", FL, "if (fp->pt_n >= fp->max_points) {", "if (fp->pt_n > fp->max_points) {", FT),

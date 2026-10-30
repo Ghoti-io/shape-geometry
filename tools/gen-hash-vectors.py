@@ -536,13 +536,13 @@ def meas_dump(dim, els):
     return "\n".join(out) + "\n"
 
 
-# --- story 7a: the flattener, revision 2 -------------------------------------
+# --- story 7a: the flattener -------------------------------------
 # A second statement of the algorithm in src/flatten/flatten.c, in Python's
 # unbounded integers and sharing no code with it.  `python3 tools/gen-hash-vectors.py
 # --check-flatten tests/flatten_vectors.h` runs it over every recorded vector
 # (recorded from font's flattener, tools/vectors-from-font) and fails on the
 # first difference in count, hash or explicit vertex list.
-FLATTEN_REVISION = 3
+FLATTEN_REVISION = 1
 FLATTEN_TOLERANCE = 4
 FLATTEN_DEPTH = 20
 

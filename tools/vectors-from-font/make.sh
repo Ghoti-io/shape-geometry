@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 #
 # A RECORD, not part of the build, and the only place in this library that names
-# `font`: how tests/flatten_vectors.h was made (story 7, remade for flattener
-# revision 2 in story 7a).  shape-geometry neither includes nor links font; this
+# `font`: how tests/flatten_vectors.h was made (story 7, remade in story 7a).
+# shape-geometry neither includes nor links font; this
 # builds a throwaway program, outside any repository's build, that #includes
 # font's own src/raster/flatten.c (the unmodified file) and runs its
 # gfnt_flatten_quad and gfnt_flatten_cubic at tolerance 4, recording the
@@ -12,7 +12,7 @@
 #   FONT_GEN_DIR=<font build's generated headers> CUTIL_CFLAGS=... \
 #     tools/vectors-from-font/make.sh <font checkout> <workdir> > tests/flatten_vectors.h
 #
-# The vectors were recorded at font commit 69d1860 (flattener revision 2).  Font
+# The vectors were recorded at font commit 69d1860.  Font
 # dropped its copy of the flattener after bbd9a47 and calls this library's now, so
 # <font checkout> has to be a checkout of font at 69d1860 (or bbd9a47, which has
 # the same file), for instance a scratch `git worktree` of it; the committed

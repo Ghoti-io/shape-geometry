@@ -1,7 +1,7 @@
 /**
  * @file
  *
- * The conic route (flatten.h, revision 3): the device path of a rational quadratic, a rational
+ * The conic route (flatten.h): the device path of a rational quadratic, a rational
  * cubic and an arc, and the proof above src/device/device.c that every point of the exact curve is
  * within the tolerance less 0.29 units of the emitted polyline, and that the depth cap never ends a
  * piece that is not flat.

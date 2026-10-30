@@ -234,7 +234,7 @@ GSHGEOM_API GSHGEOM_Result gshgeom_device_path_element(
  * units, 3/64 pixel), at most ::GSHGEOM_CONIC_MAX_DEPTH levels deep, and becomes a line to the
  * end of each piece (the ends of the whole curve are the mapped control points themselves, rounded
  * once, so an arc's device ends are its own ends and a closed arc closes).  The route is part of the
- * flattener's definition, its revision 3 and its proof (flatten.h): every point of the exact curve
+ * flattener's definition and its proof (flatten.h): every point of the exact curve
  * is within `t - 0.29` units of the polyline.  Every control point of every segment must round
  * into range.
  *

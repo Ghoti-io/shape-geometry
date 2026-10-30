@@ -237,7 +237,7 @@ TEST(Tolerance, TheMinimumIsWhatTheHeaderSaysAndTheDefaultIsAboveIt) {
   EXPECT_EQ(GSHGEOM_FLATTEN_MIN_TOLERANCE, 2);
   EXPECT_EQ(GSHGEOM_FLATTEN_TOLERANCE, 4);
   EXPECT_EQ(GSHGEOM_FLATTEN_MAX_DEPTH, 20);
-  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 3);
+  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 1);
 }
 
 /**
@@ -315,7 +315,7 @@ TEST(Tolerance, TheLargestToleranceIsAcceptedAndStillWithinTheBound) {
 
 /**
  * Answers worked out by arithmetic independent of this library: a Python model
- * of revision 2 using unbounded integers (`tools/gen-hash-vectors.py`, and
+ * of the flattener using unbounded integers (`tools/gen-hash-vectors.py`, and
  * `font`'s own model when it had this flattener), recorded as a vertex count,
  * the first and last vertex and a hash of all of them.  They pin the rounding
  * rules - ties upward at both the midpoints and the narrowing, floors of

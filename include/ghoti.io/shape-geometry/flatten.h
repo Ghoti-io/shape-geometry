@@ -31,7 +31,7 @@
  * sink with its own tolerance option (`font`'s) does, through the curve
  * functions or ::gshgeom_device_path_flatten_with_tolerance.
  *
- * ## The guarantee (flattener revision 3)
+ * ## The guarantee
  *
  * For every curve whose control points are any `int32` values, every point of
  * the curve is within the tolerance less 0.12 units of the emitted polyline: at
@@ -42,7 +42,7 @@
  * against dense exact evaluation on every size class up to the whole `int32`
  * range.
  *
- * Rational curves are part of the same definition (revision 3).  A rational quadratic, a rational
+ * Rational curves are part of the same definition.  A rational quadratic, a rational
  * cubic and each piece of an arc reach the device path by one route (::gshgeom_device_path_from_model):
  * the control points are mapped in `double` and the weights kept, the homogeneous curve is split at the
  * parameter 1/2 until every interior control point of the projected piece is within `t - 1` units of
@@ -78,17 +78,12 @@
  *
  * The flattener is versioned, and its polyline is what a rebaseline of every
  * sink's goldens follows.  ::GSHGEOM_FLATTEN_REVISION (and
- * ::gshgeom_flatten_revision) is the number; it is recorded where a rebaseline
- * lives (a golden's header, a vector file) and is in no hash: the flattened
- * path's spelling (::gshgeom_flat_path_hash) is unchanged, and two revisions
- * that gave the same polyline hash the same.  There is no way to ask for an
- * older revision.
- *
- * | Revision | Meaning |
- * |---|---|
- * | 1 | `font`'s flattener as ported in story 7: every midpoint floored to 26.6, flat at `4 * t` units, depth 16.  Its error against the exact curve reached 13 units on a large curve (13.1 over the `int32` range), 2 to 4 on a tiny one. |
- * | 2 | The above: widened by eight bits, a vertex rounded once, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12` units. |
- * | 3 | Rational curves routed by one rule, proved: the control points within `t - 1` units of the chord, depth 240, within `t - 0.29` units (an arc's pieces among them). Revision 2 flattened them to a fixed 2 units in `double` at depth 16, with no proof. The integer flattener's polyline is unchanged. |
+ * ::gshgeom_flatten_revision) numbers the definition above (the current one is
+ * 1); it is recorded where a rebaseline lives (a golden's header, a vector
+ * file) and is in no hash: the flattened path's spelling
+ * (::gshgeom_flat_path_hash) does not contain it, and two definitions that gave
+ * the same polyline would hash the same.  There is no way to ask for another
+ * revision.
  *
  */
 
@@ -133,8 +128,8 @@ extern "C" {
  */
 #define GSHGEOM_CONIC_MAX_DEPTH 240
 
-/** The revision of the flattener's definition; see the table above. */
-#define GSHGEOM_FLATTEN_REVISION 3
+/** The revision of the flattener's definition (1); see "The revision" above. */
+#define GSHGEOM_FLATTEN_REVISION 1
 
 /**
  * Receives one vertex of a flattened curve, in order.

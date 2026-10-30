@@ -21,9 +21,9 @@
 /**
  * @file
  *
- * The integer flattener (flatten.h), revision 2 of its recursion (revision 3 of the definition
- * adds the conic route of rational curves and arcs, src/device/device.c, and leaves this polyline as
- * it was), the proof that its polyline stays within the tolerance of the curve, and the flattened path.
+ * The integer flattener (flatten.h), the proof that its polyline stays within the tolerance of the
+ * curve, and the flattened path.  (The conic route of rational curves and arcs is in
+ * src/device/device.c.)
  *
  * This was `font`'s private flattener (`src/raster/flatten.c` at `font` commit
  * 69d1860, whose recursion it keeps exactly: the tests compare its output with
@@ -41,22 +41,21 @@
  *
  * A curve is halved at its midpoint until its control polygon is flat, and the
  * end point of each flat piece is a vertex.  Three things make the bound below
- * true, and each was a defect of revision 1 (story 7's port of `font`):
+ * true:
  *
  * 1. **The subdivision is done in widened integers**: every point is multiplied
  *    by 2^FLAT_EXTRA (256) on entry and all halving and both flatness tests
- *    run on those.  Revision 1 rounded every midpoint to 26.6, so each level
- *    moved the control points of every later level and the errors added up
- *    with the depth: measured against the exact curve it reached 13 units on a
- *    large curve, where 4 was promised.
+ *    run on those.  Rounding every midpoint to 26.6 would move the control
+ *    points of every later level and the errors would add up with the depth
+ *    (to 13 units on a large curve, where 4 is promised).
  * 2. **A vertex is rounded to 26.6 once**, when it is emitted, to nearest with
  *    ties upward.  That is the only rounding of a coordinate that is not
  *    2^-9 of a unit.
  * 3. **The flatness threshold leaves room for that one rounding**: a piece is
  *    flat when its L1 deviation sum is at most `4 * 256 * (t - 1)` widened
  *    units, i.e. `4 * (t - 1)` units, for the tolerance `t` (at the default 4:
- *    3,072 widened, 12 units).  Revision 1 spent the whole tolerance on the flatness
- *    test (`4 * t`) and had none to spare for rounding.
+ *    3,072 widened, 12 units).  Spending the whole tolerance on the flatness
+ *    test (`4 * t`) would leave none to spare for rounding.
  *
  * No float, no libm, no shift of a negative value (a widening is a
  * multiplication, a narrowing a floor division), no overflow: the proof below

@@ -306,7 +306,7 @@ GSHGEOM_Result gshgeom_device_path_element(const GSHGEOM_Device_Path * path,
 /* ---------------------------------------------------------------------- */
 
 /*
- * ## The conic route: the definition (flatten.h, revision 3)
+ * ## The conic route: the definition (flatten.h)
  *
  * Every rational curve of a model path is treated by this one route: a
  * rational quadratic, a rational cubic and each piece of an arc.  The control

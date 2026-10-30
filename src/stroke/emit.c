@@ -22,7 +22,7 @@
  * @file
  *
  * How a piece of a stroke becomes positively wound 26.6 polygons, and the proof
- * that the outline keeps SG17 (construction revision 1).
+ * that the outline keeps SG17.
  *
  * ## The construction
  *

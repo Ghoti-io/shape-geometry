@@ -1267,7 +1267,7 @@ int main(void) {
     printf("shape-geometry.arc-vertex-count %lu\n", vs.count);
   }
 
-  /* The conic section (flatten.h, revision 3; CV5): the device path of random rational curves and arcs, bit for bit, under maps
+  /* The conic section (flatten.h; CV5): the device path of random rational curves and arcs, bit for bit, under maps
    * that rotate, skew, mirror, stretch unevenly, collapse (a singular map) and scale from 2^-4 to 2^20, at tolerances 2, 4 and 37.
    * The weights are short fractions (so the halving is exact), powers of two to 2^+-40 and, in a few rounds, the 2^+-100 the path
    * accepts; the arcs are every sweep from a few degrees to a full turn, in the endpoint form and the centre form.  What is hashed is

@@ -3,11 +3,11 @@
 **Status:** parts 1 to 4 of the shape-geometry plan: curves, model paths,
 bounds and the hash spelling; maps, the orientation rules, the exact
 predicates and the route predicate; the 26.6 device path and the integer
-flattener (revision 3, with the conic route of rational curves and arcs);
+flattener (with the conic route of rational curves and arcs);
 along-path parametrization; path vertices; exact elliptical arcs (the element,
 three constructors, the exact decomposition and everything that reads a path);
 the fill rules; strokes: the definition of the covered region and the expansion
-(construction revision 1), solid and dashed (SG19 to SG30), and a DXF simple
+solid and dashed (SG19 to SG30), and a DXF simple
 linetype lowered to a dash array.
 
 Paths, transforms and flattening for the shape family, bit-identical on every host.
@@ -138,7 +138,7 @@ coordinates with 0 to 16 fraction bits and adds `v / 2^b`, which is exact in a
 `double`, so a library that names no floating type (`font`, with 26.6 design
 units) hands its coordinates to a model path without a rounding of its own.
 
-`flatten.h` is the integer flattener, **revision 2**, ported from `font`'s
+`flatten.h` is the integer flattener, ported from `font`'s
 `src/raster/flatten.c` (as of `font` commit 69d1860; shape-geometry does not
 depend on `font`, and `font` has since dropped its copy and calls this one).
 Points are widened by eight
@@ -224,24 +224,22 @@ every sink that wants these bits (the CPU sink, the test sink) calls the same co
 ### The revision
 
 The flattener is versioned: `GSHGEOM_FLATTEN_REVISION` and
-`gshgeom_flatten_revision()` (3). It is a number recorded where a rebaseline
-lives (the header of a golden, `tests/flatten_vectors.h`), checked against the
-code, and in no hash: the flattened path's spelling and its format version (1) are
-unchanged, and two revisions that gave equal output hash equal. There is no
-selector for an older revision.
+`gshgeom_flatten_revision()` (1) number its definition. It is a number recorded
+where a rebaseline lives (the header of a golden, `tests/flatten_vectors.h`),
+checked against the code, and in no hash: the flattened path's spelling and its
+format version (1) do not contain it. There is no selector for another revision.
 
-| Revision | What it was |
-|---|---|
-| 1 | `font`'s flattener as ported in story 7, bit for bit: every midpoint floored to 26.6, flat at `4 * t` units, depth 16. The midpoints' error accumulated with the depth, so against the exact curve it reached 2 to 4 units on a tiny curve, 7.7 below 2^16 and 11 to 13 on a large one (13.1 over the `int32` range), where 4 was promised. |
-| 2 | Widened by eight bits, one rounding of each vertex, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12`. |
-| 3 | The device path of a rational curve or an arc routed by the conic route, flat at `t - 1` units, the cap 240, proved within `t - 0.29` (the integer flattener of quadratics and cubics is revision 2's, unchanged). Before it, a rational curve was subdivided to 1/32 pixel at depth 16 with no proof. |
+The definition is the one above. The integer flattener widens by eight bits,
+rounds each vertex once, is flat at `4 * (t - 1)`, has depth 20 and is proved
+within `t - 0.12`. The device path of a rational curve or an arc goes by the
+conic route, flat at `t - 1` units, the cap 240, proved within `t - 0.29`.
 
 `tests/flatten_vectors.h` holds 960 curves with the vertices `font`'s flattener
-(revision 2, tolerance 4) produced for them; `tools/vectors-from-font/` records
+(tolerance 4) produced for them; `tools/vectors-from-font/` records
 how (it is the only place `font` is named; nothing here includes or links it),
 and `tools/gen-hash-vectors.py --check-flatten tests/flatten_vectors.h` runs the
 independent model over all of them. The cross-target hash of the corpus probe
-(`tests/corpus/geometry.hash`) was re-measured for this revision.
+(`tests/corpus/geometry.hash`) is pinned.
 
 ## Along-path parametrization
 
@@ -433,7 +431,7 @@ another library, handled there) and *support* (a test, tool or example that buil
 ### The conic route (CV1 to CV6)
 
 The device path of a model path under a map treats every rational curve (a rational quadratic, a rational cubic and each
-piece of an arc) by one route, part of the flattener's definition (revision 3). The control points are mapped in `double`
+piece of an arc) by one route, part of the flattener's definition. The control points are mapped in `double`
 (`gshgeom_map_apply_point`), scaled by 64 (exact), and the weights are unchanged (an affine map keeps them). The homogeneous
 curve `(w X, w Y, w)` is split at the parameter 1/2 by de Casteljau until **every interior control point of the projected
 piece lies within `t - 1` units of the piece's chord**, when the piece becomes a line to its end, rounded once to 26.6. `t`
@@ -619,7 +617,7 @@ cases they define, and say so:
 | A degenerate square's direction | SVG 2's effective tangent, read literally across subpaths: the end direction of the last segment with extent before it in the path, else the start direction of the first after it, else local `+x`. |
 | Canvas | One-point subpaths are dropped and zero-length segments pruned: a canvas front-end lowers to "omit". |
 
-### The construction (revision 1)
+### The construction
 
 The region is a union of pieces: the body of a stretch of a segment, a join, a
 cap, a degenerate shape. Each piece is emitted as the convex hull of a few core
@@ -783,12 +781,10 @@ intervals of the raw pattern equal those of the lowered array under the position
 ### The revision
 
 `GSHGEOM_STROKE_REVISION` and `gshgeom_stroke_revision()` number the
-construction. The number is recorded where a rebaseline lives and is in no hash;
-there is no selector for an older revision.
+construction (1). The number is recorded where a rebaseline lives and is in no hash;
+there is no selector for another revision.
 
-| Revision | What it was |
-|---|---|
-| 1 | The pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. Dashes (SG19 to SG30) were added to this revision: no solid outline changed. |
+The construction is the pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. Dashes (SG19 to SG30) are part of it.
 
 ## Stroke curves
 
@@ -964,11 +960,9 @@ covers.
 ### The revision
 
 `GSHGEOM_STROKE_CURVES_REVISION` and `gshgeom_stroke_curves_revision()` number the
-construction. The number is in no hash; there is no selector for an older revision.
+construction (1). The number is in no hash; there is no selector for another revision.
 
-| Revision | What it was |
-|---|---|
-| 1 | The pieces above: exact lines and arcs, Hermite offsets with the certified bound, folds as chord polygons, inflated fans, the arcs join as trapezoids, and the lowering by bisection. |
+The construction is the pieces above: exact lines and arcs, Hermite offsets with the certified bound, folds as chord polygons, inflated fans, the arcs join as trapezoids, and the lowering by bisection.
 
 ## Tests and gates
 

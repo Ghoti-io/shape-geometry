@@ -1,7 +1,7 @@
 /**
  * @file
  *
- * The integer flattener, revision 2, and the flattened path (CAP-3, CAP-13):
+ * The integer flattener and the flattened path (CAP-3, CAP-13):
  * bit-for-bit agreement with `font`'s flattener (at `font` commit 69d1860) on
  * recorded vectors, the guarantee (every point of the curve within the
  * tolerance less 0.12 units of the polyline) against dense exact evaluation on

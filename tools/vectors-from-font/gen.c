@@ -1,4 +1,4 @@
-/* Throwaway generator of known answers from font's own flattener (revision 2).
+/* Throwaway generator of known answers from font's own flattener.
  *
  * Built outside every repository: it #includes font's src/raster/flatten.c itself
  * (the unmodified file; see make.sh) and calls gfnt_flatten_quad and
@@ -54,7 +54,7 @@ static Vec mk3(int32_t a, int32_t b, int32_t c, int32_t d, int32_t e, int32_t f,
 
 int main(void) {
   Vec ex[256]; int nex = 0;
-  /* hand-picked, explicit lists (their vertices are revision 2's; the thresholds
+  /* hand-picked, explicit lists (their vertices are font's; the thresholds
    in the comments are in units: a piece is flat at 4 * (t - 1) = 12) */
   ex[nex++] = mk2(0, 0, 32, 0, 64, 0);          /* straight, flat */
   ex[nex++] = mk2(0, 0, 0, 0, 0, 0);            /* a point */
@@ -90,14 +90,14 @@ int main(void) {
     else ex[nex] = mk3(rr(bits), rr(bits), rr(bits), rr(bits), rr(bits), rr(bits), rr(bits), rr(bits));
     nex++;
   }
-  printf("// Generated: known answers of font's flattener, revision 2 (libs/font/src/raster/\n"
+  printf("// Generated: known answers of font's flattener (libs/font/src/raster/\n"
          "// flatten.c, gfnt_flatten_quad and gfnt_flatten_cubic at tolerance 4, font commit\n"
          "// 69d1860), recorded by tools/vectors-from-font (story 7a).  Do not edit.\n"
          "// Each vector is a quadratic (kind 2) or cubic (kind 3) in 26.6, the number of\n"
          "// lines font emits, the FNV-1a 64 of their end points (x then y, int32 little-endian),\n"
          "// and, for those with an offset, the end points themselves.\n\n"
          "#ifndef GHOTI_IO_GSHGEOM_FLATTEN_VECTORS_H\n#define GHOTI_IO_GSHGEOM_FLATTEN_VECTORS_H\n\n#include <cstdint>\n\n"
-         "// The flattener revision these vertices are those of.\nstatic const int kFlattenVectorsRevision = 2;\n\n"
+         "// The flattener revision these vertices are those of.\nstatic const int kFlattenVectorsRevision = 1;\n\n"
          "struct FlattenVector {\n  int kind;\n  std::int32_t p[4][2];\n  unsigned count;\n  std::uint64_t hash;\n  unsigned offset;  // into kFlattenPoints; UINT32_MAX when only the hash is kept\n};\n\n");
   /* explicit points first */
   static int32_t pts[1 << 20]; unsigned npts = 0;

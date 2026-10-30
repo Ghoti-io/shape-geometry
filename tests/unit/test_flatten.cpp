@@ -1,7 +1,7 @@
 /**
  * @file
  *
- * The integer flattener, revision 2, and the flattened path (CAP-3, CAP-13):
+ * The integer flattener and the flattened path (CAP-3, CAP-13):
  * bit-for-bit agreement with `font`'s flattener (at `font` commit 69d1860) on
  * recorded vectors, the guarantee (every point of the curve within the
  * tolerance less 0.12 units of the polyline) against dense exact evaluation on
@@ -190,10 +190,10 @@ TEST(FlattenAgainstFont, TheThresholdIsWhereFontPutsIt) {
 }
 
 TEST(FlattenRevision, TheFunctionTheMacroAndTheVectorsAgree) {
-  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 3);
+  EXPECT_EQ(GSHGEOM_FLATTEN_REVISION, 1);
   EXPECT_EQ(gshgeom_flatten_revision(), GSHGEOM_FLATTEN_REVISION);
   EXPECT_EQ(kFlattenVectorsRevision, gshgeom_flatten_revision())
-      << "tests/flatten_vectors.h was recorded from another revision";
+      << "tests/flatten_vectors.h was recorded from another definition";
 }
 
 TEST(FlattenRevision, TheRevisionIsInNoHash) {
@@ -258,7 +258,7 @@ TEST(FlattenAgainstFont, CoordinatesPastWhatFontsInt32SumsHandleDoNotOverflow) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The guarantee (flattener revision 2)
+// The guarantee
 // ---------------------------------------------------------------------------
 //
 // src/flatten/flatten.c proves one property: for every curve with int32
@@ -562,7 +562,7 @@ TEST(FlattenTolerance, ASumThatWrapsIn32BitsIsNotTakenForASmallOne) {
 // the narrowing, floors of negative values - that the distance test is too
 // coarse to notice (a floor midpoint at eight extra bits stays inside the
 // bound).  The first, second and fourth are also the lists `font`'s own test
-// pins for its revision 2 at tolerance 4.
+// pins at tolerance 4.
 TEST(FlattenTolerance, TheVertexListsAreWhatTheIndependentModelSays) {
   struct Known {
     bool cubic;
