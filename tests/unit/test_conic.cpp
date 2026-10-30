@@ -718,6 +718,165 @@ TEST(ConicRoute, TheSameInputGivesTheSameLinesAndTheLinesDoNotDependOnTheCall) {
   }
 }
 
+// A piece whose interior control point is exactly delta = t - 1 units from its chord is flat: the criterion is "at most", so the
+// route emits the curve's end and nothing else, at every tolerance; a control point a hair past it splits.
+TEST(ConicRoute, ABoundaryPieceIsFlatAndOneHairPastItIsNot) {
+  for (const int32_t t : {2, 3, 4, 7, 16}) {
+    Conic c;
+    c.n = 3;
+    c.x[1] = 64;
+    c.x[2] = 128;
+    c.y[1] = (double)(t - 1);
+    std::vector<Vertex> out;
+    ASSERT_EQ(gshgeom_conic_route(3, c.x, c.y, c.w, t, collect, &out), GSHGEOM_OK);
+    ASSERT_EQ(out.size(), 1u) << t;
+    EXPECT_EQ(out[0].at.x, 128);
+    EXPECT_EQ(out[0].at.y, 0);
+    EXPECT_EQ(out[0].level, 0);
+    c.y[1] = (double)(t - 1) + 0x1p-40;
+    out.clear();
+    ASSERT_EQ(gshgeom_conic_route(3, c.x, c.y, c.w, t, collect, &out), GSHGEOM_OK);
+    EXPECT_GT(out.size(), 1u) << t;
+  }
+}
+
+// The arguments the route reads, and the out parameters it writes on every call.
+TEST(ConicRoute, EveryArgumentIsCheckedAndTheCountsAreWrittenOnEveryCall) {
+  Conic c;
+  c.n = 3;
+  c.x[1] = 10;
+  c.y[1] = 10;
+  c.x[2] = 20;
+  std::vector<Vertex> out;
+  EXPECT_EQ(gshgeom_conic_route(3, c.x, c.y, nullptr, 4, collect, &out), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_conic_route(3, c.x, nullptr, c.w, 4, collect, &out), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_conic_route(3, c.x, c.y, c.w, 4, nullptr, &out), GSHGEOM_ERR_INVALID);
+  EXPECT_TRUE(out.empty());
+  // Each coordinate of the end point is range checked on its own (a vertex that does not round into int32 is the caller's limit).
+  Conic big = c;
+  big.y[2] = 2147483648.0;
+  EXPECT_EQ(gshgeom_conic_route(3, big.x, big.y, big.w, 4, collect, &out), GSHGEOM_ERR_LIMIT);
+  big = c;
+  big.x[2] = -2147483649.0;
+  EXPECT_EQ(gshgeom_conic_route(3, big.x, big.y, big.w, 4, collect, &out), GSHGEOM_ERR_LIMIT);
+  big = c;
+  big.y[2] = -2147483649.0;
+  EXPECT_EQ(gshgeom_conic_route(3, big.x, big.y, big.w, 4, collect, &out), GSHGEOM_ERR_LIMIT);
+  // The counts are reset by every call, not accumulated or left as they were.
+  int forced = 7, deepest = 9;
+  ASSERT_EQ(gshgeom_conic_route_capped(3, c.x, c.y, c.w, 4, GSHGEOM_CONIC_MAX_DEPTH, collect, &out, &forced, &deepest), GSHGEOM_OK);
+  EXPECT_EQ(forced, 0);
+  EXPECT_LE(deepest, 3) << "a gentle piece is flat after a few halvings";
+  forced = 7;
+  deepest = 9;
+  Conic flat;
+  flat.n = 3;
+  flat.x[1] = 64;
+  flat.x[2] = 128;
+  ASSERT_EQ(gshgeom_conic_route_capped(3, flat.x, flat.y, flat.w, 4, GSHGEOM_CONIC_MAX_DEPTH, collect, &out, &forced, &deepest), GSHGEOM_OK);
+  EXPECT_EQ(forced, 0);
+  EXPECT_EQ(deepest, 0);
+  // A call that is refused for its arguments leaves nothing half done.
+  forced = 7;
+  deepest = 9;
+  EXPECT_EQ(gshgeom_conic_route_capped(2, c.x, c.y, c.w, 4, 10, collect, &out, &forced, &deepest), GSHGEOM_ERR_INVALID);
+  // The cap is the caller's to lower down to zero: a piece at depth zero is ended as it stands, and counted when it is not flat.
+  EXPECT_EQ(gshgeom_conic_route_capped(3, c.x, c.y, c.w, 4, 0, collect, &out, &forced, &deepest), GSHGEOM_OK);
+  EXPECT_EQ(deepest, 0);
+  c.y[1] = 1e6;
+  EXPECT_EQ(gshgeom_conic_route_capped(3, c.x, c.y, c.w, 4, 0, collect, &out, &forced, &deepest), GSHGEOM_OK);
+  EXPECT_EQ(forced, 1);
+}
+
+// A split point that rounds outside the box of the control points is brought back into it.  A curve whose control points all lie at
+// one coordinate that is exactly half way between two device units (1.5) must emit that coordinate rounded half up (2) at every
+// vertex however its weights make the quotient round, and one at the double just below it (1.4999999999999998) must emit 1: without
+// the clamp's low side some quotient comes out one ulp low and the first rounds down, without its high side one comes out one ulp
+// high and the second rounds up.
+TEST(ConicRoute, ASplitPointNeverLeavesTheBoxOfTheControlPoints) {
+  Random random{UINT64_C(0x2545F4914F6CDD1D)};
+  int checked = 0;
+  struct Constant {
+    double at;
+    int32_t rounds_to;
+  };
+  for (const Constant k : {Constant{1.5, 2}, Constant{0x1.7ffffffffffffp+0, 1}}) {
+    for (int axis = 0; axis < 2; axis++) {
+      for (int i = 0; i < 4000; i++) {
+        Conic c;
+        c.n = 3 + (i & 1);
+        for (int j = 0; j < c.n; j++) {
+          const double along = (double)(random.next() % 100000);  // not monotone: a control point past the end splits the piece
+          (axis == 0 ? c.x : c.y)[j] = k.at;
+          (axis == 0 ? c.y : c.x)[j] = along;
+          c.w[j] = 1.0 + (double)(random.next() % 1000000) / 77777.0;
+        }
+        std::vector<Vertex> out;
+        ASSERT_EQ(gshgeom_conic_route(c.n, c.x, c.y, c.w, 2, collect, &out), GSHGEOM_OK);
+        for (const Vertex & v : out) {
+          EXPECT_EQ(axis == 0 ? v.at.x : v.at.y, k.rounds_to) << k.at << " " << axis << " " << i;
+          checked++;
+        }
+      }
+    }
+  }
+  EXPECT_GT(checked, 80000);
+}
+
+// The device path of a model path is the route's lines at the tolerance the caller named, exactly: not the route at a neighbouring
+// tolerance, and the same for a rational quadratic, a rational cubic and the pieces of an arc.
+TEST(ConicArc, TheDevicePathIsTheRoutesLinesAtTheCallersToleranceExactly) {
+  const double wq[3] = {1.0, 0.6, 1.0};
+  const double wc[4] = {1.0, 2.5, 0.4, 1.0};
+  for (const int32_t t : {2, 3, 4, 5, 9, 33}) {
+    GSHGEOM_Path * p = model();
+    ASSERT_EQ(gshgeom_path_move_to(p, P(0, 0)), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_rational_quadratic_to(p, P(30, 40), P(60, 0), wq), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_rational_cubic_to(p, P(80, -50), P(100, 70), P(120, 0), wc), GSHGEOM_OK);
+    GSHGEOM_Arc_Form f = {P(60, 0), P(60, 0), P(0, 30), GSHGEOM_ANGLE_DEGREES, 0, 200, 0u};
+    ASSERT_EQ(gshgeom_path_arc_conjugate_to(p, &f, nullptr), GSHGEOM_OK);
+    const GSHGEOM_Map id = matrix(1, 0, 0, 1);
+    GSHGEOM_Device_Path * dp = nullptr;
+    ASSERT_EQ(gshgeom_device_path_from_model_with_tolerance(p, &id, t, nullptr, nullptr, &dp), GSHGEOM_OK);
+    const std::vector<Dp> got = polyline_of(dp);
+    // The same lines by the route itself, curve by curve.
+    std::vector<Dp> want;
+    want.push_back({0, 0});
+    auto route = [&](int n, const GSHGEOM_Point * pts, const double * w) {
+      Conic c;
+      c.n = n;
+      for (int k = 0; k < n; k++) {
+        c.x[k] = pts[k].x * 64.0;
+        c.y[k] = pts[k].y * 64.0;
+        c.w[k] = w[k];
+      }
+      std::vector<Vertex> out;
+      ASSERT_EQ(gshgeom_conic_route(n, c.x, c.y, c.w, t, collect, &out), GSHGEOM_OK);
+      for (const Vertex & v : out) {
+        want.push_back(v.at);
+      }
+    };
+    const GSHGEOM_Point q[3] = {P(0, 0), P(30, 40), P(60, 0)};
+    route(3, q, wq);
+    const GSHGEOM_Point cu[4] = {P(60, 0), P(80, -50), P(100, 70), P(120, 0)};
+    route(4, cu, wc);
+    GSHGEOM_Arc a;
+    ASSERT_EQ(gshgeom_path_arc(p, 3, &a), GSHGEOM_OK);
+    GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+    int n = 0;
+    ASSERT_EQ(gshgeom_arc_pieces(&a, pieces, &n), GSHGEOM_OK);
+    for (int k = 0; k < n; k++) {
+      route(3, pieces[k].p, pieces[k].w);
+    }
+    ASSERT_EQ(got.size(), want.size()) << t;
+    for (size_t k = 0; k < got.size(); k++) {
+      EXPECT_TRUE(got[k].x == want[k].x && got[k].y == want[k].y) << t << " " << k;
+    }
+    gshgeom_device_path_destroy(dp);
+    gshgeom_path_destroy(p);
+  }
+}
+
 int main(int argc, char ** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

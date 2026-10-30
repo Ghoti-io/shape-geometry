@@ -914,6 +914,71 @@ TEST(ArcVertices, AllocationFailuresInStrokeAndDashPathsLeaveNothing) {
   gshgeom_path_destroy(p);
 }
 
+// An aligned stroke clips to the region the centerline encloses: for an arc that region is built from its pieces after the map, and
+// the curve outline carries it as conics.  Under maps that scale, skew and mirror, and for every join, the stroke and the curve outline
+// of the arcs are the stroke and the curve outline of the pieces written as conics.
+TEST(ArcStroke, TheClipOfAnAlignedStrokeIsTheMappedPiecesRegionForBothOutlines) {
+  GSHGEOM_Path * p = rounded_rect();
+  GSHGEOM_Path * l = lowered(p);
+  GSHGEOM_Map maps[3] = {identity(), matrix(1.5, 0.3, -0.2, 1.1, 4, 5), matrix(0.5, 0, 0, -2)};
+  for (int mi = 0; mi < 3; mi++) {
+    for (uint32_t al : {GSHGEOM_STROKE_ALIGN_INSIDE, GSHGEOM_STROKE_ALIGN_OUTSIDE}) {
+      for (int join : {GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_JOIN_ROUND}) {
+        GSHGEOM_Stroke s = plain();
+        s.alignment = al;
+        s.join = (uint32_t)join;
+        EXPECT_EQ(stroke_hash(p, s, maps[mi]), stroke_hash(l, s, maps[mi])) << mi << " " << al << " " << join;
+        GSHGEOM_Stroke_Curves * a = nullptr;
+        GSHGEOM_Stroke_Curves * b = nullptr;
+        ASSERT_EQ(gshgeom_stroke_curves_expand(p, &s, &maps[mi], GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL,
+                      nullptr, nullptr, &a),
+            GSHGEOM_OK);
+        ASSERT_EQ(gshgeom_stroke_curves_expand(l, &s, &maps[mi], GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL,
+                      nullptr, nullptr, &b),
+            GSHGEOM_OK);
+        EXPECT_EQ(gshgeom_stroke_curves_hash(a), gshgeom_stroke_curves_hash(b)) << mi << " " << al << " " << join;
+        gshgeom_stroke_curves_destroy(a);
+        gshgeom_stroke_curves_destroy(b);
+      }
+    }
+  }
+  // the clip is flattened at the stroke's own tolerance: a finer one changes the region of an arc exactly as it changes the pieces'
+  GSHGEOM_Stroke s = plain();
+  s.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
+  GSHGEOM_Stroke_Outline * fine_a = nullptr;
+  GSHGEOM_Stroke_Outline * fine_b = nullptr;
+  ASSERT_EQ(gshgeom_stroke_expand_with_tolerance(p, &s, &maps[1], 2, nullptr, nullptr, &fine_a), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_stroke_expand_with_tolerance(l, &s, &maps[1], 2, nullptr, nullptr, &fine_b), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_stroke_outline_hash(fine_a), gshgeom_stroke_outline_hash(fine_b));
+  GSHGEOM_Stroke_Outline * dflt = nullptr;
+  ASSERT_EQ(gshgeom_stroke_expand_with_tolerance(p, &s, &maps[1], GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, &dflt), GSHGEOM_OK);
+  EXPECT_NE(gshgeom_stroke_outline_hash(fine_a), gshgeom_stroke_outline_hash(dflt));
+  gshgeom_stroke_outline_destroy(fine_a);
+  gshgeom_stroke_outline_destroy(fine_b);
+  gshgeom_stroke_outline_destroy(dflt);
+  gshgeom_path_destroy(p);
+  gshgeom_path_destroy(l);
+}
+
+// The cubic lowering of a path of arcs is the lowering of its pieces, for an arc of several pieces (each lowered by its own weight).
+TEST(ArcStroke, TheCubicLoweringOfAMultiPieceArcIsTheLoweringOfItsPieces) {
+  for (double sweep : {100.0, 230.0, 330.0, -300.0}) {
+    GSHGEOM_Path * p = make();
+    add_form(p, P(10, 20), P(30, 5), P(-4, 12), GSHGEOM_ANGLE_DEGREES, 12.5, sweep);
+    GSHGEOM_Path * l = lowered(p);
+    GSHGEOM_Path * ca = nullptr;
+    GSHGEOM_Path * cl = nullptr;
+    ASSERT_EQ(gshgeom_stroke_curves_lower_cubic(p, 0.001, nullptr, nullptr, &ca), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_stroke_curves_lower_cubic(l, 0.001, nullptr, nullptr, &cl), GSHGEOM_OK);
+    EXPECT_TRUE(gshgeom_path_equal(ca, cl)) << sweep;
+    EXPECT_GE(gshgeom_path_element_count(ca), 3u);
+    gshgeom_path_destroy(ca);
+    gshgeom_path_destroy(cl);
+    gshgeom_path_destroy(p);
+    gshgeom_path_destroy(l);
+  }
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
