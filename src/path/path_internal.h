@@ -61,6 +61,17 @@ struct GSHGEOM_Path {
   GSHGEOM_Point start;
 };
 
+/**
+ * The stored points and weights of an element, as the pointers append_raw takes.  A path with no weights (or, for a
+ * lone close, no points) has a null array, and `&array[0]` of a null array is arithmetic on a null pointer.
+ */
+static inline const GSHGEOM_Point * gshgeom_path_elem_points(const GSHGEOM_Path * path, const Elem * e) {
+  return path->pt ? &path->pt[e->point] : NULL;
+}
+static inline const double * gshgeom_path_elem_weights(const GSHGEOM_Path * path, const Elem * e) {
+  return path->wt ? &path->wt[e->weight] : NULL;
+}
+
 /** Points stored with a verb (the control points after the start, and the end), and weights. */
 size_t gshgeom_path_verb_points(int verb);
 size_t gshgeom_path_verb_weights(int verb);

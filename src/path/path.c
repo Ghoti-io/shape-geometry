@@ -447,7 +447,7 @@ GSHGEOM_Result gshgeom_path_copy(const GSHGEOM_Path * path, const GSHGEOM_Alloca
   for (size_t i = 0; i < path->el_n && r == GSHGEOM_OK; i++) {
     const Elem * e = &path->el[i];
     r = gshgeom_path_append_raw(
-        dst, e->verb, e->unit, e->flags, &path->pt[e->point], &path->wt[e->weight]);
+        dst, e->verb, e->unit, e->flags, gshgeom_path_elem_points(path, e), gshgeom_path_elem_weights(path, e));
     if (r == GSHGEOM_OK && e->verb == GSHGEOM_VERB_MOVE) {
       dst->has_current = 1;
       dst->start = path->pt[e->point];

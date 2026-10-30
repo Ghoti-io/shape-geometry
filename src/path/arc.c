@@ -386,7 +386,8 @@ GSHGEOM_Result gshgeom_path_lower_arcs(const GSHGEOM_Path * path, const GSHGEOM_
         r = gshgeom_path_rational_quadratic_to(dst, pieces[k].p[1], pieces[k].p[2], pieces[k].w);
       }
     } else {
-      r = gshgeom_path_append_raw(dst, e->verb, e->unit, e->flags, &path->pt[e->point], &path->wt[e->weight]);
+      r = gshgeom_path_append_raw(dst, e->verb, e->unit, e->flags, gshgeom_path_elem_points(path, e),
+          gshgeom_path_elem_weights(path, e));
       if (r == GSHGEOM_OK && e->verb == GSHGEOM_VERB_MOVE) {
         dst->has_current = 1;
         dst->start = path->pt[e->point];

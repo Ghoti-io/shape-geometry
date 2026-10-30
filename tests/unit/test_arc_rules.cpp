@@ -275,8 +275,9 @@ TEST(ArcRules, EveryEntryPointRefusesNullAndNeverWritesOnFailure) {
   GSHGEOM_Map big;
   gshgeom_map_scale(2, 0x1p99, 0x1p99, 1.0, &big);
   std::memset(&out, 0x5a, sizeof out);
+  const GSHGEOM_Arc untouched = out;  // a byte copy: 0x5a5a5a5a is no value of the unit enumeration, which a load would report
   EXPECT_EQ(gshgeom_arc_map(&big, &a, &out), GSHGEOM_ERR_LIMIT);
-  EXPECT_EQ(out.unit, (GSHGEOM_Angle_Unit)0x5a5a5a5a);
+  EXPECT_EQ(std::memcmp(&out, &untouched, sizeof out), 0);
   EXPECT_EQ(gshgeom_arc_circle(nullptr, &c, &r, nullptr), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_arc_circle(&a, &c, &r, nullptr), GSHGEOM_ERR_INVALID) << "unflagged";
   a.flags = GSHGEOM_ARC_CIRCULAR;
@@ -716,6 +717,24 @@ TEST(ArcRules, UnitAndAnglesAreEachPartOfTheRecordWhenOnlyTheyDiffer) {
   gshgeom_path_destroy(rc);
 }
 
+// A path of lines has no weights, so its weight array is null: copying it and lowering its arcs index that array at
+// 0, which the sanitizer build reports as arithmetic on a null pointer (found by the 600 s libFuzzer runs).
+TEST(ArcRules, ACopyAndALoweringOfAPathWithNoWeightsAddNothingToANullArray) {
+  GSHGEOM_Path * p = make();
+  ASSERT_EQ(gshgeom_path_move_to(p, P(0, 0)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(p, P(1, 0)), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(p, P(1, 1)), GSHGEOM_OK);
+  GSHGEOM_Path * cp = nullptr;
+  GSHGEOM_Path * lo = nullptr;
+  ASSERT_EQ(gshgeom_path_copy(p, nullptr, nullptr, &cp), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lo), GSHGEOM_OK);
+  EXPECT_TRUE(gshgeom_path_equal(p, cp));
+  EXPECT_TRUE(gshgeom_path_equal(p, lo));
+  gshgeom_path_destroy(p);
+  gshgeom_path_destroy(cp);
+  gshgeom_path_destroy(lo);
+}
+
 TEST(ArcRules, ACopyAndALoweringKeepTheStateTheNextVerbReads) {
   const GSHGEOM_Arc a = consistent(P(10, 10), P(10, 0), P(0, 10), -90, 230);
   GSHGEOM_Path * p = make();
@@ -737,7 +756,9 @@ TEST(ArcRules, ACopyAndALoweringKeepTheStateTheNextVerbReads) {
   GSHGEOM_Bounds b1, b2;
   gshgeom_path_bounds(lo, &b1);
   gshgeom_path_bounds(lo2, &b2);
-  EXPECT_EQ(std::memcmp(&b1, &b2, sizeof b1), 0);
+  EXPECT_EQ(b1.empty, b2.empty);  // field by field: the struct has padding the bounds call does not write
+  EXPECT_EQ(std::memcmp(&b1.min, &b2.min, sizeof b1.min), 0);
+  EXPECT_EQ(std::memcmp(&b1.max, &b2.max, sizeof b1.max), 0);
   // the lowering is the pieces, in order, end to end
   GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
   int n = 0;

@@ -188,7 +188,11 @@ TEST(Arc, ElementReadbackIsUnsupportedNotTheChord) {
   GSHGEOM_Element el;
   std::memset(&el, 0x5a, sizeof el);
   EXPECT_EQ(gshgeom_path_element(p, 1, &el), GSHGEOM_ERR_UNSUPPORTED);
-  EXPECT_EQ(el.verb, (GSHGEOM_Verb)0x5a5a5a5a);  // untouched
+  unsigned char raw[sizeof el.verb];  // untouched (read as bytes: 0x5a5a5a5a is no value of the enum)
+  std::memcpy(raw, &el.verb, sizeof raw);
+  for (unsigned char c : raw) {
+    EXPECT_EQ(c, 0x5a);
+  }
   EXPECT_EQ(gshgeom_path_element(p, 0, &el), GSHGEOM_OK);
   gshgeom_path_destroy(p);
 }
