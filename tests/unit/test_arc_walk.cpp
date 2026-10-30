@@ -581,6 +581,69 @@ TEST(ArcStroke, ADashCutInsideAnArcAndAcrossAPieceBoundaryIsStrokedAsTheCutConic
   gshgeom_path_destroy(l);
 }
 
+// max_dash_steps (stroke.h) bounds the steps of a dashed stroke.  An arc is measured as its pieces (AR12), so a dashed arc and the same pieces
+// written as conics are refused at the same cap: the least cap that passes is equal for the two, one less is refused for both, and for one
+// open subpath it is the walk's own count over the measured length (the dash positions of that length, with the same bound).
+TEST(ArcStroke, TheDashStepsOfAnArcAreThoseOfItsConics) {
+  GSHGEOM_Path * p = make();
+  ASSERT_EQ(gshgeom_path_move_to(p, P(300, 0)), GSHGEOM_OK);
+  add_form(p, P(0, 0), P(300, 0), P(0, 300), GSHGEOM_ANGLE_DEGREES, 0, 270, GSHGEOM_ARC_CIRCULAR);
+  GSHGEOM_Path * l = lowered(p);
+  GSHGEOM_Measured * measured = nullptr;
+  ASSERT_EQ(gshgeom_measured_create(nullptr, nullptr, p, GSHGEOM_MEASURE_TOLERANCE_DEFAULT, &measured), GSHGEOM_OK);
+  const double length = gshgeom_measured_length(measured);
+  gshgeom_measured_destroy(measured);
+  EXPECT_NEAR(length, 300.0 * 1.5 * M_PI, 1e-3 * length);
+  const double dashes[2] = {1.5, 1.5};
+  GSHGEOM_Stroke s = plain();
+  s.dashes = dashes;
+  s.dash_count = 2;
+  s.width = 1.0;
+  const GSHGEOM_Map m = identity();
+  auto passes = [&](const GSHGEOM_Path * path, uint64_t cap) {
+    GSHGEOM_Limits lim;
+    gshgeom_limits_default(&lim);
+    lim.max_dash_steps = cap;
+    GSHGEOM_Stroke_Outline * o = nullptr;
+    const GSHGEOM_Result r = gshgeom_stroke_expand(path, &s, &m, nullptr, &lim, &o);
+    gshgeom_stroke_outline_destroy(o);
+    EXPECT_TRUE(r == GSHGEOM_OK || r == GSHGEOM_ERR_LIMIT) << r;
+    return r == GSHGEOM_OK;
+  };
+  auto least = [&](const GSHGEOM_Path * path) {
+    uint64_t lo = 1, hi = 1u << 22;
+    EXPECT_TRUE(passes(path, hi));
+    while (lo < hi) {
+      const uint64_t mid = lo + (hi - lo) / 2;
+      if (passes(path, mid)) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    return lo;
+  };
+  const uint64_t arc_least = least(p);
+  const uint64_t conic_least = least(l);
+  EXPECT_EQ(arc_least, conic_least) << "an arc and its conics make the same steps";
+  EXPECT_TRUE(passes(p, arc_least));
+  EXPECT_FALSE(passes(p, arc_least - 1)) << "one past the bound is refused";
+  EXPECT_FALSE(passes(l, conic_least - 1));
+  auto nothing = [](void *, double, double) { return GSHGEOM_OK; };
+  uint64_t a = 1, b = 1u << 22;
+  while (a < b) {
+    const uint64_t mid = a + (b - a) / 2;
+    if (gshgeom_stroke_dash_each(dashes, 2, 0.0, length, (size_t)mid, nothing, nullptr) == GSHGEOM_OK) {
+      b = mid;
+    } else {
+      a = mid + 1;
+    }
+  }
+  EXPECT_EQ(arc_least, a) << "the walk's own count over the measured length";
+  gshgeom_path_destroy(p);
+  gshgeom_path_destroy(l);
+}
+
 TEST(ArcStroke, ZeroWidthAFullTurnAndADegenerateArcFollowTheStrokeRules) {
   GSHGEOM_Path * p = make();
   add_form(p, P(5, 5), P(10, 0), P(0, 10), GSHGEOM_ANGLE_DEGREES, 0, 360, GSHGEOM_ARC_CIRCULAR);
