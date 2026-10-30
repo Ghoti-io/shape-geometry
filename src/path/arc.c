@@ -154,6 +154,18 @@ static double scale_of(const GSHGEOM_Arc * a) {
 }
 
 /**
+ * The decomposition of an accepted record must be representable: a control point of a piece (the meeting of two tangents) can lie past
+ * the coordinate limit when the centre form is close to it, and an arc whose pieces cannot be made could not be read by anything that
+ * walks a path by its pieces.  Such a record is a limit, as a coordinate past the limit is.
+ */
+static GSHGEOM_Result pieces_within_limit(const GSHGEOM_Arc * a) {
+  GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+  int n = 0;
+  GSHGEOM_Result r = gshgeom_arc_pieces(a, pieces, &n);
+  return r == GSHGEOM_ERR_LIMIT ? r : GSHGEOM_OK;
+}
+
+/**
  * AR2's checks, in order, for an arc to be appended where the current point is @p current.
  * @p max_elements_room is nonzero if the path can take another element.
  */
@@ -207,7 +219,7 @@ static GSHGEOM_Result validate(const GSHGEOM_Arc * a, GSHGEOM_Point current, int
     return GSHGEOM_ERR_INVALID;
   }
   if (absf(a->sweep) == turn) {
-    return same_xy(a->start, a->end) ? GSHGEOM_OK : GSHGEOM_ERR_INVALID;
+    return same_xy(a->start, a->end) ? pieces_within_limit(a) : GSHGEOM_ERR_INVALID;
   }
   r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p);
   if (r != GSHGEOM_OK) {
@@ -216,7 +228,7 @@ static GSHGEOM_Result validate(const GSHGEOM_Arc * a, GSHGEOM_Point current, int
   if (absf(p.x - a->end.x) > tol || absf(p.y - a->end.y) > tol) {
     return GSHGEOM_ERR_INVALID;
   }
-  return GSHGEOM_OK;
+  return pieces_within_limit(a);
 }
 
 static GSHGEOM_Result append_checked(GSHGEOM_Path * path, const GSHGEOM_Arc * a) {

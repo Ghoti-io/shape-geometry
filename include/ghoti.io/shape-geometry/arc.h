@@ -147,7 +147,8 @@ GSHGEOM_API GSHGEOM_Result gshgeom_arc_point(
  * `u` or `v` past ::GSHGEOM_COORD_LIMIT, `|t0|` past ::GSHGEOM_MAP_MAX_QUARTERS quarter turns, or the
  * element limit; then ::GSHGEOM_ERR_INVALID if `start` is not the current point bit for bit or the centre
  * form misses an end by more than ::GSHGEOM_ARC_AGREE (or a full turn does not close); then
- * ::GSHGEOM_ERR_OOM.
+ * ::GSHGEOM_ERR_LIMIT again if a piece of the decomposition (the meeting of two tangents can lie past the
+ * limit when the centre form is near it) cannot be made; then ::GSHGEOM_ERR_OOM.
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_path_append_arc(GSHGEOM_Path * path, const GSHGEOM_Arc * arc);
 

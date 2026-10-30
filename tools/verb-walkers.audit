@@ -49,3 +49,4 @@ shape-scene|tests/unit/test_store.cpp|*|support|builds or reads arc-free paths; 
 shape-scene|tools/check-planted.py|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-scene|tools/sink-plants.json|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 vector|tests/lower_helpers.h|*|owner|the verb printer's default prints an unknown verb as ?n: the owner adds the arc verb; nothing in vector builds an arc yet|-
+shape-geometry|tests/unit/test_arc_rules.cpp|*|support|feeds the arc to the library, which is what it is for|-
