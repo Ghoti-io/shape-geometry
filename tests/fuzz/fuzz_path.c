@@ -83,7 +83,7 @@ enum {
   OUT_MEASURED_OK, OUT_MEASURED_REFUSED, OUT_OOM, OUT_GRID_ALIGNED, OUT_MAP_INVALID, OUT_ORIENT_ZERO, OUT_CURVED,
   OUT_ARC, OUT_ARC_LINE, OUT_ARC_NOTHING, OUT_ARC_CIRCULAR, OUT_ARC_DISAGREE, OUT_ARC_MAPPED, OUT_ARC_MAP_REFUSED,
   OUT_ARC_LOWERED, OUT_ARC_VERTICES, OUT_ARC_COPIED, OUT_ARC_FULL_TURN, OUT_ARC_DEVICE,
-  OUT_SHAPE_RECT, OUT_SHAPE_ROUNDED, OUT_SHAPE_ELLIPSE, OUT_SHAPE_FLIPPED, OUT_SHAPE_OVERLAP, OUT_SHAPE_BAD_FLIP,
+  OUT_SHAPE_RECT, OUT_SHAPE_ROUNDED, OUT_SHAPE_ELLIPSE, OUT_SHAPE_FLIPPED, OUT_SHAPE_OVERLAP, OUT_SHAPE_BAD_FLIP, OUT_SHAPE_REVERSED,
   OUT_COUNT
 };
 
@@ -95,7 +95,7 @@ static const char * const outcome_names[OUT_COUNT] = {"a non-finite point refuse
     "a circular arc", "a record whose ends disagree with its centre form, refused", "a mapped arc", "a mapped arc refused",
     "a path with arcs lowered", "the vertices of a path with an arc", "a path with an arc copied", "a full-turn arc",
     "a device path of an arc", "a rect added", "a rounded rect with arcs added", "an ellipse added", "a flipped primitive added",
-    "a rounded rect refused for an overlap", "a flip that is not 0 or 1, refused"};
+    "a rounded rect refused for an overlap", "a flip that is not 0 or 1, refused", "a rounded rect run the other way round"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -682,7 +682,7 @@ static GSHGEOM_Result shape_op(Input * in, GSHGEOM_Path * path, int dim, size_t 
       c[i].rx = radius(in);
       c[i].ry = radius(in);
     }
-    r = gshgeom_path_add_rounded_rect(path, x, y, w, h, c);
+    r = gshgeom_path_add_rounded_rect(path, x, y, w, h, c, fx, fy);
     overlap = r == GSHGEOM_ERR_INVALID && finite(w) && finite(h) && w >= 0.0 && h >= 0.0;
     for (int i = 0; i < 4; i++) {
       overlap = overlap && finite(c[i].rx) && finite(c[i].ry) && c[i].rx >= 0.0 && c[i].ry >= 0.0;
@@ -692,7 +692,7 @@ static GSHGEOM_Result shape_op(Input * in, GSHGEOM_Path * path, int dim, size_t 
   }
   CHECK(dim == 2 || r == GSHGEOM_ERR_INVALID);
   outcomes[OUT_SHAPE_OVERLAP] += overlap;
-  outcomes[OUT_SHAPE_BAD_FLIP] += bad_flip && kind != 1u && r == GSHGEOM_ERR_INVALID;
+  outcomes[OUT_SHAPE_BAD_FLIP] += bad_flip && r == GSHGEOM_ERR_INVALID;
   if (r != GSHGEOM_OK) {
     return r;
   }
@@ -710,7 +710,8 @@ static GSHGEOM_Result shape_op(Input * in, GSHGEOM_Path * path, int dim, size_t 
       arcs++;
       check_arc_at(path, i);
       CHECK(gshgeom_path_arc(path, i, &a) == GSHGEOM_OK);
-      CHECK(a.unit == GSHGEOM_ANGLE_DEGREES && a.sweep == 90.0);
+      CHECK(a.unit == GSHGEOM_ANGLE_DEGREES && (a.sweep == 90.0 || (kind == 1u && a.sweep == -90.0)));
+      CHECK(kind != 1u || (a.sweep < 0.0) == (fx != fy));
       const double cross = a.u.x * a.v.y - a.u.y * a.v.x;
       CHECK(kind == 1u ? cross > 0.0 : (cross < 0.0) == (fx != fy));
       GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
@@ -720,11 +721,12 @@ static GSHGEOM_Result shape_op(Input * in, GSHGEOM_Path * path, int dim, size_t 
   }
   CHECK(kind != 0u || (added == 5u && arcs == 0u));
   CHECK(kind != 2u || (added == 6u && arcs == 4u));
-  CHECK(kind != 1u || (arcs == 0u ? added == 5u : added == 6u + arcs));
+  CHECK(kind != 1u || (arcs == 0u && !fx && !fy ? added == 5u : added == 6u + arcs));
   outcomes[OUT_SHAPE_RECT] += kind == 0u;
   outcomes[OUT_SHAPE_ROUNDED] += kind == 1u && arcs > 0u;
   outcomes[OUT_SHAPE_ELLIPSE] += kind == 2u;
-  outcomes[OUT_SHAPE_FLIPPED] += kind != 1u && (fx || fy);
+  outcomes[OUT_SHAPE_FLIPPED] += fx || fy;
+  outcomes[OUT_SHAPE_REVERSED] += kind == 1u && fx != fy && arcs > 0u;
   return r;
 }
 

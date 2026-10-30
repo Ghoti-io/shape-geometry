@@ -537,18 +537,28 @@ The direction is the parity of the flips. For the ellipse `flip_x` negates `u` a
 so the arcs' orientation (AR3) is negative exactly when one flip is set. SVG uses no flip. A front-end maps Canvas `rect(x, y, w, h)` to the
 box `(x + min(w, 0), y + min(h, 0), |w|, |h|)` with `flip_x` iff `w < 0` and `flip_y` iff `h < 0`, and builds no untagged path for any sign case.
 
-**The rounded rectangle has no flipped form here.** A dashed Chromium run (below) shows Canvas `roundRect` with a negative size
-*not* following the `rect` cases: the radii go to the corners the mirror gives them (the first radius stays with the corner the
-box's corner order puts first) but the path starts after the top-left radius and turns clockwise for an even number of negative sizes and
-counter-clockwise for an odd one, whatever the signs: a reversal, not a mirror. The HTML Standard's `roundRect` steps, read literally for a
-negative width, start outside the box. Which of the two forms the waist means for a flipped rounded rectangle is not decided, so
-`gshgeom_path_add_rounded_rect` takes no flips; the scene library refuses a flipped rounded rectangle.
+**The rounded rectangle's flips are not the rect's.** Canvas `roundRect` with a negative width or height does not mirror the path as `rect`
+does, and the HTML Standard is silent: its `roundRect` steps carry no negative-size case, and read literally for a negative width they
+start outside the box (`(x + upperLeft.x, y)` with `x` the right edge). What Chromium draws, measured (below), is what the builder does.
+The box is normalized (`(x + min(w, 0), y + min(h, 0), abs(w), abs(h))`) and then two things happen. (1) The radii go to the corners the
+mirror gives them: the list is in the order the sign case visits the corners, `r[0]` going to the corner `rect` would start at, so the
+box's corners take top-left, top-right, bottom-right, bottom-left from `r` as `0 1 2 3` (no flip), `1 0 3 2` (`flip_x`), `3 2 1 0` (`flip_y`)
+and `2 3 0 1` (both). (2) The path is the clockwise path of the box (PR4: it starts after the box's top-left radius) when the flips are
+equal, and the **reversal** of it when they differ: the same start `(x + tl.rx, y)`, then the top-left arc and the left edge, the bottom
+edge, the right edge up and the top-right arc, each arc run the other way (sweep -90, the half-diameters unchanged), the four lines
+always there (`M`, an arc or a line, a line, ..., a closing line to the start, `Z`). Two flips are therefore the unflipped path with
+permuted radii, and one flip a path no mirror of `rect` gives. A flipped rounded rectangle with no round corner keeps its four lines
+and is a rounded rectangle, never a rect. Firefox 153 agrees for an even number of flips and for the radii, and starts an odd one at
+`(x + w - tr.rx, y)` (the other end of the top edge), still counter-clockwise: the two engines differ and the waist follows Chromium.
 
-**What was checked against a browser.** `tools/` does not run a browser; the minimal pairs were run once, by hand, in headless Chrome 156
-(Chromium), dashing a 2 px stroke with a dash of 4 to 40 px and a gap of 100000 so that the first dash marks where the path starts and
-which way it turns. Canvas `rect` with each of the four sign cases, Canvas `ellipse` from angle 0 and pi both ways round (a full
-turn), and SVG `<rect>`, `<rect rx ry>`, `<ellipse>`, `<circle>` all start and turn as the table and PR3 to PR5 say; the HTML Standard's
-`rect` and `ellipse` steps say the same. Canvas `roundRect` differs from the table as described above. Neither Firefox nor Safari was run.
+**What was checked against a browser.** `tools/` does not run a browser; the minimal pairs were run by hand, dashing a 2 px stroke with a dash of
+4 to 40 px and a gap of 100000 so that the first dash marks where the path starts and which way it turns. In headless Chrome 156 (Chromium):
+Canvas `rect` with each of the four sign cases, Canvas `ellipse` from angle 0 and pi both ways round (a full turn), and SVG `<rect>`,
+`<rect rx ry>`, `<ellipse>`, `<circle>` all start and turn as the table and PR3 to PR5 say; the HTML Standard's `rect` and `ellipse` steps
+say the same. In Firefox 153 (ESR, headless): Canvas `rect` and `ellipse` give the same boxes. For `roundRect`, a page draws the model above
+and the browser's own `roundRect` for each sign case and five radii sets (circular, elliptical, all zero, one corner, two) and compares the
+whole canvas after a fill and six dashed strokes: Chromium's equals the model in all twenty cases, and Firefox's in all but the odd
+parities (above). The SVG elements were not run in Firefox, and Safari was not run (no WebKit browser here).
 
 **What checks it.** `tools/gen-shapes-vectors.py` states PR2 to PR5 and PR13 in exact rationals (`fractions.Fraction`, rounded once),
 sharing no code with the library, and writes `tests/shapes_vectors.h`: boxes with a zero side, a negative zero, a sum that rounds, the

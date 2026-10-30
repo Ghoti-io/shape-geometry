@@ -1426,7 +1426,7 @@ int main(void) {
           c[k].rx = ((q & 7u) == 0u) ? 0.0 : w * (double)((q >> 8) & 255u) / 1024.0;
           c[k].ry = ((q & 7u) == 1u) ? 0.0 : h * (double)((q >> 20) & 255u) / 1024.0;
         }
-        r = gshgeom_path_add_rounded_rect(path, x, y, w, h, c);
+        r = gshgeom_path_add_rounded_rect(path, x, y, w, h, c, fx, fy);
       } else {
         r = gshgeom_path_add_ellipse(path, x, y, w, h < 0.0 ? -h : h, fx, fy);
       }

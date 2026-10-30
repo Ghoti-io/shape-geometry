@@ -49,7 +49,7 @@ int main(void) {
   GSHGEOM_Path * rr = NULL;
   const GSHGEOM_Corner corners[4] = {{10, 10}, {20, 10}, {5, 5}, {0, 0}};
   failed |= check(gshgeom_path_create(NULL, NULL, 2, &rr), "create");
-  failed |= check(gshgeom_path_add_rounded_rect(rr, 0, 0, 100, 60, corners), "rounded rectangle");
+  failed |= check(gshgeom_path_add_rounded_rect(rr, 0, 0, 100, 60, corners, 0, 0), "rounded rectangle");
   GSHGEOM_Element first;
   failed |= check(gshgeom_path_element(rr, 0, &first), "first element");
   size_t arcs = 0;

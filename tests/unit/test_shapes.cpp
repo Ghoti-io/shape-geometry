@@ -64,7 +64,7 @@ GSHGEOM_Result build(GSHGEOM_Path * p, const shapes_vectors::Case & c) {
     r[i].rx = c.r[2 * i];
     r[i].ry = c.r[2 * i + 1];
   }
-  return gshgeom_path_add_rounded_rect(p, c.a[0], c.a[1], c.a[2], c.a[3], r);
+  return gshgeom_path_add_rounded_rect(p, c.a[0], c.a[1], c.a[2], c.a[3], r, c.fx, c.fy);
 }
 
 /* Compare the elements from index @p at with the oracle's, bit for bit; returns a message or an empty string. */
@@ -208,6 +208,90 @@ TEST(Shapes, TheEllipseStartsAndTurnsAsCanvasEllipseDoes) {
   }
 }
 
+TEST(Shapes, ARoundedRectWithAFlipIsCanvasRoundRectWithANegativeSizeAsChromiumDrawsIt) {
+  // Written out by hand from the rule (shapes.h), not from the generator.  Radii in the order the sign case visits the corners; the box
+  // is (0, 0, 100, 60).  One flip: the reversal of the clockwise path of the box, from the same start; two: the clockwise path.
+  const GSHGEOM_Corner r[4] = {{10, 12}, {6, 5}, {4, 4}, {8, 9}};
+  struct Arc {
+    double sx, sy, ex, ey, cx, cy, t0, sweep;
+  };
+  struct Row {
+    int fx, fy;
+    double mx, my;  // the move
+    Arc arcs[4];    // in path order
+  };
+  const Row rows[] = {
+      // flip_x: TR = r0, TL = r1, BL = r2, BR = r3
+      {1, 0, 6, 0, {{6, 0, 0, 5, 6, 5, 270, -90}, {0, 56, 4, 60, 4, 56, 180, -90}, {92, 60, 100, 51, 92, 51, 90, -90}, {100, 12, 90, 0, 90, 12, 0, -90}}},
+      // flip_y: BL = r0, BR = r1, TR = r2, TL = r3
+      {0, 1, 8, 0, {{8, 0, 0, 9, 8, 9, 270, -90}, {0, 48, 10, 60, 10, 48, 180, -90}, {94, 60, 100, 55, 94, 55, 90, -90}, {100, 4, 96, 0, 96, 4, 0, -90}}},
+      // both: BR = r0, BL = r1, TL = r2, TR = r3 (clockwise, from after the top-left radius 4)
+      {1, 1, 4, 0, {{92, 0, 100, 9, 92, 9, -90, 90}, {100, 48, 90, 60, 90, 48, 0, 90}, {6, 60, 0, 55, 6, 55, 90, 90}, {0, 4, 4, 0, 4, 4, 180, 90}}},
+  };
+  for (const Row & row : rows) {
+    GSHGEOM_Path * p = make();
+    ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 100, 60, r, row.fx, row.fy), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_element_count(p), 10u) << row.fx << row.fy;
+    GSHGEOM_Element m;
+    ASSERT_EQ(gshgeom_path_element(p, 0, &m), GSHGEOM_OK);
+    EXPECT_EQ(m.curve.p[0].x, row.mx) << row.fx << row.fy;
+    EXPECT_EQ(m.curve.p[0].y, row.my) << row.fx << row.fy;
+    size_t k = 0;
+    for (size_t i = 1; i < 10; i++) {
+      GSHGEOM_Verb v;
+      ASSERT_EQ(gshgeom_path_verb(p, i, &v), GSHGEOM_OK);
+      if (v != GSHGEOM_VERB_ARC) {
+        continue;
+      }
+      GSHGEOM_Arc a;
+      ASSERT_EQ(gshgeom_path_arc(p, i, &a), GSHGEOM_OK);
+      const Arc & w = row.arcs[k++];
+      EXPECT_EQ(a.start.x, w.sx) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.start.y, w.sy) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.end.x, w.ex) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.end.y, w.ey) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.center.x, w.cx) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.center.y, w.cy) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.t0, w.t0) << row.fx << row.fy << " arc " << k;
+      EXPECT_EQ(a.sweep, w.sweep) << row.fx << row.fy << " arc " << k;
+      EXPECT_GT(a.u.x * a.v.y - a.u.y * a.v.x, 0.0) << "the half-diameters are never negated; the sweep carries the turn";
+    }
+    EXPECT_EQ(k, 4u);
+    gshgeom_path_destroy(p);
+  }
+}
+
+TEST(Shapes, AFlippedRoundedRectWithNoRoundCornerIsStillARoundedRectWithItsFourLines) {
+  const GSHGEOM_Corner none[4] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+  GSHGEOM_Path * plain = make();
+  ASSERT_EQ(gshgeom_path_add_rounded_rect(plain, 1, 2, 30, 40, none, 0, 0), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_path_element_count(plain), 5u) << "unflipped it is the rect";
+  struct Row {
+    int fx, fy;
+    double pts[4][2];  // after the move: where the lines go, then the start again
+  };
+  const Row rows[] = {{1, 0, {{1, 42}, {31, 42}, {31, 2}, {1, 2}}}, {0, 1, {{1, 42}, {31, 42}, {31, 2}, {1, 2}}},
+      {1, 1, {{31, 2}, {31, 42}, {1, 42}, {1, 2}}}};
+  for (const Row & row : rows) {
+    GSHGEOM_Path * p = make();
+    ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 1, 2, 30, 40, none, row.fx, row.fy), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_element_count(p), 6u) << row.fx << row.fy;
+    for (size_t i = 0; i < 4; i++) {
+      GSHGEOM_Element e;
+      ASSERT_EQ(gshgeom_path_element(p, 1 + i, &e), GSHGEOM_OK);
+      EXPECT_EQ(e.verb, GSHGEOM_VERB_LINE);
+      EXPECT_EQ(e.curve.p[1].x, row.pts[i][0]) << row.fx << row.fy << " line " << i;
+      EXPECT_EQ(e.curve.p[1].y, row.pts[i][1]) << row.fx << row.fy << " line " << i;
+    }
+    EXPECT_FALSE(gshgeom_path_equal(p, plain));
+    gshgeom_path_destroy(p);
+  }
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(plain, 0, 0, 1, 1, none, 2, 0), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(plain, 0, 0, 1, 1, none, 0, -1), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_element_count(plain), 5u);
+  gshgeom_path_destroy(plain);
+}
+
 TEST(Shapes, TheDirectionIsTheParityOfTheFlips) {
   for (int fx = 0; fx < 2; fx++) {
     for (int fy = 0; fy < 2; fy++) {
@@ -232,7 +316,7 @@ TEST(Shapes, TheDirectionIsTheParityOfTheFlips) {
 TEST(Shapes, ARoundedRectStartsAfterTheTopLeftRadiusAndTurnsClockwise) {
   GSHGEOM_Path * p = make();
   const GSHGEOM_Corner r[4] = {{10, 12}, {6, 5}, {4, 4}, {8, 9}};
-  ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 100, 60, r), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 100, 60, r, 0, 0), GSHGEOM_OK);
   ASSERT_EQ(gshgeom_path_element_count(p), 10u);
   const GSHGEOM_Verb verbs[10] = {GSHGEOM_VERB_MOVE, GSHGEOM_VERB_LINE, GSHGEOM_VERB_ARC, GSHGEOM_VERB_LINE, GSHGEOM_VERB_ARC,
       GSHGEOM_VERB_LINE, GSHGEOM_VERB_ARC, GSHGEOM_VERB_LINE, GSHGEOM_VERB_ARC, GSHGEOM_VERB_CLOSE};
@@ -268,7 +352,7 @@ TEST(Shapes, ARoundedRectStartsAfterTheTopLeftRadiusAndTurnsClockwise) {
 TEST(Shapes, TheFourLinesAreEmittedEvenWhenTheRadiiSumToTheSide) {
   GSHGEOM_Path * p = make();
   const GSHGEOM_Corner r[4] = {{10, 5}, {10, 5}, {10, 5}, {10, 5}};  // a stadium: both sums are the side
-  ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 20, 10, r), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 20, 10, r, 0, 0), GSHGEOM_OK);
   EXPECT_EQ(gshgeom_path_element_count(p), 10u);
   GSHGEOM_Element e;
   ASSERT_EQ(gshgeom_path_element(p, 1, &e), GSHGEOM_OK);  // the top line, from (10, 0) to (10, 0)
@@ -283,8 +367,8 @@ TEST(Shapes, ACornerWithAZeroComponentIsSquareAndAllSquareIsTheRect) {
   GSHGEOM_Path * c = make();
   const GSHGEOM_Corner half[4] = {{5, 0}, {0, 5}, {0, 0}, {5, 0}};
   const GSHGEOM_Corner none[4] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
-  ASSERT_EQ(gshgeom_path_add_rounded_rect(a, 1, 2, 30, 40, half), GSHGEOM_OK);
-  ASSERT_EQ(gshgeom_path_add_rounded_rect(b, 1, 2, 30, 40, none), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_add_rounded_rect(a, 1, 2, 30, 40, half, 0, 0), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_add_rounded_rect(b, 1, 2, 30, 40, none, 0, 0), GSHGEOM_OK);
   ASSERT_EQ(gshgeom_path_add_rect(c, 1, 2, 30, 40, 0, 0), GSHGEOM_OK);
   EXPECT_EQ(gshgeom_path_element_count(a), 5u);
   EXPECT_TRUE(gshgeom_path_equal(a, b));
@@ -341,9 +425,9 @@ TEST(Shapes, ArgumentErrorsAreInvalidInThePublishedOrder) {
   EXPECT_EQ(gshgeom_path_add_ellipse(p, 0, 0, 1, 1, 0, 2), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_path_add_ellipse(p3, 0, 0, 1, 1, 0, 0), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_path_add_ellipse(nullptr, 0, 0, 1, 1, 0, 0), GSHGEOM_ERR_INVALID);
-  EXPECT_EQ(gshgeom_path_add_rounded_rect(nullptr, 0, 0, 1, 1, z), GSHGEOM_ERR_INVALID);
-  EXPECT_EQ(gshgeom_path_add_rounded_rect(p3, 0, 0, 1, 1, z), GSHGEOM_ERR_INVALID);
-  EXPECT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 1, 1, nullptr), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(nullptr, 0, 0, 1, 1, z, 0, 0), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(p3, 0, 0, 1, 1, z, 0, 0), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, 1, 1, nullptr, 0, 0), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_rounded_rect_check(1, 1, nullptr), GSHGEOM_ERR_INVALID);
   /* an invalid number is reported before a limit: a NaN beside an out-of-range number */
   EXPECT_EQ(gshgeom_path_add_rect(p, std::nan(""), 0x1p101, 1, 1, 0, 0), GSHGEOM_ERR_INVALID);
@@ -390,7 +474,7 @@ TEST(Shapes, TheElementLimitIsTheBoundAndOnePastTakesTheCallBack) {
       p = make(2, &lim);
       ASSERT_EQ(gshgeom_path_move_to(p, P(0, 0)), GSHGEOM_OK);
       GSHGEOM_Result res = row.kind == 0   ? gshgeom_path_add_rect(p, 0, 0, 10, 10, 0, 0)
-                           : row.kind == 1 ? gshgeom_path_add_rounded_rect(p, 0, 0, 10, 10, r)
+                           : row.kind == 1 ? gshgeom_path_add_rounded_rect(p, 0, 0, 10, 10, r, 0, 0)
                                            : gshgeom_path_add_ellipse(p, 0, 0, 5, 5, 0, 0);
       if (extra == 0) {
         EXPECT_EQ(res, GSHGEOM_ERR_LIMIT) << row.kind;
@@ -418,7 +502,7 @@ TEST(Shapes, AFailureAtEveryAllocationLeavesThePathAsItWasAndLeaksNothing) {
         continue;
       }
       GSHGEOM_Result res = kind == 0   ? gshgeom_path_add_rect(p, 0, 0, 10, 10, 1, 1)
-                           : kind == 1 ? gshgeom_path_add_rounded_rect(p, 0, 0, 20, 20, r)
+                           : kind == 1 ? gshgeom_path_add_rounded_rect(p, 0, 0, 20, 20, r, 0, 0)
                                        : gshgeom_path_add_ellipse(p, 0, 0, 5, 6, 0, 1);
       if (res == GSHGEOM_ERR_OOM) {
         saw_oom = true;
@@ -436,7 +520,7 @@ TEST(Shapes, AFailureAtEveryAllocationLeavesThePathAsItWasAndLeaksNothing) {
 TEST(Shapes, ThePathsAreClosedToTheBitAndAnArcFreeShapeIsJustLines) {
   GSHGEOM_Path * p = make();
   const GSHGEOM_Corner r[4] = {{0.1, 0.3}, {0.7, 0.2}, {0.3, 0.1}, {0.05, 0.15}};
-  ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0.3, 0.7, 11.3, 5.9, r), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_add_rounded_rect(p, 0.3, 0.7, 11.3, 5.9, r, 0, 0), GSHGEOM_OK);
   /* every arc's start is the end of the element before it, to the bit, and the last arc ends at the move */
   GSHGEOM_Point prev = {0, 0, 0};
   GSHGEOM_Point first = {0, 0, 0};

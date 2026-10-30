@@ -167,7 +167,7 @@ static GSHGEOM_Result add_rect(
 }
 
 static GSHGEOM_Result quarter(GSHGEOM_Path * path, GSHGEOM_Point start, GSHGEOM_Point end, GSHGEOM_Point centre,
-    GSHGEOM_Point u, GSHGEOM_Point v, double t0) {
+    GSHGEOM_Point u, GSHGEOM_Point v, double t0, double sweep) {
   GSHGEOM_Arc a;
   a.start = start;
   a.end = end;
@@ -176,25 +176,31 @@ static GSHGEOM_Result quarter(GSHGEOM_Path * path, GSHGEOM_Point start, GSHGEOM_
   a.v = v;
   a.unit = GSHGEOM_ANGLE_DEGREES;
   a.t0 = t0;
-  a.sweep = 90.0;
+  a.sweep = sweep;
   a.flags = absd(u.x) == absd(v.y) ? GSHGEOM_ARC_CIRCULAR : 0u;
   return gshgeom_path_append_arc(path, &a);
 }
 
-static GSHGEOM_Result add_rounded_rect(
-    GSHGEOM_Path * path, double x, double y, double w, double h, const GSHGEOM_Corner r[4]) {
-  if (begin(path) != GSHGEOM_OK || gshgeom_rounded_rect_check(w, h, r) != GSHGEOM_OK || !is_finite_num(x) || !is_finite_num(y)) {
+static GSHGEOM_Result add_rounded_rect(GSHGEOM_Path * path, double x, double y, double w, double h,
+    const GSHGEOM_Corner r[4], int flip_x, int flip_y) {
+  if (begin(path) != GSHGEOM_OK || (flip_x != 0 && flip_x != 1) || (flip_y != 0 && flip_y != 1) || gshgeom_rounded_rect_check(w, h, r) != GSHGEOM_OK || !is_finite_num(x) || !is_finite_num(y)) {
     return GSHGEOM_ERR_INVALID;
   }
+  /* The radii are given in the order the sign case visits the corners (shapes.h): the flips send each to the corner of the box it belongs to. */
+  static const unsigned corner_of[4][4] = {{0, 1, 2, 3}, {1, 0, 3, 2}, {3, 2, 1, 0}, {2, 3, 0, 1}};
+  const unsigned *const to_box = corner_of[(flip_x ? 1u : 0u) | (flip_y ? 2u : 0u)];
   GSHGEOM_Corner c[4];
   int round[4];
   int any = 0;
   for (unsigned i = 0; i < 4; i++) {
-    c[i] = canonical(r[i]);
+    c[to_box[i]] = canonical(r[i]);
+  }
+  for (unsigned i = 0; i < 4; i++) {
     round[i] = c[i].rx != 0.0;
     any |= round[i];
   }
-  if (!any) {
+  const int reversed = flip_x != flip_y;
+  if (!any && !flip_x && !flip_y) {
     GSHGEOM_Point p[4];
     GSHGEOM_Result e = rect_points(x, y, w, h, 0, 0, p);
     return e == GSHGEOM_OK ? emit_rect(path, p) : e;
@@ -222,29 +228,57 @@ static GSHGEOM_Result add_rounded_rect(
     }
   }
   GSHGEOM_Result e = gshgeom_path_move_to(path, start);
+  if (reversed) {
+    /* The reversal of the clockwise path: the same start, the same arcs run the other way, the four lines still all there. */
+    if (e == GSHGEOM_OK && round[0]) {
+      e = quarter(path, start, left_end, tl_c, pt(rtl_x, 0.0), pt(0.0, rtl_y), 270.0, -90.0);
+    }
+    if (e == GSHGEOM_OK) {
+      e = gshgeom_path_line_to(path, bl_end);
+    }
+    if (e == GSHGEOM_OK && round[3]) {
+      e = quarter(path, bl_end, bottom_end, bl_c, pt(rbl_x, 0.0), pt(0.0, rbl_y), 180.0, -90.0);
+    }
+    if (e == GSHGEOM_OK) {
+      e = gshgeom_path_line_to(path, br_end);
+    }
+    if (e == GSHGEOM_OK && round[2]) {
+      e = quarter(path, br_end, right_end, br_c, pt(rbr_x, 0.0), pt(0.0, rbr_y), 90.0, -90.0);
+    }
+    if (e == GSHGEOM_OK) {
+      e = gshgeom_path_line_to(path, tr_end);
+    }
+    if (e == GSHGEOM_OK && round[1]) {
+      e = quarter(path, tr_end, top_end, tr_c, pt(rtr_x, 0.0), pt(0.0, rtr_y), 0.0, -90.0);
+    }
+    if (e == GSHGEOM_OK) {
+      e = gshgeom_path_line_to(path, start);
+    }
+    return e == GSHGEOM_OK ? gshgeom_path_close(path) : e;
+  }
   if (e == GSHGEOM_OK) {
     e = gshgeom_path_line_to(path, top_end);
   }
   if (e == GSHGEOM_OK && round[1]) {
-    e = quarter(path, top_end, tr_end, tr_c, pt(rtr_x, 0.0), pt(0.0, rtr_y), -90.0);
+    e = quarter(path, top_end, tr_end, tr_c, pt(rtr_x, 0.0), pt(0.0, rtr_y), -90.0, 90.0);
   }
   if (e == GSHGEOM_OK) {
     e = gshgeom_path_line_to(path, right_end);
   }
   if (e == GSHGEOM_OK && round[2]) {
-    e = quarter(path, right_end, br_end, br_c, pt(rbr_x, 0.0), pt(0.0, rbr_y), 0.0);
+    e = quarter(path, right_end, br_end, br_c, pt(rbr_x, 0.0), pt(0.0, rbr_y), 0.0, 90.0);
   }
   if (e == GSHGEOM_OK) {
     e = gshgeom_path_line_to(path, bottom_end);
   }
   if (e == GSHGEOM_OK && round[3]) {
-    e = quarter(path, bottom_end, bl_end, bl_c, pt(rbl_x, 0.0), pt(0.0, rbl_y), 90.0);
+    e = quarter(path, bottom_end, bl_end, bl_c, pt(rbl_x, 0.0), pt(0.0, rbl_y), 90.0, 90.0);
   }
   if (e == GSHGEOM_OK) {
     e = gshgeom_path_line_to(path, left_end);
   }
   if (e == GSHGEOM_OK && round[0]) {
-    e = quarter(path, left_end, start, tl_c, pt(rtl_x, 0.0), pt(0.0, rtl_y), 180.0);
+    e = quarter(path, left_end, start, tl_c, pt(rtl_x, 0.0), pt(0.0, rtl_y), 180.0, 90.0);
   }
   return e == GSHGEOM_OK ? gshgeom_path_close(path) : e;
 }
@@ -274,7 +308,7 @@ static GSHGEOM_Result add_ellipse(
   for (unsigned k = 0; r == GSHGEOM_OK && k < 4; k++) {
     const GSHGEOM_Point from = e[k];
     const GSHGEOM_Point to = e[(k + 1) % 4];
-    r = quarter(path, from, to, c, u, v, 90.0 * (double)k);
+    r = quarter(path, from, to, c, u, v, 90.0 * (double)k, 90.0);
   }
   return r == GSHGEOM_OK ? gshgeom_path_close(path) : r;
 }
@@ -295,14 +329,14 @@ GSHGEOM_Result gshgeom_path_add_rect(
   return r;
 }
 
-GSHGEOM_Result gshgeom_path_add_rounded_rect(
-    GSHGEOM_Path * path, double x, double y, double w, double h, const GSHGEOM_Corner r[4]) {
+GSHGEOM_Result gshgeom_path_add_rounded_rect(GSHGEOM_Path * path, double x, double y, double w, double h,
+    const GSHGEOM_Corner r[4], int flip_x, int flip_y) {
   PathMark mark;
   if (begin(path) != GSHGEOM_OK) {
     return GSHGEOM_ERR_INVALID;
   }
   path_mark(path, &mark);
-  GSHGEOM_Result e = add_rounded_rect(path, x, y, w, h, r);
+  GSHGEOM_Result e = add_rounded_rect(path, x, y, w, h, r, flip_x, flip_y);
   if (e != GSHGEOM_OK) {
     path_rollback(path, &mark);
   }

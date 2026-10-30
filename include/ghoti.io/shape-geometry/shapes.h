@@ -43,7 +43,8 @@
  * `flip_x` is `w < 0` (top-right, counter-clockwise); `flip_y` is `h < 0` (bottom-left, counter-clockwise); both is `w < 0, h < 0`
  * (bottom-right, clockwise).  An ellipse follows: no flip starts at angle 0 and turns the positive way; `flip_y` alone starts at 0
  * and turns the other way; `flip_x` alone starts at pi and turns the other way; both start at pi and turn the positive way.  The
- * direction is the parity of the flips.  SVG uses no flip.  A rounded rectangle takes none: see ::gshgeom_path_add_rounded_rect.
+ * direction is the parity of the flips.  SVG uses no flip.  A rounded rectangle takes flips too, with a different path: see
+ * ::gshgeom_path_add_rounded_rect.
  *
  * ### Failure
  *
@@ -107,21 +108,30 @@ GSHGEOM_API GSHGEOM_Result gshgeom_path_add_rect(
 /**
  * @brief A rounded rectangle (PR4): a move, four lines and up to four quarter-turn arcs, closed.
  *
- * @p r are the corners in the order top-left, top-right, bottom-right, bottom-left, valid by ::gshgeom_rounded_rect_check.  The
- * path starts after the top-left radius, `(x + r[0].rx, y)`, and turns the positive way.  The four lines are **always** emitted,
- * even when a side's radii sum to the side and a line has no length (the structure is a function of which corners are round, nothing
- * else); an arc is emitted for a round corner only.  Each arc is a positive quarter turn in degrees (so its control polygon is
- * exact), its ends the named points to the bit, so the subpath closes to the bit; it is circular iff `rx` and `ry` are bit equal.
- * With no round corner the path is the rectangle's.
+ * @p r are the radii in the order the sign case visits the corners (below), valid by ::gshgeom_rounded_rect_check.  With no flip that is
+ * top-left, top-right, bottom-right, bottom-left: the path starts after the top-left radius, `(x + r[0].rx, y)`, and turns the positive
+ * way.  The four lines are **always** emitted, even when a side's radii sum to the side and a line has no length (the structure is a
+ * function of which corners are round, nothing else); an arc is emitted for a round corner only.  Each arc is a quarter turn in degrees
+ * (so its control polygon is exact), its ends the named points to the bit, so the subpath closes to the bit; it is circular iff `rx` and
+ * `ry` are bit equal.  With no flip and no round corner the path is the rectangle's.
  *
- * The flipped forms are not defined here.  Canvas's `roundRect` with a negative size is mirrored differently from its `rect` in at least
- * one engine (the radii follow the corners the mirror gives them, but the path starts and turns the unmirrored way), and which of the
- * two the waist means is not decided; a builder for it is a separate decision.
+ * ### The flips: Canvas `roundRect` with a negative width or height, as Chromium and Firefox draw it
+ *
+ * `flip_x` is a negative width and `flip_y` a negative height; `(x, y, w, h)` is the normalized box.  A flip does two things, and **not**
+ * what it does to `rect` (the path does not start at the mirrored corner):
+ *  - the radii go to the corners the mirror gives them: `r[0]` to the corner `rect` would start at.  `r` is top-left, top-right,
+ *    bottom-right, bottom-left for no flip; top-right, top-left, bottom-left, bottom-right for `flip_x`; bottom-left, bottom-right,
+ *    top-right, top-left for `flip_y`; bottom-right, bottom-left, top-left, top-right for both;
+ *  - the path is the clockwise path of the box with those radii when the flips are equal (it starts after the box's top-left radius), and
+ *    the **reversal** of it when they differ: the same start `(x + tl.rx, y)`, the top-left arc and the left edge first, then the bottom,
+ *    the right edge and the top-right arc, the arcs running the other way (sweep -90).
+ * A flipped rounded rectangle with no round corner still has the four lines and is a rounded rectangle, not a rect.  Firefox agrees with
+ * Chromium for an even number of flips and starts an odd one at `(x + w - tr.rx, y)` instead, which this does not follow.
  *
  * @return As ::gshgeom_path_add_rect, and ::GSHGEOM_ERR_INVALID for radii ::gshgeom_rounded_rect_check refuses.
  */
-GSHGEOM_API GSHGEOM_Result gshgeom_path_add_rounded_rect(
-    GSHGEOM_Path * path, double x, double y, double w, double h, const GSHGEOM_Corner r[4]);
+GSHGEOM_API GSHGEOM_Result gshgeom_path_add_rounded_rect(GSHGEOM_Path * path, double x, double y, double w, double h,
+    const GSHGEOM_Corner r[4], int flip_x, int flip_y);
 
 /**
  * @brief An ellipse (PR5, PR13): a move and four quarter-turn arcs about `(cx, cy)`, closed.

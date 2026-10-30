@@ -31,7 +31,7 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   dashes, vertices and the device path all take arcs, and the element readback refuses one so that a reader that does not
   know arcs fails instead of drawing the chord. `examples/arc.c` builds a rounded rectangle and a circle.
 - Named primitives (`shapes.h`): a rectangle, a rounded rectangle and an ellipse as lines and quarter-turn arcs with SVG 2's start
-  point and direction, the four Canvas `rect` sign cases as two flips, radii that overlap refused on an exact sum, and every coordinate
+  point and direction, the four Canvas `rect` sign cases as two flips (and `roundRect` with a negative size as Chromium draws it: the radii to the mirrored corners, the path reversed for one flip), radii that overlap refused on an exact sum, and every coordinate
   the correctly rounded value of its expression. `examples/shapes.c` builds them.
 - The conic route: the device path of a rational curve or an arc, proved within the tolerance less 0.29 units (flattener
   revision 3).

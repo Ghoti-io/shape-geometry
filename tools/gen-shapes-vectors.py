@@ -93,8 +93,8 @@ def rect_elems(b):
     return [("M", p[0])] + [("L", q) for q in p[1:]] + [("Z", p[0])], p
 
 
-def arc(start, end, c, u, v, t0, circ):
-    return ("A", start, end, c, u, v, t0, 90.0, circ)
+def arc(start, end, c, u, v, t0, circ, sweep=90.0):
+    return ("A", start, end, c, u, v, t0, sweep, circ)
 
 
 def ellipse_elems(cx, cy, rx, ry, fx, fy):
@@ -112,29 +112,59 @@ def ellipse_elems(cx, cy, rx, ry, fx, fy):
     return el, ends
 
 
-def rrect_elems(x, y, w, h, r):
-    """r: four (rx, ry), top-left, top-right, bottom-right, bottom-left; unflipped."""
+def rrect_elems(x, y, w, h, r, fx=0, fy=0):
+    """r: four (rx, ry) in the order the sign case visits the corners; the flips send them to the box's corners (Canvas roundRect with a
+    negative size: r[0] to the corner rect would start at).  Equal flips: the clockwise path of the box from after the top-left radius;
+    unequal flips: its reversal, from the same start.  Unflipped with no round corner is the rect's."""
     b = Box(x, y, w, h, 0, 0)
-    c = [(0.0, 0.0) if (a == 0 or d == 0) else (a, d) for a, d in r]
-    if all(k == (0.0, 0.0) for k in c):
+    to_box = {(0, 0): (0, 1, 2, 3), (1, 0): (1, 0, 3, 2), (0, 1): (3, 2, 1, 0), (1, 1): (2, 3, 0, 1)}[(fx, fy)]
+    c = [None] * 4
+    for k in range(4):
+        a_, d_ = r[k]
+        c[to_box[k]] = (0.0, 0.0) if (a_ == 0 or d_ == 0) else (a_, d_)
+    if all(k == (0.0, 0.0) for k in c) and not fx and not fy:
         return rect_elems(b)[0], None
     (tlx, tly), (trx, try_), (brx, bry), (blx, bly) = c
+    circ = lambda p, q: 1 if p == q else 0
     start = pt(b.X(0, tlx), b.Y(0, 0))
-    el = [("M", start), ("L", pt(b.X(1, trx), b.Y(0, 0)))]
-    if trx:
-        e = pt(b.X(1, 0), b.Y(0, try_))
-        el.append(arc(el[-1][1], e, pt(b.X(1, trx), b.Y(0, try_)), pt(trx, 0.0), pt(0.0, try_), -90.0, 1 if trx == try_ else 0))
-    el.append(("L", pt(b.X(1, 0), b.Y(1, bry))))
-    if brx:
-        e = pt(b.X(1, brx), b.Y(1, 0))
-        el.append(arc(el[-1][1], e, pt(b.X(1, brx), b.Y(1, bry)), pt(brx, 0.0), pt(0.0, bry), 0.0, 1 if brx == bry else 0))
-    el.append(("L", pt(b.X(0, blx), b.Y(1, 0))))
-    if blx:
-        e = pt(b.X(0, 0), b.Y(1, bly))
-        el.append(arc(el[-1][1], e, pt(b.X(0, blx), b.Y(1, bly)), pt(blx, 0.0), pt(0.0, bly), 90.0, 1 if blx == bly else 0))
-    el.append(("L", pt(b.X(0, 0), b.Y(0, tly))))
-    if tlx:
-        el.append(arc(el[-1][1], start, pt(b.X(0, tlx), b.Y(0, tly)), pt(tlx, 0.0), pt(0.0, tly), 180.0, 1 if tlx == tly else 0))
+    top_end = pt(b.X(1, trx), b.Y(0, 0))
+    tr_end = pt(b.X(1, 0), b.Y(0, try_))
+    tr_c = pt(b.X(1, trx), b.Y(0, try_))
+    right_end = pt(b.X(1, 0), b.Y(1, bry))
+    br_end = pt(b.X(1, brx), b.Y(1, 0))
+    br_c = pt(b.X(1, brx), b.Y(1, bry))
+    bottom_end = pt(b.X(0, blx), b.Y(1, 0))
+    bl_end = pt(b.X(0, 0), b.Y(1, bly))
+    bl_c = pt(b.X(0, blx), b.Y(1, bly))
+    left_end = pt(b.X(0, 0), b.Y(0, tly))
+    tl_c = pt(b.X(0, tlx), b.Y(0, tly))
+    el = [("M", start)]
+    if fx != fy:
+        if tlx:
+            el.append(arc(start, left_end, tl_c, pt(tlx, 0.0), pt(0.0, tly), 270.0, circ(tlx, tly), -90.0))
+        el.append(("L", bl_end))
+        if blx:
+            el.append(arc(bl_end, bottom_end, bl_c, pt(blx, 0.0), pt(0.0, bly), 180.0, circ(blx, bly), -90.0))
+        el.append(("L", br_end))
+        if brx:
+            el.append(arc(br_end, right_end, br_c, pt(brx, 0.0), pt(0.0, bry), 90.0, circ(brx, bry), -90.0))
+        el.append(("L", tr_end))
+        if trx:
+            el.append(arc(tr_end, top_end, tr_c, pt(trx, 0.0), pt(0.0, try_), 0.0, circ(trx, try_), -90.0))
+        el.append(("L", start))
+    else:
+        el.append(("L", top_end))
+        if trx:
+            el.append(arc(top_end, tr_end, tr_c, pt(trx, 0.0), pt(0.0, try_), -90.0, circ(trx, try_)))
+        el.append(("L", right_end))
+        if brx:
+            el.append(arc(right_end, br_end, br_c, pt(brx, 0.0), pt(0.0, bry), 0.0, circ(brx, bry)))
+        el.append(("L", bottom_end))
+        if blx:
+            el.append(arc(bottom_end, bl_end, bl_c, pt(blx, 0.0), pt(0.0, bly), 90.0, circ(blx, bly)))
+        el.append(("L", left_end))
+        if tlx:
+            el.append(arc(left_end, start, tl_c, pt(tlx, 0.0), pt(0.0, tly), 180.0, circ(tlx, tly)))
     el.append(("Z", start))
     return el, c
 
@@ -170,19 +200,19 @@ def add_rect(x, y, w, h, fx, fy):
     cases.append((0, [x, y, w, h], [0.0] * 8, fx, fy, res, el))
 
 
-def add_rrect(x, y, w, h, r):
+def add_rrect(x, y, w, h, r, fx=0, fy=0):
     res = "GSHGEOM_OK"
     el = []
     rr = [v for k in r for v in k]
-    if not all(finite(v) for v in (x, y, w, h) + tuple(rr)) or w < 0 or h < 0 or any(v < 0 for v in rr) or overlap(w, h, r):
+    if fx not in (0, 1) or fy not in (0, 1) or not all(finite(v) for v in (x, y, w, h) + tuple(rr)) or w < 0 or h < 0 or any(v < 0 for v in rr) or overlap(w, h, r):
         res = "GSHGEOM_ERR_INVALID"
     else:
-        el, _ = rrect_elems(x, y, w, h, r)
+        el, _ = rrect_elems(x, y, w, h, r, fx, fy)
         pts = [q for e in el for q in e[1:4] if isinstance(q, tuple)]
         radii = [v for k in (((0.0, 0.0) if (a == 0 or d == 0) else (a, d)) for a, d in r) for v in k]
         if any(too_big(v) for v in radii if v) or any(too_big(c) for q in pts for c in q):
             res, el = "GSHGEOM_ERR_LIMIT", []
-    cases.append((1, [x, y, w, h], rr, 0, 0, res, el))
+    cases.append((1, [x, y, w, h], rr, fx, fy, res, el))
 
 
 def add_ellipse(cx, cy, rx, ry, fx, fy):
@@ -287,6 +317,33 @@ add_rrect(-BIG, -BIG, 2.0 * BIG, 2.0 * BIG, R(1.5 * BIG, 1, 0.5 * BIG, 1, 0, 0, 
 add_rrect(-BIG, 0.0, 2.0 * BIG, 10.0, R(BIG, 2, BIG, 2, 0, 0, 0, 0))
 add_rrect(0.0, BIG / 2, 10.0, BIG / 2 + 2.0 ** 48, R(0, 0, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25))
 
+# Canvas roundRect with a negative width or height (repro/a2-chromium/roundrect-model.html: Chromium's own roundRect against this model, whole
+# canvas after a fill and six dashed strokes): the box of that page and its five radii sets, each under the four sign cases
+for rset in (R(10, 10, 20, 20, 30, 30, 40, 40), R(30, 10, 20, 15, 10, 25, 5, 8), R(0, 0, 0, 0, 0, 0, 0, 0), R(35, 20, 0, 0, 0, 0, 0, 0),
+             R(0, 0, 25, 12, 0, 0, 14, 30)):
+    for fx in (0, 1):
+        for fy in (0, 1):
+            add_rrect(40.0, 30.0, 200.0, 120.0, rset, fx, fy)
+# every box above under every flip pair, and the structure at a side the radii fill exactly
+for x, y, w, h in rr_boxes:
+    for r in radii:
+        for fx, fy in ((1, 0), (0, 1), (1, 1)):
+            add_rrect(x, y, w, h, r, fx, fy)
+for fx, fy in ((1, 0), (0, 1), (1, 1)):
+    add_rrect(0.0, 0.0, 20.0, 10.0, R(10, 5, 10, 5, 10, 5, 10, 5), fx, fy)
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(5, 5, 5, 5, 5, 5, 5, 5), fx, fy)
+    add_rrect(-0.0, -0.0, 8.0, 0.0, R(0, 0, 0, 0, 0, 0, 0, 0), fx, fy)
+    add_rrect(3.0, 4.0, 6.0, 6.0, R(0, 3, 0, 3, 0, 3, 0, 3), fx, fy)
+    # refusals do not depend on the flips: overlap, a negative or non-finite component, a coordinate past the limit
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(6, 1, 6, 1, 0, 0, 0, 0), fx, fy)
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(0, float("nan"), 0, 0, 0, 0, 0, 0), fx, fy)
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(-1, 1, 0, 0, 0, 0, 0, 0), fx, fy)
+    add_rrect(HUGE, 0.0, HUGE, 10.0, R(1, 1, 0, 0, 0, 0, 0, 0), fx, fy)
+    add_rrect(BIG / 2, BIG / 2, BIG / 2 + 2.0 ** 48, 4.0, R(0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25), fx, fy)
+add_rrect(0.0, 0.0, 10.0, 10.0, R(1, 1, 0, 0, 0, 0, 0, 0), 2, 0)
+add_rrect(0.0, 0.0, 10.0, 10.0, R(1, 1, 0, 0, 0, 0, 0, 0), 0, -1)
+add_rrect(0.0, float("nan"), 10.0, 10.0, R(0, 0, 0, 0, 0, 0, 0, 0), 1, 1)
+
 ells = [(0.0, 0.0, 1.0, 1.0), (10.0, 20.0, 5.0, 3.0), (-4.5, 8.25, 0.5, 40.0), (1e16, 1e16, 3.0, 3.0), (-0.0, -0.0, 2.0, 2.0),
         (0.1, 0.2, 0.3, 0.7), (1.0, 1.0, 1.0, nextafter(1.0)), (0.0, 0.0, 1e-300, 1e-300), (0.0, 0.0, 5e-324, 5e-324),
         (0.0, 0.0, 2.0 ** 99, 2.0 ** 99), (2.0 ** 99, 0.0, 2.0 ** 99, 1.0), (BIG, 0.0, 1.0, 1.0), (BIG, 0.0, 2.0 ** 48, 1.0), (-BIG, 0.0, 2.0 ** 48, 1.0), (0.0, 0.0, nextafter(BIG), 1.0),
@@ -318,7 +375,7 @@ for _ in range(160):
     fr = [rng.random() * 0.25 for _ in range(8)]
     rr = [(w * fr[0], h * fr[1]), (w * fr[2], h * fr[3]), (w * fr[4], h * fr[5]), (w * fr[6], h * fr[7])]
     rr = [(a if rng.random() > 0.15 else 0.0, d if rng.random() > 0.15 else 0.0) for a, d in rr]
-    add_rrect(rd(k), rd(k), w, h, rr)
+    add_rrect(rd(k), rd(k), w, h, rr, rng.randint(0, 1), rng.randint(0, 1))
 
 out = []
 w = out.append

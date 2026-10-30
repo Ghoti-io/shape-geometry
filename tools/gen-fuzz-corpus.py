@@ -202,6 +202,8 @@ def shape_scripted():
     rr = (160, 96, 160, 96, 160, 96, 160, 96)
     out["scripted-shape-rounded.bin"] = bytes([0, 0]) + shape(1, 0, 0, 0, 1600, 960, rr) + ARC_PASS + identity_device()
     out["scripted-shape-rounded-two.bin"] = bytes([0, 0]) + shape(1, 0, 0, 0, 1600, 960, (160, 96, 0, 0, 0, 0, 96, 160)) + ARC_PASS
+    for fl in (1, 2, 3):
+        out["scripted-shape-rounded-flipped-%d.bin" % fl] = bytes([0, 0]) + shape(1, fl, 0, 0, 1600, 960, (160, 96, 0, 0, 0, 0, 96, 160)) + ARC_PASS
     out["scripted-shape-overlap.bin"] = bytes([0, 0]) + shape(1, 0, 0, 0, 1600, 960, (1000, 96, 1000, 96, 0, 0, 0, 0))
     out["scripted-shape-bad-flip.bin"] = bytes([0, 0]) + shape(0, 0x10, 0, 0, 1600, 960) + shape(2, 0x30, 0, 0, 1600, 960)
     out["scripted-shape-3d.bin"] = bytes([1, 0]) + shape(0, 0, 0, 0, 1600, 960)
