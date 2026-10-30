@@ -23,6 +23,15 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
 - Path vertices (`vertices.h`): each vertex of a 2D path with its position, the unit incoming and outgoing directions
   (segments without extent are looked past; a closed subpath is read round) and the direction an `orient="auto"` marker
   takes (the bisector, bit-exact on every target).
+- Exact arcs (`arc.h`): an elliptical arc is one element of a 2D path, its start and end kept to the bit and its centre form
+  a centre and two conjugate half-diameters (closed under every affine map), built by the SVG endpoint form (with the
+  radius correction and the near-semicircle decided exactly), the Canvas and DXF centre forms, `arcTo` and the DXF bulge.
+  An arc decomposes exactly into at most four rational quadratics (a quarter turn's weight is exactly `sqrt(1/2)`, a
+  rounded rectangle's corner has exact control points); bounds, maps (with the circular flag), measurement, strokes,
+  dashes, vertices and the device path all take arcs, and the element readback refuses one so that a reader that does not
+  know arcs fails instead of drawing the chord. `examples/arc.c` builds a rounded rectangle and a circle.
+- The conic route: the device path of a rational curve or an arc, proved within the tolerance less 0.29 units (flattener
+  revision 3).
 - The fill rules (`fill.h`: nonzero 0, even-odd 1, pinned), which `shape-cpu`
   fills under and `font`'s `GFNT_FillRule` is the type of.
 - Strokes (`stroke.h`): the region a stroke covers, stated once as rules SG1 to

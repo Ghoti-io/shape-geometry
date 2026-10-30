@@ -3,10 +3,12 @@
 **Status:** parts 1 to 4 of the shape-geometry plan: curves, model paths,
 bounds and the hash spelling; maps, the orientation rules, the exact
 predicates and the route predicate; the 26.6 device path and the integer
-flattener (revision 2); along-path parametrization; the fill rules; strokes:
-the definition of the covered region and the expansion (construction revision
-1), solid and dashed (SG19 to SG30), and a DXF simple linetype lowered to a dash
-array.
+flattener (revision 3, with the conic route of rational curves and arcs);
+along-path parametrization; path vertices; exact elliptical arcs (the element,
+three constructors, the exact decomposition and everything that reads a path);
+the fill rules; strokes: the definition of the covered region and the expansion
+(construction revision 1), solid and dashed (SG19 to SG30), and a DXF simple
+linetype lowered to a dash array.
 
 Paths, transforms and flattening for the shape family, bit-identical on every host.
 
@@ -110,11 +112,12 @@ clipping in `double` is a sink's decision. The device path is a builder over
 no rational form), and a verb after a close stores a move at the closed
 subpath's start, so every stored subpath begins with a move.
 `gshgeom_device_path_from_model` maps each point in `double` (`gshgeom_map_apply_point`)
-and rounds it; every control point must round into range. A rational curve is
-subdivided in `double` after the map, in homogeneous coordinates at the
-parameter 1/2, until its projected control points are within 1/32 pixel of the
-chord *segment* (convexity of positive weights makes that a bound), and becomes
-lines.
+and rounds it; every control point must round into range. A rational curve (a
+rational quadratic, a rational cubic, and each piece of an arc) takes the conic
+route, below: it is subdivided in `double` after the map, in homogeneous
+coordinates at the parameter 1/2, until its projected control points are within
+`t - 1` units of the chord *segment* (convexity of positive weights makes that a
+bound), and becomes lines.
 
 **The integer spelling and the fixed-point builder (story 14a, AD-5).**
 `gshgeom_scale_26_6(p, S, flip)` is the same rule for a point a fixed-point
@@ -221,7 +224,7 @@ every sink that wants these bits (the CPU sink, the test sink) calls the same co
 ### The revision
 
 The flattener is versioned: `GSHGEOM_FLATTEN_REVISION` and
-`gshgeom_flatten_revision()` (2). It is a number recorded where a rebaseline
+`gshgeom_flatten_revision()` (3). It is a number recorded where a rebaseline
 lives (the header of a golden, `tests/flatten_vectors.h`), checked against the
 code, and in no hash: the flattened path's spelling and its format version (1) are
 unchanged, and two revisions that gave equal output hash equal. There is no
@@ -230,7 +233,8 @@ selector for an older revision.
 | Revision | What it was |
 |---|---|
 | 1 | `font`'s flattener as ported in story 7, bit for bit: every midpoint floored to 26.6, flat at `4 * t` units, depth 16. The midpoints' error accumulated with the depth, so against the exact curve it reached 2 to 4 units on a tiny curve, 7.7 below 2^16 and 11 to 13 on a large one (13.1 over the `int32` range), where 4 was promised. |
-| 2 | Widened by eight bits, one rounding of each vertex, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12`. Story 7a. |
+| 2 | Widened by eight bits, one rounding of each vertex, flat at `4 * (t - 1)`, depth 20, proved within `t - 0.12`. |
+| 3 | The device path of a rational curve or an arc routed by the conic route, flat at `t - 1` units, the cap 240, proved within `t - 0.29` (the integer flattener of quadratics and cubics is revision 2's, unchanged). Before it, a rational curve was subdivided to 1/32 pixel at depth 16 with no proof. |
 
 `tests/flatten_vectors.h` holds 960 curves with the vertices `font`'s flattener
 (revision 2, tolerance 4) produced for them; `tools/vectors-from-font/` records
@@ -309,6 +313,170 @@ has the same bits on every target: the cross-target probe hashes 500 random path
 segments, reversals and closed corners are common, and a fine one, where the bisectors are irrational) as the committed
 `vertex-hash`. The walk allocates nothing and is linear in the elements: the search for the next segment with extent only
 moves forward.
+
+## Arcs
+
+`arc.h`. A 2D model path can hold an elliptical arc as one element (verb `GSHGEOM_VERB_ARC`, 7). An SVG `A`, a Canvas
+`arc`, a DXF `ARC` or a G-code `G2` are each one arc, so a writer can say `<circle>` and a toolpath sink `G2` instead of
+recovering a circle from control points and weights. The rules are numbered AR1 to AR18 (the record, its constructors,
+the decomposition and what every reader does with an arc) and CV1 to CV6 (the conic route of rational curves, which an
+arc's pieces take); the tests, the oracle and the plants cite them.
+
+### The element (AR1 to AR4)
+
+An arc keeps its **start and end exactly as the caller gave them** and its centre form: a centre `c`, two conjugate
+half-diameters `u` and `v`, a start parameter `t0`, a signed `sweep` and the angle unit the two are in. The curve is
+`P(t) = c + u cos t + v sin t` for `t` from `t0` to `t0 + sweep`. The conjugate form is closed under every affine map (the
+map is applied to the three vectors; no singular value decomposition, whose radii would be irrational), and the radii
+and rotation of the SVG and Canvas forms are derived, never stored. The unit is stored (radians, degrees, gradians or
+turns) so that a quarter turn in the three exact units stays exact through the decomposition.
+
+A record is accepted in this order, a failed call leaving the path as it was: `ERR_INVALID` for a NULL or 3D path, no
+current point (the arc's start is the current point), a non-finite number, an unknown unit or flag bit, `cross(u, v) = 0`
+(the ellipse must have area, decided exactly with the orientation predicate) or a sweep of zero or more than one turn; then
+`ERR_LIMIT` for a coordinate or half-diameter past the coordinate limit, `|t0|` past the rotation map's quarter-turn
+limit, or the element limit; then `ERR_INVALID` if the start is not the current point to the bit or the centre form
+misses an end; then `ERR_LIMIT` again if a piece of the decomposition cannot be made (the meeting of two tangents can lie
+past the coordinate limit when the centre form is near it, and an arc that cannot be decomposed could not be read by anything
+that walks a path by its pieces); then `ERR_OOM`.
+
+The ends are authoritative and the centre form must agree with them: `P(t0)` and `P(t0 + sweep)` must be within
+`GSHGEOM_ARC_AGREE` (`2^-40`) times the arc's scale of the stored start and end, the scale being the largest magnitude of
+any coordinate of the start, end and centre and of `|u|_inf + |v|_inf`. That is a ceiling chosen to be provable for every
+path through the code, not a target: the tests measure the worst disagreement of the constructors at least eight times
+below it, and assert the bound at the bound and one past it. A sweep of exactly one turn requires `end = start` to the bit,
+so a closed subpath of arcs closes to the bit. The direction of an arc is `sign(sweep) * sign(cross(u, v))`, exact; every
+constructor builds `cross(u, v) > 0`, so a positive sweep runs from +x toward +y (SVG's sweep flag 1), and only a mapped
+arc under a mirror has `cross(u, v) < 0`. The sine and cosine of a parameter come from `gshgeom_sincos`, the quarter-turn
+reduction the rotation map uses: in degrees, gradians and turns a multiple of a quarter turn is exactly 0 and +-1.
+
+### The constructors (AR5 to AR7)
+
+**The endpoint form** (`gshgeom_path_arc_endpoint_to`; SVG 2, F.6.5 and F.6.6) takes the end, `rx`, `ry`, the rotation, and
+the two flags, each exactly 0 or 1. Equal ends add nothing (`NOTHING`); a zero radius adds a line (`LINE`); otherwise
+the radii are made absolute and, if they are too small, scaled up so that the arc is the half ellipse with the centre at
+the chord's midpoint. Whether they are too small is decided on exact sums (`src/exact`, as `orient2d` is), not on rounded
+ones; and the radicand `1 - |m|^2` that places the centre is evaluated exactly and rounded once, so the centre keeps its
+accuracy as the ends approach a half ellipse, where a radicand computed from rounded sums loses half its digits. The sweep
+is not a difference of two arctangents (which cannot show a sweep below the spacing of the start angle) but twice
+`atan2(sqrt(a^2 + b^2), sqrt(N))` of the two exact sums, accurate however small the chord is. The `CIRCULAR` flag is set
+iff the radii are bit equal.
+
+**The centre form** (`gshgeom_path_arc_center_to` for Canvas `arc` and `ellipse`, DXF `ARC`, `CIRCLE`; and
+`gshgeom_path_arc_conjugate_to` for the record's own fields, DXF `ELLIPSE` giving a major axis vector and a ratio). With a
+current point the arc starts there; without one a subpath begins at `P(t0)`. An explicit end overrides `P(t0 + sweep)`
+(G-code names it). A sweep of exactly one turn closes: `end = start` to the bit, which Canvas's
+`arc(x, y, r, 0, 2 pi)` needs, since `cos(2 pi)` is not 1. `gshgeom_arc_point` evaluates `P(t)` as the constructor does, so a
+front-end that needs Canvas's connecting line can call `line_to` with the bits the arc starts from.
+
+**The tangent forms.** `gshgeom_path_arc_tangent_to` is Canvas `arcTo` exactly (a line when the points coincide, the
+radius is zero or the three are collinear by the exact predicate; otherwise a line to the first tangent point, unless it is
+the current point, and a circular arc to the second), and `gshgeom_path_arc_bulge_to` is a DXF polyline bulge
+(`bulge = tan(sweep / 4)`). Both keep their computed ends authoritative and check the agreement like any other record.
+
+### The decomposition (AR8)
+
+`gshgeom_arc_pieces` gives the arc as at most four rational quadratics of at most a quarter turn each (1 to 4 pieces for
+a sweep up to one, two, three and four quarter turns, the comparison exact). Piece `k` runs from `t0 + (k sweep) / n` to the
+next; its weights are `(1, w, 1)` with `w = cos h` for its half sweep `h`, **exactly `gmath_sqrt(0.5)` for a quarter turn**; its
+control point is the meeting of the tangents at its two ends, and where both tangents are parallel to an axis (an exact
+zero component) each coordinate is taken from the end point on that tangent, so a rounded rectangle's corner has the control
+point `(E.x, S.y)` exactly and the first and last directions of the arc are bit-exact axis vectors. The first piece starts at
+the arc's `start` and the last ends at its `end`. The pieces lie on the ellipse of the centre form to within
+`GSHGEOM_ARC_DECOMP` (`2^-44`) times the scale, a limit the tests assert at its bound and one past it. Every operation is one
+`double` operation in the written order, with no contraction.
+
+### What reads an arc (AR9 to AR16)
+
+An arc is **one segment** of its subpath. It has extent when some control point of its pieces differs from the first; its
+start direction is the first such piece's and its end direction the last such piece's, read by the code the stroke expansion
+reads them with. **A boundary between two of an arc's pieces is not a vertex**: not a join, a cap, a marker position or a
+corner for any reader. The table says what each operation does.
+
+| Operation | With an arc |
+|---|---|
+| `gshgeom_path_element` | `ERR_UNSUPPORTED`: a reader that predates arcs fails instead of drawing the chord. `gshgeom_path_verb` and `gshgeom_path_arc` read one back; `gshgeom_path_lower_arcs` gives the path with each arc replaced by its pieces. |
+| copy, equal, hash, dump | The record, bit for bit (`-0` is not `+0`). Hash after the verb byte 7: flags, unit, then the twelve doubles of start, end, centre, `u`, `v`, `t0`, `sweep`; the dump line is `A <flags> <unit>` and the twelve bit patterns. A path with no arc hashes as it always did. |
+| bounds | The union of the exact boxes of the pieces, so includes both ends. |
+| `gshgeom_arc_map` | The ends and the centre as points and the half-diameters as vectors, so the result is the map's image to the rounding of the one composer; `unit`, `t0` and `sweep` are kept. A mirror flips the direction. `CIRCULAR` is kept if and only if the map's kind tag has none of `SCALES_NONUNIFORM`, `SKEWS`, `SINGULAR`, `GENERAL`; a rotation by an arbitrary angle leaves `u . v` a few ulps from zero, so the tag, never a test of the numbers, is the predicate. A singular map is `ERR_INVALID`; the device route maps the pieces instead. `gshgeom_arc_circle` answers a flagged arc's centre, radius and sense. |
+| measurement | The pieces, each as a rational quadratic, in order; `segment_count` counts pieces and the frame names the element and the piece. |
+| stroke, dashes | The body is the union of the pieces' bodies; joins and caps are made at the arc's two ends only, from its end directions and (for the `arcs` join) the curvature there; no join at a piece boundary. A dash end inside an arc cuts a piece, and the dash is stroked as the cut conics. A stroke of an arc and of its pieces written as rational quadratics have the same outline hash where the pieces are tangent continuous to the bit and a join emits nothing at a zero turn (butt, bevel); for the other joins the covered regions agree within the stroke tolerance. |
+| vertices | One vertex per arc, at its authoritative end. A rounded rectangle's corner has bit-equal incoming and outgoing directions, so the marker angle there is exact. A full-turn arc has both directions at its vertex; a zero-extent arc is looked past, like any segment without extent. |
+| curve outline | The pieces, each lowered as a rational quadratic is. |
+| device path, flattening | The pieces through the conic route (CV1 to CV6, below); the device ends are the arc's own ends rounded once, so a closed arc closes in device space. |
+| limits | An arc is one element for `max_elements`; its device path counts its elements and points against the device path's limits (`ERR_LIMIT`, nothing truncated). |
+
+### Every site that reads a path by verb (AR17, AR18)
+
+A reader that names a path verb, or calls `gshgeom_path_element`, must either handle `ARC` or be audited.
+`tools/verb-walkers.audit` has one line per site (library, file, symbols, a disposition, the reason and the test that feeds
+the site an arc); `tools/check-verb-walkers.sh` finds the sites again by search over the libraries that link this one and
+fails on a file or function with no line, a line whose test does not exist, or a site audited as handling arcs that no longer
+names the arc. `tools/check-walker-gate.sh` shows the gate failing on each of those (a site that drops the arc, a new
+caller, a deleted line, a missing test, an unaudited test file). The dispositions are *updated* (the arc is handled), *confirmed*
+(receives `ERR_UNSUPPORTED` and fails loudly), *unreachable* (an arc cannot get there, with the reason), *owner* (a reader in
+another library, handled there) and *support* (a test, tool or example that builds or reads paths).
+
+| Site | Disposition |
+|---|---|
+| `src/path/path.c` element, bounds, hash, dump, copy | updated: the element refuses an arc (AR15); bounds, hash, dump and copy take the record |
+| `src/path/arc.c` | updated: validation, readback and lowering |
+| `src/path/vertices.c` | updated: an arc is one vertex, directions from the pieces (AR14) |
+| `src/along/along.c` | updated: the pieces (AR12) |
+| `src/stroke/expand.c`, `dash.c` | updated: one segment, joins at its ends only, dashes cut a piece (AR13) |
+| `src/stroke_curves/lower.c` | updated: the pieces lowered (AR8) |
+| `src/device/device.c` | updated: the pieces through the conic route (CV1) |
+| `src/flatten/flatten.c` | unreachable: reaches a path only through the device path, which holds lines |
+| the path builders, `gshgeom_path_element_count` | unreachable or confirmed: an arc is one element |
+| readers in other libraries that call `gshgeom_path_element` | confirmed until they take an arc: they receive `ERR_UNSUPPORTED` |
+
+### The conic route (CV1 to CV6)
+
+The device path of a model path under a map treats every rational curve (a rational quadratic, a rational cubic and each
+piece of an arc) by one route, part of the flattener's definition (revision 3). The control points are mapped in `double`
+(`gshgeom_map_apply_point`), scaled by 64 (exact), and the weights are unchanged (an affine map keeps them). The homogeneous
+curve `(w X, w Y, w)` is split at the parameter 1/2 by de Casteljau until **every interior control point of the projected
+piece lies within `t - 1` units of the piece's chord**, when the piece becomes a line to its end, rounded once to 26.6. `t`
+is the flattener's tolerance (at least `GSHGEOM_FLATTEN_MIN_TOLERANCE`; `gshgeom_device_path_from_model_with_tolerance`
+takes it, `gshgeom_device_path_from_model` uses `GSHGEOM_FLATTEN_TOLERANCE`). The ends of the whole curve are the mapped
+control points themselves, rounded once. A split point is the quotient of its homogeneous point clamped into the box of the
+control points; the pieces are visited left to right; a piece deeper than the cap is ended as it stands. Everything is one
+`double` operation in the written order, no `long double`, no fused multiply-add, no library function, so the same bits on
+every target.
+
+**The guarantee.** For control points that each round into `int32` and weights in `[2^-100, 2^100]` (the range a path
+accepts), every point of the exact curve is within `t - 0.29` units of the emitted polyline, and the depth cap
+(`GSHGEOM_CONIC_MAX_DEPTH`, 240) never ends a piece that is not flat. The proof is stated above the code in
+`src/device/device.c`; in outline: (a) a rational Bezier curve with positive weights lies in the convex hull of its projected
+control points, and so does each piece, whose control points de Casteljau gives; (b) the `double` homogeneous halves are within
+`2^-10` unit of the exact ones at every depth up to the cap (the rounding of an average adds at most `u` relative, and the
+error grows by at most three per level); (c) the squared distance test is within `2^-16` unit of the true distance; (d) the
+rounding of the vertices moves a chord by at most 0.7072; so the hull of a flat piece lies within `(t - 1) + 2^-16 + 2^-10 +
+0.7072 = t - 0.2918` of the emitted segment; (e) the cap never binds: neighbouring homogeneous points of a piece of parameter
+length `2^-k` differ by at most `2^-k` times those of the whole, which bounds a control point's distance from the chord by
+`2^235.1 * 2^-k` units, below 0.04 at `k = 240`. A weight ratio of `2^200`, which a path accepts, is what needs 236 levels rather
+than the twenty of an ordinary curve (the integer flattener needs 20 for the `int32` range): a uniform split of such a curve
+spends about a hundred levels before it divides the curve's length at all, each emitting one line, the price of an input no
+one writes. `tests/unit/test_conic.cpp` checks the proof against dense exact evaluation of the curves (the Bernstein form in
+`long double` at dyadic parameters, thirty-three inside every piece the route made, and `2^-k` and `1 - 2^-k` for every depth
+the proof allows) on every size class up to the whole `int32` range, and a variant of the route with a smaller cap shows that
+a cap that binds is seen.
+
+**Hostile input** (CV6): control points at the map limit, a weight at `2^100` or `2^-100`, and a piece that does not flatten
+before the device range is exceeded are `ERR_LIMIT` for a coordinate that does not round into `int32`, never a hang and never
+a depth that binds. The cross-target value over random conics, arcs of every sweep and tiny and huge scales is the
+`conic-hash` pair of `tests/corpus/geometry.hash`; the arc constructors and pieces are the `arc-hash` pair and the vertices of
+paths that hold arcs the `arc-vertex-hash` pair.
+
+### What checks it
+
+`tools/arc-oracle.py` states the endpoint, centre and tangent forms, the bulge and the decomposition in exact rationals and
+130-digit decimals with no code shared with the library, and `tools/gen-arc-vectors.py` writes `tests/arc_vectors.h` from it:
+every flag pair, the radius corrections, rotations in every unit, the near-semicircle on either side of one at three scales,
+ends one ulp apart and the quarter-aligned arcs a rounded rectangle uses. The oracle and the library are both written from
+the same text, so they could agree and be wrong about which of the four arcs a flag pair means. The check against a
+renderer's behaviour (the four-arc minimal pair, and an elongated rotated ellipse, since a rotation sign error is invisible on
+a circle) is not part of `make test`.
 
 ## The fill rules
 
@@ -716,6 +884,8 @@ construction. The number is in no hash; there is no selector for an older revisi
 
 `make test` runs the unit tests and the gates; `make check-planted` builds
 each defect in `tools/check-planted.py` and requires a test to fail on it
-(the defects it accepts as invisible, with reasons, are in its docstring).
+(the defects it accepts as invisible, with reasons, are in its docstring); the
+arcs have a family of plants for every rule above, and `make check-verb-walkers`
+shows the walker audit failing on its own planted violations.
 `suite/tools/xarch/shape.sh` (section 6) and `suite/tools/xwin/shape.sh` run
 the probe on every target.
