@@ -417,7 +417,7 @@ PLANTS = [
     ("path-weights-first-only", "src", P, "    for (size_t k = 0; k < verb_weights(e->verb); k++) {\n      gshgeom_hash_f64",
      "    for (size_t k = 0; k < (verb_weights(e->verb) ? 1u : 0u); k++) {\n      gshgeom_hash_f64", PT),
     ("verb-code-quadratic", "hdr", PH, "GSHGEOM_VERB_QUADRATIC = 2,", "GSHGEOM_VERB_QUADRATIC = 9,", PT),
-    ("verb-code-close", "hdr", PH, "GSHGEOM_VERB_CLOSE = 6,", "GSHGEOM_VERB_CLOSE = 8,", PT),
+    ("verb-code-close", "hdr", PH, "GSHGEOM_VERB_CLOSE = 6,", "GSHGEOM_VERB_CLOSE = 9,", PT),
     ("kind-code-cubic", "hdr", CH, "GSHGEOM_CURVE_CUBIC = 2,", "GSHGEOM_CURVE_CUBIC = 6,", CT + PT),
 
     # --- the dump -----------------------------------------------------------
@@ -671,8 +671,8 @@ PLANTS += [
     ("m-limit-bound", "hdr", MH, "#define GSHGEOM_MAP_LIMIT 0x1p100", "#define GSHGEOM_MAP_LIMIT 0x1p101", MT),
     ("m-quarters-bound-high", "hdr", MH, "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p40", "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p41", MT),
     ("m-quarters-bound-low", "hdr", MH, "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p40", "#define GSHGEOM_MAP_MAX_QUARTERS 0x1p39", MT),
-    ("m-unit-gradians", "hdr", MH, "GSHGEOM_ANGLE_GRADIANS = 2,", "GSHGEOM_ANGLE_GRADIANS = 3,", MT),
-    ("m-unit-degrees", "hdr", MH, "GSHGEOM_ANGLE_DEGREES = 1,", "GSHGEOM_ANGLE_DEGREES = 2,", MT),
+    ("m-unit-gradians", "hdr", MH, "GSHGEOM_ANGLE_GRADIANS = 2,", "GSHGEOM_ANGLE_GRADIANS = 6,", MT),
+    ("m-unit-degrees", "hdr", MH, "GSHGEOM_ANGLE_DEGREES = 1,", "GSHGEOM_ANGLE_DEGREES = 5,", MT),
     ("m-axis-z", "hdr", MH, "GSHGEOM_AXIS_Z = 2,", "GSHGEOM_AXIS_Z = 1,", MT),
     ("m-kind-translates", "hdr", MH, "GSHGEOM_MAP_TRANSLATES = 1u << 0,", "GSHGEOM_MAP_TRANSLATES = 1u << 9,", MT),
     ("m-kind-flips-y", "hdr", MH, "GSHGEOM_MAP_FLIPS_Y = 1u << 3,", "GSHGEOM_MAP_FLIPS_Y = 1u << 4,", MT),
@@ -1197,7 +1197,7 @@ PLANTS += [
     ("fl-revision-constant-4", "hdr", FH, "#define GSHGEOM_FLATTEN_REVISION 1", "#define GSHGEOM_FLATTEN_REVISION 3", FT),
     ("fl-revision-function", "src", FL, "  return GSHGEOM_FLATTEN_REVISION;", "  return 2;", FT),
     ("fl-revision-in-hash", "src", FL, "  gshgeom_hash_u32(&h, FLAT_KIND);", "  gshgeom_hash_u32(&h, FLAT_KIND);\n  gshgeom_hash_u32(&h, (uint32_t)GSHGEOM_FLATTEN_REVISION);", FT),
-    ("fl-revision-in-dump", "src", FL, "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION,", "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION + (unsigned)GSHGEOM_FLATTEN_REVISION - 1u,", FT),
+    ("fl-revision-in-dump", "src", FL, "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION,", "  if (fprintf(out, \"gshgeom.flat-path %u subpaths=%llu points=%llu hash=%016llx\\n\",\n          FLAT_FORMAT_VERSION + (unsigned)GSHGEOM_FLATTEN_REVISION,", FT),
     ("fl-limit-off-by-one", "src", FL, "if (fp->pt_n >= fp->max_points) {", "if (fp->pt_n > fp->max_points) {", FT),
     ("fl-limit-one-short", "src", FL, "if (fp->pt_n >= fp->max_points) {", "if (fp->pt_n + 1 >= fp->max_points) {", FT),
     ("fl-zero-limit-is-zero", "src", FL, "  fp->max_points = (limits && limits->max_points)\n      ? limits->max_points\n      : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;",
