@@ -231,7 +231,10 @@ double gshgeom_exact_sum_to_double(const GSHGEOM_ExactSum * s) {
     m >>= 1;
     e2++;
   }
-  double v = (double)(int64_t)m;
+  /* m < 2^53, so each of these terms and every partial sum is an exact integer.  Not `(double)(int64_t)m`: a 32-bit
+   * x86 build converts a 64-bit integer with the x87 `fild`, and this library's code holds no x87 instruction. */
+  double v = ((double)(int32_t)(uint32_t)(m >> 32) * 4294967296.0 + (double)(int32_t)(uint32_t)((m >> 16) & 0xffffu) * 65536.0) +
+      (double)(int32_t)(uint32_t)(m & 0xffffu);
   /* scale by 2^e2 in steps that are themselves exact powers of two */
   while (e2 > 0) {
     long st = e2 > 1000 ? 1000 : e2;
