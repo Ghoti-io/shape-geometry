@@ -336,7 +336,7 @@ static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, 
   }
   GSHGEOM_Device_Path * dp = NULL;
   if (r == GSHGEOM_OK) {
-    r = gshgeom_device_path_from_model(mp, &c->map, &c->alloc, &c->limits, &dp);
+    r = gshgeom_device_path_from_model_with_tolerance(mp, &c->map, c->tau, &c->alloc, &c->limits, &dp);
   }
   if (r == GSHGEOM_OK) {
     r = gshgeom_device_path_flatten_with_tolerance(dp, c->tau, &c->alloc, &c->limits, out);
