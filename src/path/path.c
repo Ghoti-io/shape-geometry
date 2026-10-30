@@ -392,6 +392,33 @@ GSHGEOM_Result gshgeom_path_verb(const GSHGEOM_Path * path, size_t index, GSHGEO
   return GSHGEOM_OK;
 }
 
+/* Give an empty path room for exactly these counts. */
+static GSHGEOM_Result presize(GSHGEOM_Path * path, size_t el, size_t pt, size_t wt) {
+  if (el > SIZE_MAX / sizeof *path->el || pt > SIZE_MAX / sizeof *path->pt || wt > SIZE_MAX / sizeof *path->wt) {
+    return GSHGEOM_ERR_OOM;
+  }
+  path->el = gcu_allocator_realloc(&path->alloc, NULL, el * sizeof *path->el);
+  if (!path->el) {
+    return GSHGEOM_ERR_OOM;
+  }
+  path->el_cap = el;
+  if (pt > 0) {
+    path->pt = gcu_allocator_realloc(&path->alloc, NULL, pt * sizeof *path->pt);
+    if (!path->pt) {
+      return GSHGEOM_ERR_OOM;
+    }
+    path->pt_cap = pt;
+  }
+  if (wt > 0) {
+    path->wt = gcu_allocator_realloc(&path->alloc, NULL, wt * sizeof *path->wt);
+    if (!path->wt) {
+      return GSHGEOM_ERR_OOM;
+    }
+    path->wt_cap = wt;
+  }
+  return GSHGEOM_OK;
+}
+
 GSHGEOM_Result gshgeom_path_copy(const GSHGEOM_Path * path, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, GSHGEOM_Path ** out) {
   if (!path || !out) {
@@ -401,6 +428,19 @@ GSHGEOM_Result gshgeom_path_copy(const GSHGEOM_Path * path, const GSHGEOM_Alloca
   GSHGEOM_Result r = gshgeom_path_create(alloc, limits, path->dim, &dst);
   if (r != GSHGEOM_OK) {
     return r;
+  }
+  /* The arrays are sized to the source's contents, once: a copy holds what it needs and no more, so that what a store accounts for
+   * (a fixed figure for each element) bounds what the copy takes.  The limit is decided first, before anything is reserved. */
+  if (path->el_n > dst->max_elements) {
+    gshgeom_path_destroy(dst);
+    return GSHGEOM_ERR_LIMIT;
+  }
+  if (path->el_n > 0) {
+    r = presize(dst, path->el_n, path->pt_n, path->wt_n);
+    if (r != GSHGEOM_OK) {
+      gshgeom_path_destroy(dst);
+      return r;
+    }
   }
   /* The stored numbers go over raw: they were checked when they were stored, and a copy must not
    * change a bit.  The move's and the close's bookkeeping is what the builders would have set. */

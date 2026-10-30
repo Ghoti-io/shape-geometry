@@ -14,10 +14,15 @@
 #include "../alloc_tracker.h"
 #include "../shapes_vectors.h"
 
+extern "C" {
+#include "../../src/path/path_internal.h"
+}
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -71,7 +76,7 @@ std::string compare(const GSHGEOM_Path * p, size_t at, const shapes_vectors::Cas
     return buf;
   }
   for (size_t i = 0; i < c.count; i++) {
-    const Elem & e = elems[c.first + i];
+    const shapes_vectors::Elem & e = elems[c.first + i];
     GSHGEOM_Verb verb;
     if (gshgeom_path_verb(p, at + i, &verb) != GSHGEOM_OK) {
       return "verb unreadable";
@@ -452,6 +457,100 @@ TEST(Shapes, ThePathsAreClosedToTheBitAndAnArcFreeShapeIsJustLines) {
   }
   EXPECT_TRUE(same(prev.x, first.x) && same(prev.y, first.y));
   gshgeom_path_destroy(p);
+}
+
+
+namespace {
+
+/** An allocator that keeps the size of every live block. */
+struct Sized {
+  size_t live = 0;
+  std::map<void *, size_t> blocks;
+};
+
+void * sized_malloc(void * ctx, size_t n) {
+  Sized * s = static_cast<Sized *>(ctx);
+  void * p = std::malloc(n ? n : 1);
+  if (p) {
+    s->blocks[p] = n;
+    s->live += n;
+  }
+  return p;
+}
+
+void * sized_calloc(void * ctx, size_t k, size_t n) {
+  Sized * s = static_cast<Sized *>(ctx);
+  void * p = std::calloc(k ? k : 1, n ? n : 1);
+  if (p) {
+    s->blocks[p] = k * n;
+    s->live += k * n;
+  }
+  return p;
+}
+
+void * sized_realloc(void * ctx, void * old, size_t n) {
+  Sized * s = static_cast<Sized *>(ctx);
+  void * p = std::realloc(old, n ? n : 1);
+  if (p) {
+    if (old) {
+      s->live -= s->blocks[old];
+      s->blocks.erase(old);
+    }
+    s->blocks[p] = n;
+    s->live += n;
+  }
+  return p;
+}
+
+void sized_free(void * ctx, void * p) {
+  Sized * s = static_cast<Sized *>(ctx);
+  if (p) {
+    s->live -= s->blocks[p];
+    s->blocks.erase(p);
+  }
+  std::free(p);
+}
+
+}  // namespace
+
+TEST(Shapes, ACopyHoldsExactlyWhatItNeedsNotTheSourcesSlack) {
+  /* A store accounts a fixed figure for each element of a path (the scene library's resource.h); a copy sized to its contents is what
+   * makes that figure a bound.  The source grew by doubling and holds slack; the copy must not. */
+  Sized sized;
+  GSHGEOM_Allocator al;
+  al.ctx = &sized;
+  al.malloc_fn = sized_malloc;
+  al.calloc_fn = sized_calloc;
+  al.realloc_fn = sized_realloc;
+  al.free_fn = sized_free;
+  GSHGEOM_Path * src = make();
+  for (int i = 0; i < 41; i++) {
+    ASSERT_EQ(gshgeom_path_add_ellipse(src, i, 2 * i, 3, 4, i & 1, (i >> 1) & 1), GSHGEOM_OK);
+  }
+  const size_t n = gshgeom_path_element_count(src);
+  size_t points = 0, weights = 0;
+  for (size_t i = 0; i < n; i++) {
+    GSHGEOM_Verb v;
+    ASSERT_EQ(gshgeom_path_verb(src, i, &v), GSHGEOM_OK);
+    points += gshgeom_path_verb_points(v);
+    weights += gshgeom_path_verb_weights(v);
+  }
+  GSHGEOM_Path * copy = nullptr;
+  ASSERT_EQ(gshgeom_path_copy(src, &al, nullptr, &copy), GSHGEOM_OK);
+  EXPECT_TRUE(gshgeom_path_equal(copy, src));
+  EXPECT_EQ(sized.live, sizeof(GSHGEOM_Path) + n * sizeof(Elem) + points * sizeof(GSHGEOM_Point) + weights * sizeof(double));
+  /* the limit is decided before anything is reserved */
+  const size_t blocks = sized.blocks.size();
+  GSHGEOM_Limits lim;
+  gshgeom_limits_default(&lim);
+  lim.max_elements = n - 1;
+  GSHGEOM_Path * refused = nullptr;
+  EXPECT_EQ(gshgeom_path_copy(src, &al, &lim, &refused), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(refused, nullptr);
+  EXPECT_EQ(sized.blocks.size(), blocks) << "nothing is left behind";
+  gshgeom_path_destroy(copy);
+  EXPECT_EQ(sized.live, 0u);
+  gshgeom_path_destroy(src);
 }
 
 int main(int argc, char ** argv) {
