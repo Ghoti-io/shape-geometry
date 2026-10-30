@@ -152,7 +152,8 @@ static void check_reduced(GSHGEOM_Stroke_Outline * o, const GSHGEOM_Limits * lim
 enum {
   OUT_DRAWN = 0, OUT_EMPTY, OUT_NOT_INVERTIBLE, OUT_INVALID, OUT_UNSUPPORTED, OUT_LIMIT, OUT_OOM, OUT_ALIGNED,
   OUT_CURVE, OUT_ARCS, OUT_DEVICE, OUT_DEGENERATE, OUT_DASHED, OUT_DASH_PATH, OUT_DASH_DOTS, OUT_CV_DRAWN, OUT_CV_CUBIC,
-  OUT_CV_ALIGNED, OUT_CV_ARCS, OUT_CV_REFUSED, OUT_CV_LIMIT, OUT_COUNT
+  OUT_CV_ALIGNED, OUT_CV_ARCS, OUT_CV_REFUSED, OUT_CV_LIMIT, OUT_ARC_STROKED, OUT_ARC_DASHED, OUT_ARC_CURVES,
+  OUT_ARC_LOWERED_SAME, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"an outline drawn", "width 0 (EMPTY)",
@@ -161,7 +162,8 @@ static const char * const outcome_names[OUT_COUNT] = {"an outline drawn", "width
     "device width drawn", "a degenerate subpath drawn", "a dashed stroke drawn", "a dashed stroke with one pattern for the path",
     "a dashed stroke with zero-length dashes", "a curve outline drawn", "a curve outline in the cubic form",
     "a curve outline with an aligned part", "a curve outline with an exact arc", "a curve outline refused for its arguments",
-    "a curve outline past max_elements"};
+    "a curve outline past max_elements", "a path with an arc stroked", "a path with an arc stroked with dashes",
+    "a curve outline of a path with an arc", "the stroke of a path's lowered arcs, drawn when the arc path was"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -258,6 +260,18 @@ static GSHGEOM_Point point(Input * in) {
   return p;
 }
 
+/** A radius or an angle for the arc constructors: ordinary values, the degenerate ones, and bytes. */
+static double arc_number(Input * in) {
+  static const double table[] = {0.0, 1.0, 2.0, 0.5, 8.0, 90.0, 180.0, 270.0, 360.0, -90.0, 45.5, -30.0, 100.0, -1.0, 1e-9, 3.0};
+  const uint8_t pick = next(in);
+  if (pick < 16) {
+    return table[pick];
+  }
+  const unsigned hi = next(in);
+  const unsigned lo = next(in);
+  return (double)(int16_t)(uint16_t)((hi << 8) | lo) / 16.0;
+}
+
 static void weights(Input * in, double * w, int n) {
   static const double table[] = {1.0, 0.70710678118654752, 2.0, 0.0, 1e-6, 1e6, 0.5, 3.0};
   for (int i = 0; i < n; i++) {
@@ -307,7 +321,7 @@ static GSHGEOM_Result build_map(Input * in, GSHGEOM_Map * map) {
   return r;
 }
 
-static GSHGEOM_Path * build_path(Input * in, const GSHGEOM_Allocator * alloc, int * curved) {
+static GSHGEOM_Path * build_path(Input * in, const GSHGEOM_Allocator * alloc, int * curved, int * arcs) {
   GSHGEOM_Path * p = NULL;
   int dim = next(in) == 7 ? 3 : 2;
   if (gshgeom_path_create(alloc, NULL, dim, &p) != GSHGEOM_OK) {
@@ -316,7 +330,62 @@ static GSHGEOM_Path * build_path(Input * in, const GSHGEOM_Allocator * alloc, in
   const int ops = next(in) % 24;
   for (int i = 0; i < ops; i++) {
     double w[4];
-    switch (next(in) % 7) {
+    switch (next(in) % 11) {
+    case 7: {
+      /* an arc by the endpoint form (SVG), in degrees */
+      GSHGEOM_Point e = point(in);
+      const double rx = arc_number(in);
+      const double ry = arc_number(in);
+      const double phi = arc_number(in);
+      const uint8_t fl = next(in);
+      const int ok = gshgeom_path_arc_endpoint_to(p, e, rx, ry, phi, GSHGEOM_ANGLE_DEGREES, fl & 1, (fl >> 1) & 1, NULL) == GSHGEOM_OK;
+      *curved |= ok;
+      *arcs |= ok;
+      break;
+    }
+    case 8: {
+      /* an arc by its centre form, in the unit a byte names (a circle when the radii are equal) */
+      GSHGEOM_Point c = point(in);
+      const double rx = arc_number(in);
+      const double ry = arc_number(in);
+      const double phi = arc_number(in);
+      const GSHGEOM_Angle_Unit unit = (GSHGEOM_Angle_Unit)(next(in) % 4);
+      const double t0 = arc_number(in);
+      const double sweep = arc_number(in);
+      const int ok = gshgeom_path_arc_center_to(p, c, rx, ry, phi, unit, t0, sweep, NULL) == GSHGEOM_OK;
+      *curved |= ok;
+      *arcs |= ok;
+      break;
+    }
+    case 9: {
+      /* arcTo: a line and an arc, or a line */
+      GSHGEOM_Point p1 = point(in);
+      GSHGEOM_Point p2 = point(in);
+      const double r = arc_number(in);
+      const size_t before = gshgeom_path_element_count(p);
+      if (gshgeom_path_arc_tangent_to(p, p1, p2, r) == GSHGEOM_OK) {
+        GSHGEOM_Verb verb;
+        const size_t n = gshgeom_path_element_count(p);
+        const int arc = n > before && gshgeom_path_verb(p, n - 1, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC;
+        *curved |= arc;
+        *arcs |= arc;
+      }
+      break;
+    }
+    case 10: {
+      /* a polyline bulge */
+      GSHGEOM_Point q = point(in);
+      const double bulge = arc_number(in) / 4.0;
+      const size_t before = gshgeom_path_element_count(p);
+      if (gshgeom_path_arc_bulge_to(p, q, bulge) == GSHGEOM_OK) {
+        GSHGEOM_Verb verb;
+        const size_t n = gshgeom_path_element_count(p);
+        const int arc = n > before && gshgeom_path_verb(p, n - 1, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC;
+        *curved |= arc;
+        *arcs |= arc;
+      }
+      break;
+    }
     case 0:
       (void)gshgeom_path_move_to(p, point(in));
       break;
@@ -429,8 +498,10 @@ static int stroke_box(const GSHGEOM_Path * p, const GSHGEOM_Stroke * s, const GS
   size_t n = gshgeom_path_element_count(p);
   for (size_t i = 0; i < n; i++) {
     GSHGEOM_Element el;
-    (void)gshgeom_path_element(p, i, &el);
     /* every point any subpath starts at (a degenerate subpath is its point) */
+    if (gshgeom_path_element(p, i, &el) == GSHGEOM_ERR_UNSUPPORTED) {
+      continue; /* an arc starts where the element before it ended, which is counted there */
+    }
     double x = el.curve.p[0].x, y = el.curve.p[0].y;
     if (!any) {
       x0 = x1 = x;
@@ -557,7 +628,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     gshgeom_map_identity(3, &map); /* a 3D map: refused */
   }
   int curved = 0;
-  GSHGEOM_Path * path = build_path(&in, NULL, &curved);
+  int arcs = 0;
+  GSHGEOM_Path * path = build_path(&in, NULL, &curved, &arcs);
   if (!path) {
     return 0;
   }
@@ -610,6 +682,25 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         if (s.width_space == GSHGEOM_STROKE_WIDTH_DEVICE) {
           outcomes[OUT_DEVICE]++;
         }
+        if (arcs) {
+          outcomes[OUT_ARC_STROKED]++;
+          /* the same stroke of the same path with every arc lowered to its pieces is drawn too (the statuses
+           * depend on the width and the map alone) */
+          GSHGEOM_Path * low = NULL;
+          GSHGEOM_Result rl = gshgeom_path_lower_arcs(path, NULL, &limits, &low);
+          CHECK(rl == GSHGEOM_OK || rl == GSHGEOM_ERR_LIMIT);
+          if (low) {
+            GSHGEOM_Stroke_Outline * ol = NULL;
+            GSHGEOM_Result rs = gshgeom_stroke_expand_with_tolerance(low, &s, &map, tau, NULL, &limits, &ol);
+            CHECK(rs == GSHGEOM_OK || rs == GSHGEOM_ERR_LIMIT || rs == GSHGEOM_ERR_UNSUPPORTED || rs == GSHGEOM_ERR_INVALID);
+            if (rs == GSHGEOM_OK) {
+              CHECK(gshgeom_stroke_outline_status(ol) == GSHGEOM_STROKE_DRAWN);
+              outcomes[OUT_ARC_LOWERED_SAME]++;
+              gshgeom_stroke_outline_destroy(ol);
+            }
+            gshgeom_path_destroy(low);
+          }
+        }
         if (!curved && gshgeom_path_element_count(path) <= 2) {
           outcomes[OUT_DEGENERATE]++;
         }
@@ -620,6 +711,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         }
         if (!solid && any) {
           outcomes[OUT_DASHED]++;
+          outcomes[OUT_ARC_DASHED] += arcs != 0;
           if (s.dash_scope == GSHGEOM_STROKE_DASH_PATH) {
             outcomes[OUT_DASH_PATH]++;
           }
@@ -683,6 +775,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         CHECK(!gshgeom_stroke_curves_body(cu) && !gshgeom_stroke_curves_aligned(cu) && !gshgeom_stroke_curves_clip(cu));
       } else {
         outcomes[OUT_CV_DRAWN]++;
+        outcomes[OUT_ARC_CURVES] += arcs != 0;
         if (form == GSHGEOM_STROKE_CURVES_CUBIC) {
           outcomes[OUT_CV_CUBIC]++;
         }

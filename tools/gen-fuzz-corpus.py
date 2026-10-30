@@ -32,11 +32,14 @@ import sys
 
 # Keep in step with the op enum in tests/fuzz/fuzz_path.c.
 OPS = ["MOVE", "LINE", "QUAD", "CUBIC", "RQUAD", "RCUBIC", "CLOSE", "MOVE_FIXED", "LINE_FIXED", "QUAD_FIXED",
-       "CUBIC_FIXED", "DEVICE", "MEASURE", "ORIENT", "BOUNDS"]
+       "CUBIC_FIXED", "DEVICE", "MEASURE", "ORIENT", "BOUNDS", "ARC_ENDPOINT", "ARC_CENTER", "ARC_CONJUGATE", "ARC_TANGENT",
+       "ARC_BULGE", "ARC_RAW", "ARC_PASS", "ARC_MAP"]
 OP = {name: i for i, name in enumerate(OPS)}
 
 BIASED = {"MOVE": 3, "LINE": 5, "QUAD": 5, "CUBIC": 6, "RQUAD": 4, "RCUBIC": 3, "CLOSE": 3, "MOVE_FIXED": 1,
-          "LINE_FIXED": 2, "QUAD_FIXED": 2, "CUBIC_FIXED": 2, "DEVICE": 6, "MEASURE": 4, "ORIENT": 3, "BOUNDS": 1}
+          "LINE_FIXED": 2, "QUAD_FIXED": 2, "CUBIC_FIXED": 2, "DEVICE": 6, "MEASURE": 4, "ORIENT": 3, "BOUNDS": 1,
+          "ARC_ENDPOINT": 4, "ARC_CENTER": 3, "ARC_CONJUGATE": 2, "ARC_TANGENT": 3, "ARC_BULGE": 3, "ARC_RAW": 3,
+          "ARC_PASS": 3, "ARC_MAP": 3}
 
 BIASED_FILES = 120
 PLAIN_FILES = 40
@@ -110,9 +113,81 @@ def cubic():
             + raw(0) + raw(640))
 
 
+# Arc ops (tests/fuzz/fuzz_path.c).  A radius is a byte below 16 (the table) or a byte of 16 and up and two more; an angle a
+# byte below 24 or one of 24 and up and two more; raw() writes 24, which both read as a value.
+A_ZERO, A_DEG = 0, 1
+
+
+def arc_endpoint(e, rx, ry, phi=bytes([0]), unit=A_DEG, flags=2):
+    return bytes([OP["ARC_ENDPOINT"]]) + e + rx + ry + phi + bytes([unit, flags])
+
+
+def arc_center(c, rx, ry, phi, unit, t0, sweep, end=None):
+    return (bytes([OP["ARC_CENTER"]]) + c + rx + ry + phi + bytes([unit]) + t0 + sweep + bytes([0 if end is None else 1])
+            + (end or raw(0) + raw(0)))
+
+
+def arc_conj(c, u, v, unit, t0, sweep, flags=0, end=None):
+    return (bytes([OP["ARC_CONJUGATE"]]) + c + u + v + bytes([unit]) + t0 + sweep + bytes([flags, 0 if end is None else 1])
+            + (end or raw(0) + raw(0)))
+
+
+def pt2(x, y):
+    return raw(x) + raw(y)
+
+
+def move0():
+    return bytes([OP["MOVE"]]) + pt2(0, 0)
+
+
+ARC_PASS = bytes([OP["ARC_PASS"]])
+SEMI = move0() + arc_endpoint(pt2(320, 0), raw(160), raw(160))
+
+
+def arc_scripted():
+    """Arc inputs: each constructor, each kind of result, the agreement bound, the readers, the map, the limits."""
+    out = {}
+    out["scripted-arc-endpoint.bin"] = bytes([0, 0]) + SEMI + ARC_PASS
+    out["scripted-arc-nothing.bin"] = bytes([0, 0]) + move0() + arc_endpoint(pt2(0, 0), raw(160), raw(160)) + ARC_PASS
+    out["scripted-arc-line.bin"] = bytes([0, 0]) + move0() + arc_endpoint(pt2(320, 0), bytes([A_ZERO]), raw(160)) + ARC_PASS
+    out["scripted-arc-endpoint-flag.bin"] = bytes([0, 0]) + move0() + arc_endpoint(pt2(320, 0), raw(160), raw(160), flags=0xF0)
+    out["scripted-arc-ellipse.bin"] = bytes([0, 0]) + move0() + arc_endpoint(pt2(160, 160), raw(320), raw(96), raw(30 * 16), flags=1) + ARC_PASS
+    # a full-turn circle by the centre form, in degrees (angle table index 4 is 360), beginning a subpath of its own
+    out["scripted-arc-full-turn.bin"] = bytes([0, 0]) + arc_center(pt2(0, 0), raw(160), raw(160), bytes([0]), A_DEG, bytes([0]),
+                                                                    bytes([4])) + ARC_PASS + identity_device()
+    # a conjugate form with a negative sweep and an explicit end, and an elliptical arc in turns
+    out["scripted-arc-conjugate.bin"] = bytes([0, 0]) + arc_conj(pt2(0, 0), pt2(160, 0), pt2(0, 80), A_DEG, bytes([0]), bytes([5])) + ARC_PASS
+    out["scripted-arc-conjugate-flag.bin"] = bytes([0, 0]) + arc_conj(pt2(0, 0), pt2(160, 0), pt2(0, 160), A_DEG, bytes([0]), bytes([2]), flags=1) + ARC_PASS
+    out["scripted-arc-conjugate-end.bin"] = bytes([0, 0]) + arc_conj(pt2(0, 0), pt2(160, 0), pt2(0, 160), 3, bytes([0]), bytes([13]), end=pt2(0, 160)) + ARC_PASS
+    out["scripted-arc-tangent.bin"] = bytes([0, 0]) + move0() + bytes([OP["ARC_TANGENT"]]) + pt2(160, 0) + pt2(160, 160) + raw(32) + ARC_PASS
+    out["scripted-arc-tangent-line.bin"] = bytes([0, 0]) + move0() + bytes([OP["ARC_TANGENT"]]) + pt2(160, 0) + pt2(320, 0) + raw(32)
+    out["scripted-arc-bulge.bin"] = bytes([0, 0]) + move0() + bytes([OP["ARC_BULGE"]]) + pt2(320, 0) + bytes([1]) + ARC_PASS
+    out["scripted-arc-bulge-infinite.bin"] = bytes([0, 0]) + move0() + bytes([OP["ARC_BULGE"]]) + pt2(320, 0) + bytes([10])
+    # a raw record: the end as the form gives it, a nudge inside the agreement bound (nudge 2), and past it (nudge 1: refused)
+    def raw_arc(nudge):
+        return (bytes([OP["ARC_RAW"]]) + pt2(0, 0) + pt2(160, 0) + pt2(0, 160) + bytes([A_DEG]) + bytes([0]) + bytes([1])
+                + bytes([1, nudge]))
+    out["scripted-arc-raw.bin"] = bytes([0, 0]) + raw_arc(0) + ARC_PASS
+    out["scripted-arc-raw-nudged.bin"] = bytes([0, 0]) + raw_arc(2) + ARC_PASS
+    out["scripted-arc-raw-disagree.bin"] = bytes([0, 0]) + raw_arc(1) + ARC_PASS
+    # the map: the identity, a scale by 0 and 1 (singular: refused), a rotation by 30 degrees, a non-uniform scale
+    out["scripted-arc-map.bin"] = bytes([0, 0]) + SEMI + bytes([OP["ARC_MAP"], 0])
+    out["scripted-arc-map-singular.bin"] = bytes([0, 0]) + SEMI + bytes([OP["ARC_MAP"], 1, 1, 0, 2])
+    out["scripted-arc-map-rotate.bin"] = bytes([0, 0]) + SEMI + bytes([OP["ARC_MAP"], 1, 2, 1]) + raw(480)
+    out["scripted-arc-map-nonuniform.bin"] = bytes([0, 0]) + SEMI + bytes([OP["ARC_MAP"], 1, 1]) + raw(32) + raw(16)
+    # an arc in a 3D path, the element cap, a point cap, a failed allocation at several places
+    out["scripted-arc-3d.bin"] = bytes([1, 0]) + move0() + arc_endpoint(pt2(320, 0), raw(160), raw(160))
+    out["scripted-arc-element-cap.bin"] = bytes([2 | (1 << 2), 0]) + SEMI + arc_endpoint(pt2(640, 0), raw(160), raw(160)) + ARC_PASS
+    for k, fail in enumerate((1, 3, 5, 7, 9, 12)):
+        out["scripted-arc-oom-%d.bin" % k] = bytes([128, fail]) + SEMI + ARC_PASS + identity_device() + bytes([OP["MEASURE"], 0])
+    out["scripted-arc-device.bin"] = bytes([0, 0]) + SEMI + identity_device() + bytes([OP["MEASURE"], 0, 10, 100, 200, 255, ONE])
+    return out
+
+
 def scripted():
     """Inputs that reach, by construction, the outcomes that random bytes reach only by luck."""
     out = {}
+    out.update(arc_scripted())
     out["scripted-nan.bin"] = bytes([0, 0, OP["MOVE"], NAN, 0])
     # options 2: max_elements 1, so the line after the move is refused by the cap.
     out["scripted-element-cap.bin"] = bytes([2, 0, OP["MOVE"], 0, 0, OP["LINE"], ONE, ONE])
@@ -183,8 +258,46 @@ def s_input(params, ops, opts=0, fail=0, tol=4, map_bytes=b"\x00", map3d=0, tail
     return bytes([opts, fail, tol]) + params + map_bytes + bytes([map3d]) + s_path(ops) + tail
 
 
-def stroke_scripted():
+def s_arc_endpoint(e, rx, ry, phi=bytes([0]), flags=2):
+    return bytes([7]) + e + rx + ry + phi + bytes([flags])
+
+
+S_ARC = [bytes([0]) + s_pt(0, 0), s_arc_endpoint(s_pt(320, 0), raw(160), raw(160))]
+S_ARC_ELLIPSE = [bytes([0]) + s_pt(0, 0), s_arc_endpoint(s_pt(160, 160), raw(320), raw(96), raw(30 * 16), 1)]
+S_ARC_CIRCLE = [bytes([8]) + s_pt(160, 0) + raw(160) + raw(160) + bytes([0, 1, 0, 8])]
+S_ARC_ROUNDED = [bytes([0]) + s_pt(0, 0), bytes([1]) + s_pt(240, 0), s_arc_endpoint(s_pt(320, 80), raw(80), raw(80)),
+                 bytes([1]) + s_pt(320, 160), s_arc_endpoint(s_pt(240, 240), raw(80), raw(80)), bytes([6])]
+S_ARC_TANGENT = [bytes([0]) + s_pt(0, 0), bytes([9]) + s_pt(160, 0) + s_pt(160, 160) + raw(32)]
+S_ARC_BULGE = [bytes([0]) + s_pt(0, 0), bytes([10]) + s_pt(320, 0) + raw(64)]
+
+
+def stroke_arc_scripted():
     out = {}
+    out["s-arc.bin"] = s_input(s_params(), S_ARC)
+    out["s-arc-ellipse.bin"] = s_input(s_params(join=1, cap=1), S_ARC_ELLIPSE)
+    out["s-arc-circle.bin"] = s_input(s_params(), S_ARC_CIRCLE)
+    out["s-arc-rounded.bin"] = s_input(s_params(join=1), S_ARC_ROUNDED)
+    out["s-arc-tangent.bin"] = s_input(s_params(join=3, limit=raw(64)), S_ARC_TANGENT)
+    out["s-arc-bulge.bin"] = s_input(s_params(cap=2), S_ARC_BULGE)
+    out["s-arc-arcs-join.bin"] = s_input(s_params(join=4, limit=raw(160)), S_ARC_ROUNDED)
+    out["s-arc-dashed.bin"] = s_input(s_params(cap=1, dash=bytes([6, 0, 5, 3, 0, 0])), S_ARC)
+    out["s-arc-dashed-closed.bin"] = s_input(s_params(join=1, dash=bytes([6, 1, 4, 3, 5, 0, 0])), S_ARC_ROUNDED)
+    out["s-arc-dashed-device.bin"] = s_input(s_params(space=1, cap=2, dash=bytes([6, 0, 5, 3, 3, 0])), S_ARC_ELLIPSE,
+                                             map_bytes=bytes([1, 1]) + raw(48) + raw(16))
+    out["s-arc-device.bin"] = s_input(s_params(space=1), S_ARC_CIRCLE, map_bytes=bytes([1, 1]) + raw(48) + raw(16))
+    out["s-arc-inside.bin"] = s_input(s_params(align=1, rule=1), S_ARC_ROUNDED)
+    out["s-arc-outside.bin"] = s_input(s_params(align=2), S_ARC_CIRCLE)
+    out["s-arc-curves.bin"] = s_input(s_params(join=1, cap=1), S_ARC_ELLIPSE, tail=bytes([0, 0]))
+    out["s-arc-curves-cubic.bin"] = s_input(s_params(join=1, cap=1), S_ARC_ROUNDED, tail=bytes([0, 1]))
+    out["s-arc-curves-aligned.bin"] = s_input(s_params(align=1, rule=1), S_ARC_ROUNDED, tail=bytes([1, 0]))
+    out["s-arc-rotated.bin"] = s_input(s_params(), S_ARC_ELLIPSE, map_bytes=bytes([1, 2, 1]) + raw(480))
+    out["s-arc-oom.bin"] = s_input(s_params(join=1, cap=1), S_ARC_ELLIPSE, opts=4, fail=9)
+    out["s-arc-limit.bin"] = s_input(s_params(join=1), S_ARC_ROUNDED, opts=2)
+    return out
+
+
+def stroke_scripted():
+    out = stroke_arc_scripted()
     out["s-drawn.bin"] = s_input(s_params(), S_POLY)
     out["s-empty.bin"] = s_input(s_params(width=bytes([S_ZERO])), S_POLY)
     # a map step of kind 1 (a scale) by 0 and 1: singular

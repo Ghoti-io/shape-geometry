@@ -32,7 +32,12 @@
  * in every unit and raw matrices, and the passes that read the path: bounds,
  * hash and dump, the 26.6 device path, the integer flattener at the default
  * tolerance and at another, the measured path and points along it, and the
- * orientation predicates.  A coordinate is drawn from a table of the degenerate
+ * orientation predicates.  Arcs (arc.h) are built by all three constructors (the endpoint form, the centre and
+ * conjugate forms, the tangent form and the bulge) and by appending a raw record whose ends agree with its centre
+ * form to a chosen bound or disagree past it; one pass maps the last arc, lowers every arc to its pieces, copies
+ * the path, and reads every arc back (the element is refused, the pieces chain end to end and meet the arc's own
+ * ends, the vertices are one per element); the device path and the measured path take the arcs the ops built.  A
+ * coordinate is drawn from a table of the degenerate
  * values (zeros of both signs, subnormals, the 26.6 range's edges, the map
  * limit, values past it, NaN and the infinities) or from the bytes.
  *
@@ -47,7 +52,10 @@
  *   widened by one unit (the flattener emits points of the curve, rounded once);
  * - the adaptive orientation predicates agree with the exact ones in sign;
  * - a point along a measured path is finite, and the clamped query at the
- *   length is the end of the path.
+ *   length is the end of the path;
+ * - an arc is refused as an element and read back whole, its pieces (at most four) chain bit for bit from its start
+ *   to its end, the lowered path holds no arc and has the arc path's box, a copy is equal, a mapped arc keeps the
+ *   circular flag only under a similarity, and the endpoint form's result kind says what it added.
  *
  * The replay fails if the corpus never reaches an outcome (each refusal kind
  * and each success): tools/gen-fuzz-corpus.py writes it.
@@ -73,6 +81,8 @@
 enum {
   OUT_PATH_INVALID = 0, OUT_PATH_LIMIT, OUT_DEVICE_OK, OUT_DEVICE_RANGE, OUT_FLAT_OK, OUT_FLAT_LIMIT, OUT_FLAT_TOLERANCE,
   OUT_MEASURED_OK, OUT_MEASURED_REFUSED, OUT_OOM, OUT_GRID_ALIGNED, OUT_MAP_INVALID, OUT_ORIENT_ZERO, OUT_CURVED,
+  OUT_ARC, OUT_ARC_LINE, OUT_ARC_NOTHING, OUT_ARC_CIRCULAR, OUT_ARC_DISAGREE, OUT_ARC_MAPPED, OUT_ARC_MAP_REFUSED,
+  OUT_ARC_LOWERED, OUT_ARC_VERTICES, OUT_ARC_COPIED, OUT_ARC_FULL_TURN, OUT_ARC_DEVICE,
   OUT_COUNT
 };
 
@@ -80,7 +90,10 @@ static const char * const outcome_names[OUT_COUNT] = {"a non-finite point refuse
     "a device path", "a device coordinate out of the 26.6 range", "a flattened path", "a flattened path's point cap",
     "a tolerance below the minimum", "a measured path", "a measured path refused", "a failed allocation",
     "a grid-aligned map", "an invalid map refused", "a degenerate orientation (sign 0)",
-    "a device path holding a curve"};
+    "a device path holding a curve", "an arc added", "an arc constructor's line", "an endpoint form that adds nothing",
+    "a circular arc", "a record whose ends disagree with its centre form, refused", "a mapped arc", "a mapped arc refused",
+    "a path with arcs lowered", "the vertices of a path with an arc", "a path with an arc copied", "a full-turn arc",
+    "a device path of an arc"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -196,6 +209,39 @@ static void weights(Input * in, double * w, int n) {
   for (int i = 0; i < n; i++) {
     w[i] = table[next(in) % (sizeof table / sizeof table[0])];
   }
+}
+
+static double absd(double x) {
+  return x < 0.0 ? -x : x;
+}
+
+/** A radius: a table of the degenerate and ordinary values, or a number in 1/16 from two bytes. */
+static double radius(Input * in) {
+  static const double table[] = {0.0, -0.0, 1.0, 2.0, 0.5, 100.0, -3.0, 1e-9, 1e9, 1e300, 0x1p100, 0x1p-1000, 4.0, 8.0};
+  const uint8_t pick = next(in);
+  if (pick < 16) {
+    const size_t n = sizeof table / sizeof table[0];
+    volatile double zero = 0.0;
+    return pick < n ? table[pick] : (pick == 14 ? zero / zero : 1.0 / zero);
+  }
+  const unsigned hi = next(in);
+  const unsigned lo = next(in);
+  return (double)(int16_t)(uint16_t)((hi << 8) | lo) / 16.0;
+}
+
+/** An angle (in whatever unit the op names): the quarter turns, odd angles, past the limit, and bytes. */
+static double angle(Input * in) {
+  static const double table[] = {0.0, 90.0, 180.0, 270.0, 360.0, -90.0, 720.0, 45.5, -30.0, 1.5707963267948966, 3.141592653589793,
+      6.283185307179586, 0.25, 0.5, 1.0, 1e9, 1e300, 0x1p40, 4.0, 100.0, 200.0, 400.0};
+  const uint8_t pick = next(in);
+  if (pick < 24) {
+    const size_t n = sizeof table / sizeof table[0];
+    volatile double zero = 0.0;
+    return pick < n ? table[pick] : (pick == 22 ? zero / zero : 1.0 / zero);
+  }
+  const unsigned hi = next(in);
+  const unsigned lo = next(in);
+  return (double)(int16_t)(uint16_t)((hi << 8) | lo) / 16.0;
 }
 
 static int32_t fixed(Input * in) {
@@ -317,6 +363,14 @@ static void device_passes(Input * in, const GSHGEOM_Path * path, const GSHGEOM_A
     return;
   }
   outcomes[OUT_DEVICE_OK]++;
+  {
+    int has_arc = 0;
+    for (size_t i = 0; i < gshgeom_path_element_count(path); i++) {
+      GSHGEOM_Verb verb;
+      has_arc |= gshgeom_path_verb(path, i, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC;
+    }
+    outcomes[OUT_ARC_DEVICE] += has_arc;
+  }
   CHECK(gshgeom_device_path_element_count(device) <= limits->max_elements);
   for (size_t i = 0; i < gshgeom_device_path_element_count(device); i++) {
     GSHGEOM_Device_Element e;
@@ -405,10 +459,205 @@ static void orient(Input * in, int dim) {
   CHECK(a != GSHGEOM_OK || fast == exact);
 }
 
+/* --- arcs ------------------------------------------------------------------------------------------- */
+
+static int same_bits(double a, double b) {
+  return memcmp(&a, &b, sizeof a) == 0;
+}
+
+static int same_point(GSHGEOM_Point a, GSHGEOM_Point b) {
+  return same_bits(a.x, b.x) && same_bits(a.y, b.y);
+}
+
+static int finite(double v) {
+  return v - v == 0.0;
+}
+
+/** The pieces of an arc chain bit for bit from its start to its end (AR8), at most four, with weights in (0, 1]. */
+static void check_pieces(const GSHGEOM_Arc * a) {
+  GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
+  int n = 0;
+  const GSHGEOM_Result pr = gshgeom_arc_pieces(a, pieces, &n);
+  if (pr != GSHGEOM_OK) {
+    fprintf(stderr, "arc pieces %d: start %a %a end %a %a c %a %a u %a %a v %a %a unit %d t0 %a sweep %a flags %u\n", (int)pr, a->start.x,
+        a->start.y, a->end.x, a->end.y, a->center.x, a->center.y, a->u.x, a->u.y, a->v.x, a->v.y, (int)a->unit, a->t0, a->sweep, a->flags);
+  }
+  CHECK(pr == GSHGEOM_OK);
+  CHECK(n >= 1 && n <= GSHGEOM_ARC_MAX_PIECES);
+  CHECK(same_point(pieces[0].p[0], a->start) && same_point(pieces[n - 1].p[2], a->end));
+  for (int k = 0; k < n; k++) {
+    CHECK(pieces[k].kind == GSHGEOM_CURVE_RATIONAL_QUADRATIC);
+    CHECK(pieces[k].w[0] == 1.0 && pieces[k].w[2] == 1.0 && pieces[k].w[1] > 0.0 && pieces[k].w[1] <= 1.0);
+    if (k + 1 < n) {
+      CHECK(same_point(pieces[k].p[2], pieces[k + 1].p[0]));
+    }
+  }
+}
+
+/** Element @p i is an arc: refused as an element, read back whole and chained. */
+static void check_arc_at(const GSHGEOM_Path * path, size_t i) {
+  GSHGEOM_Verb verb;
+  GSHGEOM_Element el;
+  GSHGEOM_Arc a;
+  CHECK(gshgeom_path_verb(path, i, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC);
+  CHECK(gshgeom_path_element(path, i, &el) == GSHGEOM_ERR_UNSUPPORTED);
+  CHECK(gshgeom_path_arc(path, i, &a) == GSHGEOM_OK);
+  CHECK(finite(a.t0) && finite(a.sweep) && a.sweep != 0.0);
+  CHECK((a.flags & ~GSHGEOM_ARC_CIRCULAR) == 0u);
+  check_pieces(&a);
+  if (i > 0) {
+    /* the start is the end of the element before it, bit for bit */
+    GSHGEOM_Verb pv;
+    CHECK(gshgeom_path_verb(path, i - 1, &pv) == GSHGEOM_OK);
+    if (pv == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Arc pa;
+      CHECK(gshgeom_path_arc(path, i - 1, &pa) == GSHGEOM_OK && same_point(pa.end, a.start));
+    } else {
+      GSHGEOM_Element pe;
+      CHECK(gshgeom_path_element(path, i - 1, &pe) == GSHGEOM_OK);
+      CHECK(same_point(pe.curve.p[gshgeom_curve_point_count(pe.curve.kind) - 1], a.start));
+    }
+  }
+}
+
+typedef struct VertexCount {
+  size_t n;
+  size_t last_element;
+  int ordered;
+} VertexCount;
+
+static GSHGEOM_Result count_vertex(const GSHGEOM_Vertex * v, void * ctx) {
+  VertexCount * c = ctx;
+  c->ordered = c->ordered && (c->n == 0 || v->element == c->last_element + 1) && v->element == c->n;
+  c->last_element = v->element;
+  c->n++;
+  CHECK(finite(v->point.x) && finite(v->point.y));
+  CHECK(finite(v->direction.x) && finite(v->direction.y));
+  const double len2 = v->direction.x * v->direction.x + v->direction.y * v->direction.y;
+  CHECK(len2 > 0.99999 && len2 < 1.00001);
+  return GSHGEOM_OK;
+}
+
+/** Every reader that takes an arc, on the path as it is: the readback, the vertices, the copy, the lowering. */
+static void arc_passes(const GSHGEOM_Path * path, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits) {
+  const size_t n = gshgeom_path_element_count(path);
+  size_t arcs = 0;
+  for (size_t i = 0; i < n; i++) {
+    GSHGEOM_Verb verb;
+    CHECK(gshgeom_path_verb(path, i, &verb) == GSHGEOM_OK);
+    if (verb == GSHGEOM_VERB_ARC) {
+      check_arc_at(path, i);
+      arcs++;
+    } else {
+      GSHGEOM_Arc a;
+      CHECK(gshgeom_path_arc(path, i, &a) == GSHGEOM_ERR_INVALID);
+    }
+  }
+  CHECK(gshgeom_path_verb(path, n, &(GSHGEOM_Verb){GSHGEOM_VERB_MOVE}) == GSHGEOM_ERR_INVALID);
+  if (gshgeom_path_dimension(path) == 2) {
+    VertexCount vc = {0, 0, 1};
+    size_t want = 0;
+    CHECK(gshgeom_path_vertex_count(path, &want) == GSHGEOM_OK && want == n);
+    CHECK(gshgeom_path_vertices(path, count_vertex, &vc) == GSHGEOM_OK);
+    CHECK(vc.n == n && vc.ordered);
+    outcomes[OUT_ARC_VERTICES] += arcs > 0;
+  }
+  GSHGEOM_Path * copy = NULL;
+  GSHGEOM_Result r = gshgeom_path_copy(path, alloc, limits, &copy);
+  CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_OOM);
+  if (copy) {
+    CHECK(gshgeom_path_equal(path, copy) && gshgeom_path_hash(path) == gshgeom_path_hash(copy));
+    gshgeom_path_destroy(copy);
+    outcomes[OUT_ARC_COPIED] += arcs > 0;
+  }
+  GSHGEOM_Path * low = NULL;
+  r = gshgeom_path_lower_arcs(path, alloc, limits, &low);
+  CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_LIMIT || r == GSHGEOM_ERR_OOM);
+  CHECK((r == GSHGEOM_OK) == (low != NULL));
+  if (low) {
+    for (size_t i = 0; i < gshgeom_path_element_count(low); i++) {
+      GSHGEOM_Verb verb;
+      CHECK(gshgeom_path_verb(low, i, &verb) == GSHGEOM_OK && verb != GSHGEOM_VERB_ARC);
+    }
+    CHECK(arcs > 0 || gshgeom_path_equal(low, path));
+    GSHGEOM_Bounds a, b;
+    CHECK(gshgeom_path_bounds(path, &a) == GSHGEOM_OK && gshgeom_path_bounds(low, &b) == GSHGEOM_OK);
+    CHECK(a.empty == b.empty);
+    CHECK(a.empty || (same_bits(a.min.x, b.min.x) && same_bits(a.min.y, b.min.y) && same_bits(a.max.x, b.max.x) &&
+                      same_bits(a.max.y, b.max.y)));
+    gshgeom_path_destroy(low);
+    outcomes[OUT_ARC_LOWERED] += arcs > 0;
+  }
+}
+
+/** Map the last arc of the path by a map built from the input (AR11). */
+static void arc_map(Input * in, const GSHGEOM_Path * path) {
+  GSHGEOM_Map map;
+  const size_t n = gshgeom_path_element_count(path);
+  GSHGEOM_Arc a;
+  size_t at = n;
+  for (size_t i = n; i > 0 && at == n; i--) {
+    GSHGEOM_Verb verb;
+    if (gshgeom_path_verb(path, i - 1, &verb) == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC) {
+      at = i - 1;
+    }
+  }
+  if (build_map(in, &map) != GSHGEOM_OK || at == n || gshgeom_path_arc(path, at, &a) != GSHGEOM_OK) {
+    return;
+  }
+  GSHGEOM_Arc out;
+  GSHGEOM_Result r = gshgeom_arc_map(&map, &a, &out);
+  CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_INVALID || r == GSHGEOM_ERR_LIMIT);
+  if (r != GSHGEOM_OK) {
+    outcomes[OUT_ARC_MAP_REFUSED]++;
+    return;
+  }
+  outcomes[OUT_ARC_MAPPED]++;
+  /* the circular flag is kept only by a similarity, and only if it was there */
+  const unsigned not_similar = GSHGEOM_MAP_SCALES_NONUNIFORM | GSHGEOM_MAP_SKEWS | GSHGEOM_MAP_SINGULAR | GSHGEOM_MAP_GENERAL;
+  CHECK((out.flags & GSHGEOM_ARC_CIRCULAR) == 0u || ((a.flags & GSHGEOM_ARC_CIRCULAR) && (map.kind & not_similar) == 0u));
+  CHECK((a.flags & GSHGEOM_ARC_CIRCULAR) == 0u || (map.kind & not_similar) != 0u || (out.flags & GSHGEOM_ARC_CIRCULAR));
+  CHECK(out.unit == a.unit && same_bits(out.t0, a.t0) && same_bits(out.sweep, a.sweep));
+  GSHGEOM_Point centre;
+  double rad;
+  int ccw;
+  r = gshgeom_arc_circle(&out, &centre, &rad, &ccw);
+  CHECK((r == GSHGEOM_OK) == ((out.flags & GSHGEOM_ARC_CIRCULAR) != 0u));
+  CHECK(r != GSHGEOM_OK || (rad >= 0.0 && finite(rad)));
+  /* a map is a map: mapping the mapped arc's start and end again by the inverse is not asked; its pieces chain */
+  check_pieces(&out);
+}
+
+/** The result of an arc-adding op: a refusal changes nothing; an addition is an arc whose ends and flag are as asked. */
+static void arc_added(const GSHGEOM_Path * path, size_t before) {
+  const size_t n = gshgeom_path_element_count(path);
+  CHECK(n >= before);
+  if (n > before) {
+    GSHGEOM_Verb verb;
+    CHECK(gshgeom_path_verb(path, n - 1, &verb) == GSHGEOM_OK);
+    if (verb == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Arc a;
+      check_arc_at(path, n - 1);
+      CHECK(gshgeom_path_arc(path, n - 1, &a) == GSHGEOM_OK);
+      const double turn = a.unit == GSHGEOM_ANGLE_RADIANS ? 6.283185307179586
+          : (a.unit == GSHGEOM_ANGLE_DEGREES ? 360.0 : (a.unit == GSHGEOM_ANGLE_GRADIANS ? 400.0 : 1.0));
+      outcomes[OUT_ARC]++;
+      outcomes[OUT_ARC_CIRCULAR] += (a.flags & GSHGEOM_ARC_CIRCULAR) != 0u;
+      outcomes[OUT_ARC_FULL_TURN] += absd(a.sweep) >= turn;
+      /* a full turn closes to the bit */
+      CHECK(absd(a.sweep) < turn || same_point(a.start, a.end));
+    } else {
+      CHECK(verb == GSHGEOM_VERB_LINE);
+      outcomes[OUT_ARC_LINE]++;
+    }
+  }
+}
+
 /* --- the entry point ---------------------------------------------------------------------------------- */
 
 enum { OP_MOVE, OP_LINE, OP_QUAD, OP_CUBIC, OP_RQUAD, OP_RCUBIC, OP_CLOSE, OP_MOVE_FIXED, OP_LINE_FIXED,
-       OP_QUAD_FIXED, OP_CUBIC_FIXED, OP_DEVICE, OP_MEASURE, OP_ORIENT, OP_BOUNDS, OP_COUNT };
+       OP_QUAD_FIXED, OP_CUBIC_FIXED, OP_DEVICE, OP_MEASURE, OP_ORIENT, OP_BOUNDS, OP_ARC_ENDPOINT, OP_ARC_CENTER, OP_ARC_CONJUGATE,
+       OP_ARC_TANGENT, OP_ARC_BULGE, OP_ARC_RAW, OP_ARC_PASS, OP_ARC_MAP, OP_COUNT };
 
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
 
@@ -507,6 +756,153 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         r = gshgeom_path_cubic_to_fixed(path, v[0], v[1], v[2], v[3], v[4], v[5], next(&in) % 40);
         break;
       }
+      case OP_ARC_ENDPOINT: {
+        GSHGEOM_Point e = point(&in, dim);
+        const double rx = radius(&in);
+        const double ry = radius(&in);
+        const double phi = angle(&in);
+        const GSHGEOM_Angle_Unit unit = (GSHGEOM_Angle_Unit)(next(&in) % 5);
+        const uint8_t fl = next(&in);
+        /* a flag that is neither 0 nor 1 is refused: one input in sixteen asks for it */
+        const int large = (fl & 1) | ((fl & 0xF0) == 0xF0 ? 2 : 0), sweep = ((fl >> 1) & 1) | ((fl & 0xF0) == 0xE0 ? 2 : 0);
+        GSHGEOM_Arc_Kind kind = GSHGEOM_ARC_KIND_ARC;
+        r = gshgeom_path_arc_endpoint_to(path, e, rx, ry, phi, unit, large, sweep, &kind);
+        if (r == GSHGEOM_OK) {
+          CHECK(dim == 2);
+          const size_t now = gshgeom_path_element_count(path);
+          outcomes[OUT_ARC_NOTHING] += kind == GSHGEOM_ARC_KIND_NOTHING;
+          CHECK(kind == GSHGEOM_ARC_KIND_NOTHING ? (now == before && gshgeom_path_hash(path) == hash_before) : now == before + 1);
+          if (kind == GSHGEOM_ARC_KIND_ARC) {
+            GSHGEOM_Arc a;
+            CHECK(gshgeom_path_arc(path, now - 1, &a) == GSHGEOM_OK);
+            /* the end is what the caller gave, to the bit; the circular flag says the radii were equal */
+            CHECK(same_bits(a.end.x, e.x) && same_bits(a.end.y, e.y));
+            CHECK(((a.flags & GSHGEOM_ARC_CIRCULAR) != 0u) == (absd(rx) == absd(ry)));
+            CHECK(a.unit == GSHGEOM_ANGLE_RADIANS && absd(a.sweep) <= 6.2831853071795873);
+          }
+        }
+        if (r == GSHGEOM_OK && kind != GSHGEOM_ARC_KIND_NOTHING) {
+          arc_added(path, before);
+        }
+        break;
+      }
+      case OP_ARC_CENTER: {
+        GSHGEOM_Point c = point(&in, dim);
+        const double rx = radius(&in);
+        const double ry = radius(&in);
+        const double phi = angle(&in);
+        const GSHGEOM_Angle_Unit unit = (GSHGEOM_Angle_Unit)(next(&in) % 5);
+        const double t0 = angle(&in);
+        const double sweep = angle(&in);
+        const int has_end = next(&in) & 1;
+        GSHGEOM_Point e = point(&in, dim);
+        r = gshgeom_path_arc_center_to(path, c, rx, ry, phi, unit, t0, sweep, has_end ? &e : NULL);
+        if (r == GSHGEOM_OK) {
+          arc_added(path, before);
+        }
+        break;
+      }
+      case OP_ARC_CONJUGATE: {
+        GSHGEOM_Arc_Form f;
+        f.center = point(&in, dim);
+        f.u = point(&in, dim);
+        f.v = point(&in, dim);
+        f.unit = (GSHGEOM_Angle_Unit)(next(&in) % 5);
+        f.t0 = angle(&in);
+        f.sweep = angle(&in);
+        f.flags = next(&in) % 3; /* 2 is no flag the record knows */
+        const int has_end = next(&in) & 1;
+        GSHGEOM_Point e = point(&in, dim);
+        r = gshgeom_path_arc_conjugate_to(path, &f, has_end ? &e : NULL);
+        if (r == GSHGEOM_OK) {
+          arc_added(path, before);
+        }
+        break;
+      }
+      case OP_ARC_TANGENT: {
+        GSHGEOM_Point p1 = point(&in, dim);
+        GSHGEOM_Point p2 = point(&in, dim);
+        r = gshgeom_path_arc_tangent_to(path, p1, p2, radius(&in));
+        if (r == GSHGEOM_OK) {
+          arc_added(path, before);
+        }
+        break;
+      }
+      case OP_ARC_BULGE: {
+        static const double bulges[] = {0.0, 1.0, -1.0, 0.5, 1e-9, 1e9, 0.41421356237309503, -2.0, 1e300};
+        GSHGEOM_Point q = point(&in, dim);
+        const uint8_t pick = next(&in);
+        volatile double zero = 0.0;
+        const double bulge = pick < 9 ? bulges[pick] : (pick == 9 ? zero / zero : (pick == 10 ? 1.0 / zero : 0.25 * (double)(pick - 128)));
+        r = gshgeom_path_arc_bulge_to(path, q, bulge);
+        if (r == GSHGEOM_OK) {
+          arc_added(path, before);
+        }
+        break;
+      }
+      case OP_ARC_RAW: {
+        /* A record built from a centre form, begun by a move to its start: its end is the form's to the bit, a nudge
+         * inside the agreement bound, or a nudge past it (which must be refused). */
+        GSHGEOM_Arc_Form f;
+        f.center = point(&in, dim);
+        f.u = point(&in, dim);
+        f.v = point(&in, dim);
+        f.unit = (GSHGEOM_Angle_Unit)(next(&in) % 5);
+        f.t0 = angle(&in);
+        f.sweep = angle(&in);
+        f.flags = next(&in) % 3;
+        const uint8_t nudge = next(&in) % 3;
+        GSHGEOM_Arc a;
+        GSHGEOM_Point s, e;
+        if (gshgeom_arc_point(&f, f.t0, &s) != GSHGEOM_OK || gshgeom_arc_point(&f, f.t0 + f.sweep, &e) != GSHGEOM_OK ||
+            !finite(s.x) || !finite(s.y) || !finite(e.x) || !finite(e.y)) {
+          continue;
+        }
+        const double scale = absd(f.u.x) + absd(f.u.y) + absd(f.v.x) + absd(f.v.y) + absd(f.center.x) + absd(f.center.y) +
+            absd(s.x) + absd(s.y) + absd(e.x) + absd(e.y);
+        if (nudge == 1) {
+          e.x += scale * 0x1p-30; /* far past the agreement bound, 2^-40 of the scale */
+        } else if (nudge == 2) {
+          e.x += scale * 0x1p-48;
+        }
+        r = gshgeom_path_move_to(path, s);
+        if (r != GSHGEOM_OK) {
+          break;
+        }
+        const size_t b2 = gshgeom_path_element_count(path);
+        const uint64_t h2 = gshgeom_path_hash(path);
+        a.start = s;
+        a.end = e;
+        a.center = f.center;
+        a.u = f.u;
+        a.v = f.v;
+        a.unit = f.unit;
+        a.t0 = f.t0;
+        a.sweep = f.sweep;
+        a.flags = f.flags;
+        r = gshgeom_path_append_arc(path, &a);
+        CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_INVALID || r == GSHGEOM_ERR_LIMIT || r == GSHGEOM_ERR_OOM);
+        if (r != GSHGEOM_OK) {
+          CHECK(gshgeom_path_element_count(path) == b2 && gshgeom_path_hash(path) == h2);
+          outcomes[OUT_ARC_DISAGREE] += nudge == 1 && r == GSHGEOM_ERR_INVALID;
+        } else {
+          CHECK(nudge != 1 && dim == 2);
+          arc_added(path, b2);
+        }
+        outcomes[OUT_PATH_INVALID] += r == GSHGEOM_ERR_INVALID;
+        outcomes[OUT_PATH_LIMIT] += r == GSHGEOM_ERR_LIMIT;
+        outcomes[OUT_OOM] += r == GSHGEOM_ERR_OOM;
+        CHECK(gshgeom_path_element_count(path) <= limits.max_elements);
+        continue;
+      }
+      case OP_ARC_PASS:
+        arc_passes(path, &alloc, &limits);
+        continue;
+      case OP_ARC_MAP:
+        if (dim == 2) {
+          arc_map(&in, path);
+        }
+        continue;
       case OP_DEVICE:
         if (dim == 2) {
           device_passes(&in, path, &alloc, &limits, sink);
