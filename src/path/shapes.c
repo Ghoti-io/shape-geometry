@@ -46,14 +46,10 @@ static int is_finite_num(double v) {
   return v - v == 0.0;
 }
 
-/** The correctly rounded `a + b`, `+0` when it is exactly zero. */
-static double sum2(double a, double b) {
-  GSHGEOM_ExactSum s;
-  gshgeom_exact_sum_init(&s);
-  gshgeom_exact_sum_add(&s, 0, 1, &a);
-  gshgeom_exact_sum_add(&s, 0, 1, &b);
-  return gshgeom_exact_sum_to_double(&s);
-}
+/*
+ * A sum of two doubles is `a + b`: IEEE addition rounds once, to nearest even, from the exact sum, and an exact zero is `+0`
+ * (no contraction and no x87: tools/check-fp-contract.sh and tools/check-no-x87.sh).  A sum of three is the exact-sum facility's.
+ */
 
 /** The correctly rounded `a + b - c`. */
 static double sum3(double a, double b, double c) {
@@ -77,7 +73,7 @@ static int over(double a, double b, double c) {
 
 /** The distance @p a from the left edge (`x + a`; a zero distance is `x`, bit for bit). */
 static double from_near(double x, double a) {
-  return a == 0.0 ? x : sum2(x, a);
+  return a == 0.0 ? x : x + a;
 }
 
 /** The distance @p a from the far edge (`x + w - a`). */
@@ -96,7 +92,7 @@ static GSHGEOM_Point pt(double x, double y) {
 }
 
 static int out_of_range(double v) {
-  return !(absd(v) <= GSHGEOM_COORD_LIMIT);
+  return absd(v) > GSHGEOM_COORD_LIMIT; /* an overflow to infinity is past it */
 }
 
 static GSHGEOM_Corner canonical(GSHGEOM_Corner c) {
@@ -116,9 +112,7 @@ GSHGEOM_Result gshgeom_rounded_rect_check(double w, double h, const GSHGEOM_Corn
       return GSHGEOM_ERR_INVALID;
     }
   }
-  if (w < 0.0 || h < 0.0) {
-    return GSHGEOM_ERR_INVALID;
-  }
+  /* A negative width or height is an overlap: the radii are not negative, so their sums are not under it. */
   for (unsigned i = 0; i < 4; i++) {
     if (r[i].rx < 0.0 || r[i].ry < 0.0) {
       return GSHGEOM_ERR_INVALID;
@@ -167,9 +161,6 @@ static GSHGEOM_Result add_rect(
   if (!is_finite_num(x) || !is_finite_num(y) || !is_finite_num(w) || !is_finite_num(h) || w < 0.0 || h < 0.0) {
     return GSHGEOM_ERR_INVALID;
   }
-  if (out_of_range(w) || out_of_range(h)) {
-    return GSHGEOM_ERR_LIMIT;
-  }
   GSHGEOM_Point p[4];
   r = rect_points(x, y, w, h, flip_x, flip_y, p);
   return r == GSHGEOM_OK ? emit_rect(path, p) : r;
@@ -203,16 +194,13 @@ static GSHGEOM_Result add_rounded_rect(
     round[i] = c[i].rx != 0.0;
     any |= round[i];
   }
-  if (out_of_range(w) || out_of_range(h)) {
-    return GSHGEOM_ERR_LIMIT;
-  }
   if (!any) {
     GSHGEOM_Point p[4];
     GSHGEOM_Result e = rect_points(x, y, w, h, 0, 0, p);
     return e == GSHGEOM_OK ? emit_rect(path, p) : e;
   }
-  /* The corners in the order top-left, top-right, bottom-right, bottom-left.  A radius is at most the side it lies on (the overlap
-   * rule), so the limit on the width and the height bounds them. */
+  /* The corners in the order top-left, top-right, bottom-right, bottom-left.  A radius past the limit is refused by the arc that holds
+   * it, after the points here are checked. */
   const double rtl_x = c[0].rx, rtl_y = c[0].ry, rtr_x = c[1].rx, rtr_y = c[1].ry;
   const double rbr_x = c[2].rx, rbr_y = c[2].ry, rbl_x = c[3].rx, rbl_y = c[3].ry;
   const GSHGEOM_Point start = pt(from_near(x, rtl_x), y);
@@ -266,7 +254,7 @@ static GSHGEOM_Result add_ellipse(
   if (begin(path) != GSHGEOM_OK || (flip_x != 0 && flip_x != 1) || (flip_y != 0 && flip_y != 1)) {
     return GSHGEOM_ERR_INVALID;
   }
-  if (!is_finite_num(cx) || !is_finite_num(cy) || !is_finite_num(rx) || !is_finite_num(ry) || !(rx > 0.0) || !(ry > 0.0)) {
+  if (!is_finite_num(cx) || !is_finite_num(cy) || !is_finite_num(rx) || !is_finite_num(ry) || rx <= 0.0 || ry <= 0.0) {
     return GSHGEOM_ERR_INVALID;
   }
   const double sx = flip_x ? -rx : rx;
@@ -274,9 +262,9 @@ static GSHGEOM_Result add_ellipse(
   const GSHGEOM_Point c = pt(cx, cy);
   const GSHGEOM_Point u = pt(sx, 0.0);
   const GSHGEOM_Point v = pt(0.0, sy);
-  /* The ends `cx +- sx` and `cy +- sy` are checked, and a centre or a radius past the limit puts one of the pair past it. */
+  /* The ends `cx +- sx` and `cy +- sy` are checked; a centre or a radius past the limit puts one of each pair past it. */
   const GSHGEOM_Point e[4] = {
-      pt(sum2(cx, sx), cy), pt(cx, sum2(cy, sy)), pt(sum2(cx, -sx), cy), pt(cx, sum2(cy, -sy))};
+      pt(cx + sx, cy), pt(cx, cy + sy), pt(cx - sx, cy), pt(cx, cy - sy)};
   for (unsigned i = 0; i < 4; i++) {
     if (out_of_range(e[i].x) || out_of_range(e[i].y)) {
       return GSHGEOM_ERR_LIMIT;

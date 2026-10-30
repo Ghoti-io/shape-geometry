@@ -165,7 +165,7 @@ def add_rect(x, y, w, h, fx, fy):
     else:
         b = Box(x, y, w, h, fx, fy)
         el, p = rect_elems(b)
-        if too_big(w) or too_big(h) or any(too_big(c) for q in p for c in q):
+        if any(too_big(c) for q in p for c in q):
             res, el = "GSHGEOM_ERR_LIMIT", []
     cases.append((0, [x, y, w, h], [0.0] * 8, fx, fy, res, el))
 
@@ -179,8 +179,8 @@ def add_rrect(x, y, w, h, r):
     else:
         el, _ = rrect_elems(x, y, w, h, r)
         pts = [q for e in el for q in e[1:4] if isinstance(q, tuple)]
-        radii = [v for k in r for v in k]
-        if too_big(w) or too_big(h) or any(too_big(v) for v in radii) or any(too_big(c) for q in pts for c in q):
+        radii = [v for k in (((0.0, 0.0) if (a == 0 or d == 0) else (a, d)) for a, d in r) for v in k]
+        if any(too_big(v) for v in radii if v) or any(too_big(c) for q in pts for c in q):
             res, el = "GSHGEOM_ERR_LIMIT", []
     cases.append((1, [x, y, w, h], rr, 0, 0, res, el))
 
@@ -192,7 +192,7 @@ def add_ellipse(cx, cy, rx, ry, fx, fy):
         res = "GSHGEOM_ERR_INVALID"
     else:
         el, ends = ellipse_elems(cx, cy, rx, ry, fx, fy)
-        if any(too_big(v) for v in (cx, cy, rx, ry)) or any(too_big(c) for q in ends for c in q):
+        if any(too_big(c) for q in ends for c in q):
             res, el = "GSHGEOM_ERR_LIMIT", []
     cases.append((2, [cx, cy, rx, ry], [0.0] * 8, fx, fy, res, el))
 
@@ -209,6 +209,14 @@ for b in boxes:
         for fy in (0, 1):
             add_rect(*b, fx, fy)
 
+# near the top of the double range: a sum overflows to infinity, which is past the limit (not an invalid number)
+HUGE = 1.7976931348623157e308
+for b in ((HUGE, 0.0, HUGE, 1.0), (0.0, HUGE, 1.0, HUGE), (-HUGE, -HUGE, HUGE, HUGE), (1e308, 1e308, 1e308, 1e308),
+          (0.0, 2.0 ** 99, 1.0, 2.0 ** 99 + 2.0 ** 48), (0.0, -(2.0 ** 99), 1.0, -(2.0 ** 99) - 2.0 ** 48),
+          (0.0, -BIG, 1.0, BIG), (-BIG, -BIG, BIG, BIG), (BIG, 0.0, 0.0, 0.0), (0.0, BIG, 0.0, 1.0)):
+    for fx in (0, 1):
+        for fy in (0, 1):
+            add_rect(*b, fx, fy)
 R = lambda *a: [(a[i], a[i + 1]) for i in range(0, 8, 2)]
 rr_boxes = [(10.0, 20.0, 100.0, 60.0), (0.0, 0.0, 40.0, 40.0), (-7.5, 3.25, 31.0, 17.0), (1e16, 1e16, 64.0, 64.0)]
 radii = [R(0, 0, 0, 0, 0, 0, 0, 0), R(10, 10, 0, 0, 0, 0, 0, 0), R(0, 0, 8, 6, 0, 0, 0, 0), R(0, 0, 0, 0, 5, 5, 0, 0),
@@ -261,12 +269,34 @@ add_rrect(BIG, 0.0, 1.0, 5.0, R(1, 1, 0, 0, 0, 0, 0, 0))
 add_rrect(BIG, 0.0, 1.0, 5.0, R(0, 0, 0, 0, 0, 0, 0, 0))
 add_rrect(-BIG, -BIG, BIG, BIG, R(BIG / 2, BIG / 2, 0, 0, 0, 0, 0, 0))
 add_rrect(1e-300, 1e-300, 1e-300, 1e-300, R(1e-301, 1e-301, 0, 0, 0, 0, 0, 0))
+# a non-finite or negative component beside a zero one (the zero would make the corner square and hide it)
+for bad in (float("nan"), float("inf"), float("-inf"), -1.0, -0.5):
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(0, bad, 0, 0, 0, 0, 0, 0))
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(bad, 0, 0, 0, 0, 0, 0, 0))
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(0, 0, 0, 0, 0, 0, 2, bad))
+    add_rrect(0.0, 0.0, 10.0, 10.0, R(0, 0, 0, 0, 0, 0, bad, 2))
+add_rrect(0.0, float("nan"), 10.0, 10.0, R(1, 1, 0, 0, 0, 0, 0, 0))
+add_rrect(0.0, float("inf"), 10.0, 10.0, R(1, 1, 0, 0, 0, 0, 0, 0))
+add_rrect(float("inf"), 0.0, 10.0, 10.0, R(0, 0, 0, 0, 0, 0, 0, 0))
+add_rrect(0.0, float("nan"), 10.0, 10.0, R(0, 0, 0, 0, 0, 0, 0, 0))
+# the limit, as the derived points and the arcs' half-diameters see it
+add_rrect(HUGE, 0.0, HUGE, 10.0, R(1, 1, 0, 0, 0, 0, 0, 0))
+add_rrect(0.0, HUGE, 10.0, HUGE, R(0, 0, 1, 1, 0, 0, 0, 0))
+add_rrect(BIG / 2, BIG / 2, BIG / 2 + 2.0 ** 48, 4.0, R(0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25))
+add_rrect(-BIG, -BIG, 2.0 * BIG, 2.0 * BIG, R(1.5 * BIG, 1, 0.5 * BIG, 1, 0, 0, 0, 0))
+add_rrect(-BIG, 0.0, 2.0 * BIG, 10.0, R(BIG, 2, BIG, 2, 0, 0, 0, 0))
+add_rrect(0.0, BIG / 2, 10.0, BIG / 2 + 2.0 ** 48, R(0, 0, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25))
 
 ells = [(0.0, 0.0, 1.0, 1.0), (10.0, 20.0, 5.0, 3.0), (-4.5, 8.25, 0.5, 40.0), (1e16, 1e16, 3.0, 3.0), (-0.0, -0.0, 2.0, 2.0),
         (0.1, 0.2, 0.3, 0.7), (1.0, 1.0, 1.0, nextafter(1.0)), (0.0, 0.0, 1e-300, 1e-300), (0.0, 0.0, 5e-324, 5e-324),
         (0.0, 0.0, 2.0 ** 99, 2.0 ** 99), (2.0 ** 99, 0.0, 2.0 ** 99, 1.0), (BIG, 0.0, 1.0, 1.0), (BIG, 0.0, 2.0 ** 48, 1.0), (-BIG, 0.0, 2.0 ** 48, 1.0), (0.0, 0.0, nextafter(BIG), 1.0),
         (0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, -1.0, 1.0), (0.0, 0.0, 1.0, -1.0), (float("nan"), 0.0, 1.0, 1.0),
-        (0.0, 0.0, float("inf"), 1.0), (0.0, 0.0, 1e308, 1.0), (1.0, 1.0, 1e300, 1e-300)]
+        (0.0, 0.0, float("inf"), 1.0), (0.0, 0.0, 1e308, 1.0), (1.0, 1.0, 1e300, 1e-300),
+        # invalid radii decided before any limit: a zero or negative radius beside a coordinate past the limit
+        (BIG, 0.0, 2.0 ** 48, 0.0), (BIG, 0.0, 0.0, 1.0), (-BIG, 0.0, 2.0 ** 48, -1.0), (0.0, BIG, -1.0, 2.0 ** 48),
+        (HUGE, 0.0, HUGE, 1.0), (0.0, HUGE, 1.0, HUGE), (1e308, 1e308, 1e308, 1e308), (0.0, 0.0, 1.0, HUGE),
+        (-BIG, 0.0, 2.0 ** 48, 1.0), (0.0, -BIG, 1.0, 2.0 ** 48), (BIG, BIG, 2.0 ** 48, 2.0 ** 48),
+        (0.0, 0.0, float("nan"), float("nan")), (0.0, float("inf"), 1.0, 1.0)]
 for e in ells:
     for fx in (0, 1):
         for fy in (0, 1):

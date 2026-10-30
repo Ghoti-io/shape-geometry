@@ -465,11 +465,13 @@ namespace {
 /** An allocator that keeps the size of every live block. */
 struct Sized {
   size_t live = 0;
+  size_t calls = 0;
   std::map<void *, size_t> blocks;
 };
 
 void * sized_malloc(void * ctx, size_t n) {
   Sized * s = static_cast<Sized *>(ctx);
+  s->calls++;
   void * p = std::malloc(n ? n : 1);
   if (p) {
     s->blocks[p] = n;
@@ -480,6 +482,7 @@ void * sized_malloc(void * ctx, size_t n) {
 
 void * sized_calloc(void * ctx, size_t k, size_t n) {
   Sized * s = static_cast<Sized *>(ctx);
+  s->calls++;
   void * p = std::calloc(k ? k : 1, n ? n : 1);
   if (p) {
     s->blocks[p] = k * n;
@@ -490,6 +493,7 @@ void * sized_calloc(void * ctx, size_t k, size_t n) {
 
 void * sized_realloc(void * ctx, void * old, size_t n) {
   Sized * s = static_cast<Sized *>(ctx);
+  s->calls++;
   void * p = std::realloc(old, n ? n : 1);
   if (p) {
     if (old) {
@@ -541,6 +545,7 @@ TEST(Shapes, ACopyHoldsExactlyWhatItNeedsNotTheSourcesSlack) {
   EXPECT_EQ(sized.live, sizeof(GSHGEOM_Path) + n * sizeof(Elem) + points * sizeof(GSHGEOM_Point) + weights * sizeof(double));
   /* the limit is decided before anything is reserved */
   const size_t blocks = sized.blocks.size();
+  const size_t calls = sized.calls;
   GSHGEOM_Limits lim;
   gshgeom_limits_default(&lim);
   lim.max_elements = n - 1;
@@ -548,6 +553,7 @@ TEST(Shapes, ACopyHoldsExactlyWhatItNeedsNotTheSourcesSlack) {
   EXPECT_EQ(gshgeom_path_copy(src, &al, &lim, &refused), GSHGEOM_ERR_LIMIT);
   EXPECT_EQ(refused, nullptr);
   EXPECT_EQ(sized.blocks.size(), blocks) << "nothing is left behind";
+  EXPECT_EQ(sized.calls, calls + 1) << "and nothing but the empty path was ever allocated: the limit is decided before the arrays are reserved";
   gshgeom_path_destroy(copy);
   EXPECT_EQ(sized.live, 0u);
   gshgeom_path_destroy(src);
