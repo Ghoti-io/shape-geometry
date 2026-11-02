@@ -47,7 +47,8 @@ shape-scene|tests/unit/test_resource.cpp|*|support|builds or reads arc-free path
 shape-scene|tests/unit/test_store.cpp|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-scene|tools/check-planted.py|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-scene|tools/sink-plants.json|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
-vector|tests/lower_helpers.h|*|owner|the verb printer's default prints an unknown verb as ?n: the owner adds the arc verb; nothing in vector builds an arc yet|-
+vector|tests/lower_helpers.h|*|updated|the dump prints an arc as its own verb (GSHGEOM_VERB_ARC) and reads it through gshgeom_path_arc|vector:tests/unit/test_lower_arc.cpp:LowerArc.AStrokedArcIsAStrokeOfTheArcPath
+vector|tests/unit/test_lower_arc.cpp|*|updated|feeds the lowering arcs in endpoint form and reads each back through gshgeom_path_arc, as the arc record the path holds|vector:tests/unit/test_lower_arc.cpp:LowerArc.AStrokedArcIsAStrokeOfTheArcPath
 shape-geometry|tests/unit/test_arc_rules.cpp|*|support|feeds the arc to the library, which is what it is for|-
 shape-geometry|examples/arc.c|*|support|builds a path of arcs and shows the element readback refusing one; feeds the arc to the library, which is what it is for|-
 shape-geometry|tests/unit/test_shapes.cpp|*|support|builds the primitives and reads them back, arcs included; feeds the arc to the library, which is what it is for|-
