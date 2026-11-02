@@ -34,7 +34,8 @@
  *   four turns (the sign of ::gshgeom_orient2d_exact at each corner) are all of one sign or zero, they are not all zero,
  *   and the area is not zero; otherwise the call is ::GSHGEOM_ERR_INVALID.  Either orientation is accepted, and points
  *   may repeat (a triangle given as four points).  When nothing of the path is inside `Q` the call succeeds and the
- *   result has no subpath: that is the status "empty", not an error (as for ::gshgeom_flat_path_cancel_seams).
+ *   result has no subpath: that is the status "empty", not an error, and there is no separate "empty" result code
+ *   (::gshgeom_flat_path_cancel_seams does the same).
  *   ::GSHGEOM_ERR_LIMIT is returned when the result would hold more than `max_points` points.
  * - **CK2, winding is preserved.**  Every subpath is read as a closed polygon, as a rasterizer reads it.  For every point
  *   `q` that is not within the rounding bound of CK4 of an edge of the input or of `Q`, the winding number of the result
@@ -58,15 +59,21 @@
  *   same bits on every target.
  * - **CK4, the seam bound.**  Each crossing is within half a unit (1/128 pixel) of the exact one in each coordinate.
  *   Later cuts decide on the rounded points, so a point of the result can lie outside `Q` by the rounding, and every edge of
- *   the result lies within three units of an edge of the input or of `Q`; CK2 excepts that distance.  The area of the
- *   symmetric difference between the result and the exact clip of the input (where the windings differ, weighted by the
- *   difference) is at most `c (sqrt(2)/2) D` square units for `c` crossings and a quadrilateral of diameter `D`; for a
- *   clip line of length `P` crossed by edges that are not long compared with it, that is within `P/128` pixels squared per
- *   crossing, and a long edge that crosses a short side at a shallow angle exceeds that figure (documentation/design.md,
- *   "Clipping a flattened path to a convex quadrilateral", gives the proof and the measured worst cases).
- * - **CK5, size.**  The result has at most `n + c` points for `n` input points and `c` crossings computed (each cut
- *   removes at least one point for every two crossings it makes), so at most `(3/2)^4 n`, a little over `5n`; each cut is
- *   `O(n)` in the points of the polygon it cuts.
+ *   the result lies within three units of an edge of the input or of `Q`; CK2 excepts that distance.  The proved bound on
+ *   the area of the symmetric difference between the result and the exact clip of the input (where the windings differ,
+ *   weighted by the difference) is `c (sqrt(2)/2) D` square units for `c` crossings and a quadrilateral of diameter `D`:
+ *   a crossing moves by at most `sqrt(2)/2` units, and the two result edges that meet there are at most `D` long.  There
+ *   is no bound proportional to the length `P` of the clip lines crossed: an edge that is long against a line moves its
+ *   end by the rounding over its whole length, so a thin cell crossed at a shallow angle by a long edge exceeds
+ *   `P/128` pixels squared by a large factor, and over the tests' random sweep the area reached 1.40 times that
+ *   figure.  `P/128` is therefore not a guarantee; the bound above is.  (documentation/design.md, "Clipping a
+ *   flattened path to a convex quadrilateral", gives the proof and the measured cases.)
+ * - **CK5, size.**  The result has at most `n + c/2` points, so at most `n + c`, for `n` input points and `c` crossings
+ *   computed (each cut removes at least one point for every two crossings it makes), and at most `(3/2)^4 n`, a little
+ *   over `5n`.  The crossings are at most `65 n / 8 = 8.125 n` in all (a cut makes at most one crossing per point of
+ *   the polygon it cuts).  That `c <= 4 n` is **not proved**: a search over polygons reached `c = 4 n` exactly, for
+ *   every even `n` it tried, and never more, which is evidence and not a theorem.  Each cut is `O(n)` in the points of
+ *   the polygon it cuts.
  * - **CK6, determinism.**  The result, and so ::gshgeom_flat_path_hash of it, is a function of the input and `Q` alone:
  *   the same on every target, in the cross-target probe.
  *
@@ -91,6 +98,9 @@ extern "C" {
 
 /**
  * @brief Clip a flattened path to a convex quadrilateral, preserving the winding (CK1 to CK6 above).
+ *
+ * The signature is that of ::gshgeom_flat_path_cancel_seams: the path, the quadrilateral, an allocator, the limits and
+ * the result.  The result is `OK` with no subpath when nothing is inside, so a caller tests the subpath count.
  *
  * @param path   The flattened path; every subpath is read as closed whatever its flag.  Not changed.
  * @param quad   The four corners of `Q`, in order, in 26.6 (either orientation; repeats allowed).

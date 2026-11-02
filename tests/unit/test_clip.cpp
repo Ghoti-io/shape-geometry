@@ -418,6 +418,18 @@ TEST(Clip, NothingInsideIsAnEmptyResultNotAnError) {
   EXPECT_TRUE(out.empty());
 }
 
+TEST(Clip, CrossingsReach4nOnAConstructedCaseAndNeverPassTheProvedBound) {
+  // Four points, each edge crossing the cell's boundary on every cut: 16 crossings, four per input point.  The bound that
+  // is proved is 8.125 per point; that four is the most there can be is not proved (the header says so), and this is the
+  // case that shows it is reached.
+  const Contours in = {Contour{{D(-197, 140), D(168, -40), D(-113, 85), D(208, -57)}, 1}};
+  GSHGEOM_Clip_Stats st{};
+  Contours out;
+  ASSERT_EQ(clip(in, kCell, &out, &st), GSHGEOM_OK);
+  EXPECT_EQ(st.crossings, 16u);
+  EXPECT_LE(8 * st.crossings, 65u * 4u);
+}
+
 TEST(Clip, AContourWhollyInsideIsCopiedBitForBitFlagsAndTinyOnesIncluded) {
   Contours in = {Contour{{D(10, 10), D(50, 12), D(30, 50)}, 0}, Contour{{D(7, 7)}, 1}, Contour{{D(7, 7), D(9, 9)}, 0},
       Contour{{D(0, 0), D(64, 0), D(64, 64), D(0, 64)}, 1}, Contour{{D(5, 5), D(5, 5), D(5, 5)}, 1}};
@@ -811,6 +823,8 @@ TEST(ClipSweep, SeededRandomCasesAgreeWithTheOracleAndRecordTheSeamBound) {
     for (const Contour & c : in) n_in += c.pts.size();
     for (const Contour & c : out) n_out += c.pts.size();
     EXPECT_LE(n_out, n_in + stats.crossings) << i;
+    // CK5's proved bound on the crossings: at most 65/8 = 8.125 per input point (not the unproved 4).
+    EXPECT_LE(8 * stats.crossings, 65 * n_in) << i;
     if (n_in) max_c_over_n_x1000 = std::max<long>(max_c_over_n_x1000, (long)(1000 * stats.crossings / n_in));
     // A contour entirely inside the closed quadrilateral is in the output, bit for bit.
     {

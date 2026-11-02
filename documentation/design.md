@@ -978,7 +978,8 @@ triangle is given as four points, with a point twice, or with a corner on a side
 self-intersecting quadrilateral (the turning of a closed quadrilateral is at most 360 degrees at four corners of less
 than 180 each), and a reversal along a line shows as turns of both signs, so the test is the convexity test. When nothing
 of the path is inside `Q` the call succeeds and the result has no subpath: "empty" is a status, as for
-`gshgeom_flat_path_cancel_seams`, not an error. `GSHGEOM_ERR_LIMIT` is returned when the result would hold more than
+`gshgeom_flat_path_cancel_seams`, not an error, and the result enumeration has no separate code for it. The signature is also
+that function's: the path, the quadrilateral, an allocator, the limits and the result. `GSHGEOM_ERR_LIMIT` is returned when the result would hold more than
 `max_points` points (the input may be larger: what the cut discards is not counted).
 
 **CK2, winding is preserved.** Every subpath is read as a closed polygon, as a rasterizer reads it. For every point `q`
@@ -1028,19 +1029,28 @@ edges there, and a result edge lies inside `Q` so is at most its diameter `D` lo
     area  <=  c * (sqrt(2)/2) * D        for c crossings and a quadrilateral of diameter D, in square units
 
 (`tests/unit/test_clip.cpp` gates every case of its random sweep by this bound; the worst ratio seen is recorded in the
-test output.) When a shape crosses a cell edge and the neighbouring copy continues it, the two roundings can differ by
-up to 1/128 pixel in each coordinate, and the area between them is at most `P/128` pixels squared for a clip line of length
-`P` provided the edges there are not long compared with the line; a thin cell crossed by a long edge at a shallow angle
-exceeds that figure (the tests exercise both: over the random sweep the worst ratio to `P/128` was 1.40, and a cell 64 units
-wide and 6400 tall crossed by an edge from 6000 units below its short side reached 47), because the rounding moves the
-end of an edge that is much longer than the line. The bound above is the one that holds for every shape.
+test output.) **There is no bound proportional to the length `P` of the clip lines alone, and the figure `P/128` pixels
+squared is not a guarantee.** When a shape crosses a cell edge and the neighbouring copy continues it, the two roundings can
+differ by up to 1/128 pixel in each coordinate, but the area between them depends on how long the edges are, not only on
+the line: rounding moves the end of an edge by half a unit perpendicular to that edge whatever its length, so a thin cell
+crossed at a shallow angle by a long edge exceeds `P/128` pixels squared by a large factor. The tests exercise both: over
+the random sweep the worst ratio to `P/128` was 1.40, and a cell 64 units wide and 6400 tall crossed by an edge from 6000
+units below its short side reached 47. The bound above is the one that holds for every shape; where the edges of a
+shape are short against the clip line, `P/128` is a reasonable estimate of the area and no more than an estimate.
 
 **CK5, size.** A cut removes at least one point for every two crossings it makes (the points of a run outside are
-dropped, and every outside run has two crossings), so a cut of `n` points yields at most `n + c/2` and at most `3n/2`
-points, and the result has at most `n + c` points for `n` input points and `c` crossings computed over the four cuts, at
-most `(3/2)^4 n`, a little over `5n`. The crossings are at most `n` for each cut, `8.125 n` in all by the same
-recurrence; a hill-climbing search over polygons never found more than `4 n`; the random sweep of the tests prints the worst ratio it
-saw, and the fuzz harness asserts `9 n`. Each cut is `O(n)` in the points of the polygon it cuts. The scratch is two buffers, grown as
+dropped, and every outside run has two crossings), so a cut of `m` points yields at most `m + c_k/2` points, with `c_k <= m`
+crossings, and the result has at most `n + c/2` points, hence at most `n + c`, for `n` input points and `c` crossings
+computed over the four cuts. By the same recurrence the cuts make at most `n`, `3n/2`, `9n/4` and `27n/8` crossings, so
+`c <= 65n/8 = 8.125 n`, and the result has at most `(3/2)^4 n`, a little over `5n`, points. **That `c <= 4n` is not proved.**
+The bound above uses only the count of points, and not the geometry (that the closing edge a cut makes lies on one line, and
+that a straight segment crosses another line once), which is what a better bound would have to use, and the rounded points
+of a later cut do not lie exactly on the earlier lines, so a proof of `4n` has to hold for the rounded polygons the code
+cuts and not only for the exact ones. What is known is a search: hill-climbing over polygons of 3 to 16 points against
+rectangles and general convex quadrilaterals, with the crossing points rounded as CK3 states, reached `c = 4n` exactly
+for every even `n` tried (four points with 16 crossings is `tests/unit/test_clip.cpp`'s constructed case) and never more.
+That is evidence for `4n` and not a theorem; the sweep of the tests asserts the proved `8.125 n`, and the fuzz harness
+asserts `9 n`. Each cut is `O(n)` in the points of the polygon it cuts. The scratch is two buffers, grown as
 needed and freed before the call returns.
 
 **CK6, determinism.** The result, and so `gshgeom_flat_path_hash` of it, is a function of the input and `Q` alone: every
