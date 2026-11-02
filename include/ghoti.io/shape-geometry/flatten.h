@@ -287,6 +287,31 @@ GSHGEOM_API GSHGEOM_Result gshgeom_path_flatten(const GSHGEOM_Path * path,
 GSHGEOM_API GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path,
     const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out);
 
+/**
+ * @brief Build a flattened path from explicit 26.6 points and the subpaths they form.
+ *
+ * The flattener makes flattened paths from curves; this makes one from polygons a caller already holds in device space
+ * (a test vector, a clip's expected answer, a polygon from another source).  @p subpaths must tile @p points in order:
+ * the first subpath starts at index 0, each starts where the one before it ended, each has at least one point and a
+ * `closed` flag of 0 or 1, and together they cover exactly @p point_count points.  Nothing is changed or merged: the
+ * result's points, subpaths and flags are the arguments', so ::gshgeom_flat_path_hash of it is that of the same path
+ * made by the flattener.  No points and no subpaths make an empty path.
+ *
+ * @param points        The points of every subpath, in order; may be NULL only when @p point_count is 0.
+ * @param point_count   The number of points.
+ * @param subpaths      One entry for each subpath; may be NULL only when @p subpath_count is 0.
+ * @param subpath_count The number of subpaths.
+ * @param alloc         The allocator; NULL for the default.
+ * @param limits        Caps (`max_points`); NULL for the defaults.
+ * @param out           Receives the path, only on success; destroy it with ::gshgeom_flat_path_destroy.
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for a NULL @p out, a NULL array with a nonzero count, points without
+ *         subpaths or subpaths without points, or subpaths that do not tile the points as above;
+ *         ::GSHGEOM_ERR_LIMIT if @p point_count exceeds `max_points`; ::GSHGEOM_ERR_OOM.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_flat_path_from_points(const GSHGEOM_Device_Point * points, size_t point_count,
+    const GSHGEOM_Flat_Subpath * subpaths, size_t subpath_count, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out);
+
 /** @brief Destroy a flattened path; NULL is ignored. */
 GSHGEOM_API void gshgeom_flat_path_destroy(GSHGEOM_Flat_Path * path);
 

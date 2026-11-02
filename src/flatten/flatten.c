@@ -546,6 +546,50 @@ void gshgeom_flat_path_close_last(GSHGEOM_Flat_Path * path) {
   }
 }
 
+GSHGEOM_Result gshgeom_flat_path_from_points(const GSHGEOM_Device_Point * points, size_t point_count,
+    const GSHGEOM_Flat_Subpath * subpaths, size_t subpath_count, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out) {
+  if (!out || (point_count && !points) || (subpath_count && !subpaths) || (point_count == 0) != (subpath_count == 0)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  /* The subpaths must tile the points in order, each with at least one point and a flag of 0 or 1. */
+  size_t next = 0;
+  for (size_t s = 0; s < subpath_count; s++) {
+    if (subpaths[s].first != next || subpaths[s].count == 0 || subpaths[s].count > point_count - next ||
+        (subpaths[s].closed != 0 && subpaths[s].closed != 1)) {
+      return GSHGEOM_ERR_INVALID;
+    }
+    next += subpaths[s].count;
+  }
+  if (next != point_count) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  const size_t max_points = (limits && limits->max_points) ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;
+  if (point_count > max_points) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  GSHGEOM_Flat_Path * fp = NULL;
+  GSHGEOM_Result r = gshgeom_flat_path_new(alloc, limits, &fp);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  for (size_t s = 0; s < subpath_count && r == GSHGEOM_OK; s++) {
+    r = begin_subpath(fp, points[subpaths[s].first]);
+    for (size_t k = 1; k < subpaths[s].count && r == GSHGEOM_OK; k++) {
+      r = add_point(fp, points[subpaths[s].first + k]);
+    }
+    if (r == GSHGEOM_OK && subpaths[s].closed) {
+      gshgeom_flat_path_close_last(fp);
+    }
+  }
+  if (r != GSHGEOM_OK) {
+    gshgeom_flat_path_destroy(fp);
+    return r;
+  }
+  *out = fp;
+  return GSHGEOM_OK;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Readback                                                                */
 /* ---------------------------------------------------------------------- */
