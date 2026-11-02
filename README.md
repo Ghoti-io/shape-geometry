@@ -15,6 +15,11 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   within the tolerance for every `int32` curve; ported from `font`'s scan
   converter, which now calls it) producing a flattened path, or the vertices of
   one curve.
+- Clipping a flattened path to a convex quadrilateral (`clip.h`): the contours of a flat path cut to four 26.6 points with
+  their winding preserved for any closed polylines (self-intersecting and nested ones included), the side of every point
+  decided exactly and every crossing the exact intersection rounded once to 26.6, half up, in 128-bit integer arithmetic, so
+  the result is the same bits on every target; and `gshgeom_flat_path_from_points`, which builds a flat path from explicit
+  points and subpaths.
 - Along-path parametrization: a measured path built once from a model path (any
   curve kind, 2D or 3D, any number of subpaths) gives its arc length and, at any
   distance along it, the point, the unit tangent and the left normal. The arc

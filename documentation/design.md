@@ -6,7 +6,7 @@ predicates and the route predicate; the 26.6 device path and the integer
 flattener (with the conic route of rational curves and arcs);
 along-path parametrization; path vertices; exact elliptical arcs (the element,
 three constructors, the exact decomposition and everything that reads a path);
-the fill rules; strokes: the definition of the covered region and the expansion
+the fill rules; the clip of a flattened path to a convex quadrilateral; strokes: the definition of the covered region and the expansion
 solid and dashed (SG19 to SG30), and a DXF simple
 linetype lowered to a dash array.
 
@@ -963,6 +963,116 @@ covers.
 construction (1). The number is in no hash; there is no selector for another revision.
 
 The construction is the pieces above: exact lines and arcs, Hermite offsets with the certified bound, folds as chord polygons, inflated fans, the arcs join as trapezoids, and the lowering by bisection.
+
+## Clipping a flattened path to a convex quadrilateral
+
+`gshgeom_flat_path_clip_convex` (`clip.h`, `src/clip/clip.c`) cuts the contours of a flattened path to a convex
+quadrilateral `Q` of 26.6 points and returns them as a new flat path. A pattern or a tile draws one shape many times and
+needs each copy cut at the edge of its cell, so that the pieces of two neighbours add to the whole; that changes the
+geometry, and the cut is built so that it does not change what the geometry means. The rules are CK1 to CK6.
+
+**CK1, the function and what it refuses.** `Q` is four points in order. Its four turns (the sign of `gshgeom_orient2d_exact`
+at each corner, with its neighbours) must be of one sign or zero, not all zero, and its area must not be zero; otherwise
+the call is `GSHGEOM_ERR_INVALID`, before anything is allocated. Either orientation is accepted, and points may repeat (a
+triangle is given as four points, with a point twice, or with a corner on a side). Four turns of one sign cannot make a
+self-intersecting quadrilateral (the turning of a closed quadrilateral is at most 360 degrees at four corners of less
+than 180 each), and a reversal along a line shows as turns of both signs, so the test is the convexity test. When nothing
+of the path is inside `Q` the call succeeds and the result has no subpath: "empty" is a status, as for
+`gshgeom_flat_path_cancel_seams`, not an error. `GSHGEOM_ERR_LIMIT` is returned when the result would hold more than
+`max_points` points (the input may be larger: what the cut discards is not counted).
+
+**CK2, winding is preserved.** Every subpath is read as a closed polygon, as a rasterizer reads it. For every point `q`
+that is not within the rounding bound of CK4 of an edge of the input or of `Q`, the winding number of the result at `q`
+equals the input's if `q` is in the interior of `Q`, and is zero outside it. This holds for any closed polylines,
+self-intersecting, nested and overlapping included, because a contour is cut by one half-plane at a time. Walking the
+closed polygon, a crossing is emitted when two successive points are strictly on opposite sides of the clip line, and a
+point is kept if it is not strictly outside; the join from the last emitted point back to the first is implicit. A maximal
+run of the contour that is strictly outside leaves at a point `X` of the closed inside half-plane and returns at a point
+`Y` of it, and the cut replaces the run by the segment `XY` along the line. The run and that segment form a closed polygon
+that lies in the closed outside half-plane, so it winds zero times about every point strictly inside the half-plane; the
+cut contour therefore winds as the contour does there, and, lying in the closed inside half-plane, winds zero about a point
+strictly outside it. Nothing is unioned, merged or re-oriented: the contours of the result are the cut contours, in the
+order of the input. A contour wholly inside `Q` is copied bit for bit (its points, their order and its `closed` flag); one
+wholly outside gives nothing; a contour that a cut leaves with fewer than three points encloses nothing and is not
+written. A cut contour is a closed polygon and is flagged closed.
+
+**CK3, exact decisions, one rounding.** "Inside" is the closed quadrilateral: a point exactly on a side is inside, so a
+contour that lies along the boundary is kept as it is, and a point on a clip line is kept and needs no crossing. Which
+side of a clip line a point lies on is the sign of `(l1 - l0) x (p - l0)`, a difference of two products of 33-bit
+differences: each product is below 2^64, so the comparison needs no more than the sign and magnitude of two `uint64_t`
+and no overflow is possible. An edge yields a crossing only when its end points lie strictly on opposite sides. The
+crossing is the exact rational intersection of the edge with the line through two points of `Q`:
+
+    P = A + (B - A) t,   t = |fA| / (|fA| + |fB|),   fA, fB the side values of A and B (below 2^64, opposite signs)
+
+so each coordinate is `A + floor((2 d |fA| + den) / (2 den))` with `d` the 33-bit difference of that coordinate and
+`den = |fA| + |fB|` (below 2^65); the numerator is below 2^99 (a side value is twice the area of a triangle inside a square of
+side 2^32 - 1, so it is below 2^64). That is rounding once, to the nearest 26.6 point with
+ties upward (`floor(v + 1/2)`), of the exact value. It is done in a 128-bit unsigned type made of two `uint64_t` (the
+library does not use the compiler's 128-bit integer, which a 32-bit target lacks) with a sign-and-magnitude wrapper, so
+no shift of a negative value occurs; there is no `double`, no `long double`, no libm and no fused multiply-add anywhere
+in the clip. The edge's end points are put in lexicographic order and so are the line's, so the arithmetic is the same
+for the same edge and line however the edge is traversed or the line is named. (The exact rational is the same either
+way, so this order is the definition made explicit and not a repair of a rounding that depends on it; a tie, the
+only place a rounding could differ, is rounded up from either end.)
+
+**CK4, the seam bound.** Each crossing is within half a unit (1/128 pixel) of the exact one in each coordinate, so
+within `sqrt(2)/2` units. The four cuts are made in turn, and a later cut decides on the rounded points, so the points of the
+result can lie a little outside `Q`, and every edge of the result lies within `4 sqrt(2)/2` (under three) units of an edge of
+the input or of `Q` (the distance to a segment is convex, so a crossing taken on an edge that is itself off by `d` lies
+within `d` of the exact edge, and the rounding adds at most `sqrt(2)/2` per cut): this is the "rounding bound" CK2 excepts. The
+area of the symmetric difference between the result and the exact clip of the input (the area where the windings differ,
+weighted by the difference) changes at a crossing by at most half the displacement times the lengths of the two result
+edges there, and a result edge lies inside `Q` so is at most its diameter `D` long, hence:
+
+    area  <=  c * (sqrt(2)/2) * D        for c crossings and a quadrilateral of diameter D, in square units
+
+(`tests/unit/test_clip.cpp` gates every case of its random sweep by this bound; the worst ratio seen is recorded in the
+test output.) When a shape crosses a cell edge and the neighbouring copy continues it, the two roundings can differ by
+up to 1/128 pixel in each coordinate, and the area between them is at most `P/128` pixels squared for a clip line of length
+`P` provided the edges there are not long compared with the line; a thin cell crossed by a long edge at a shallow angle
+exceeds that figure (the tests exercise both: over the random sweep the worst ratio to `P/128` was 1.40, and a cell 64 units
+wide and 6400 tall crossed by an edge from 6000 units below its short side reached 47), because the rounding moves the
+end of an edge that is much longer than the line. The bound above is the one that holds for every shape.
+
+**CK5, size.** A cut removes at least one point for every two crossings it makes (the points of a run outside are
+dropped, and every outside run has two crossings), so a cut of `n` points yields at most `n + c/2` and at most `3n/2`
+points, and the result has at most `n + c` points for `n` input points and `c` crossings computed over the four cuts, at
+most `(3/2)^4 n`, a little over `5n`. The crossings are at most `n` for each cut, `8.125 n` in all by the same
+recurrence; a hill-climbing search over polygons never found more than `4 n`; the random sweep of the tests prints the worst ratio it
+saw, and the fuzz harness asserts `9 n`. Each cut is `O(n)` in the points of the polygon it cuts. The scratch is two buffers, grown as
+needed and freed before the call returns.
+
+**CK6, determinism.** The result, and so `gshgeom_flat_path_hash` of it, is a function of the input and `Q` alone: every
+operation is an integer operation on `int32`, `int64` and `uint64` values with defined behavior. The cross-target probe
+(`tools/corpus-hash.c`, the `clip-hash` and `clip-count` pair of `tests/corpus/geometry.hash`) clips 600 random polygons to
+random quadrilaterals, from a 300-unit span to the whole `int32` range, and every target must print the committed value.
+
+**The flat path from points.** `gshgeom_flat_path_from_points` builds a flat path from explicit points and the subpaths
+(`first`, `count`, `closed`) they form, which must tile the points in order; it changes and merges nothing, so a test, or
+a caller with polygons from another source, can state the input of a clip. Subpaths that do not tile the points, a flag
+other than 0 or 1, points without subpaths, NULL arguments are `GSHGEOM_ERR_INVALID`; more than `max_points` points is
+`GSHGEOM_ERR_LIMIT`, before anything is allocated.
+
+**What checks it.** `tests/clip_oracle.h` states what the cut must do by the definition and shares nothing with the method: exact
+rational arithmetic on integers of any size, the winding number of the input and of the result at a rational probe point by
+counting the crossings of a ray, the distance from a point to a segment, the exact rounding of a crossing from the rational, and the area
+of the symmetric difference by a sweep of horizontal slabs (between two heights at which edges end or meet the edges cross the slab
+whole, in a fixed order, so the length of the stretches where the windings differ is linear in the height and the area of a slab is
+that length at its middle times its height, exactly). `tools/gen-clip-vectors.py` states the cut again in Python integers and
+fractions, sharing no code with the library, and writes `tests/clip_vectors.h`: about three hundred cases (a square cell and
+rectangles, a fan, a bowtie, a nested pair with a hole, contours on and outside the cell edge, rotated and skewed cells in both
+orientations, triangles given as four points, ties at a half unit in each direction, the extremes of `int32`, and seeded random
+polygons); the test compares every point, its order and the flags bit for bit, and compares the winding of the result with the
+oracle's at probes at least three units from every edge. The refusals, the empty result, the limit (exact at the
+boundary and over all contours), the bit copy, every tie in a small box against the oracle's exact rounding, the side
+against `gshgeom_orient2d_exact` and the crossing against the oracle across the whole `int32` range, and an allocation that fails at
+every call are separate tests. `tests/fuzz/fuzz_clip.c` checks the same properties on bytes. `tools/check-planted.py` has a plant for
+every rule and branch above (the ids start with `clip-` and `fb-`); the equivalent mutants it lists are the 128-bit division's fast
+path (the long division gives the same answers), the lexicographic order (the exact rational is the same from either end), the
+redundant area test (a quadrilateral whose fan triangles at corners 1 and 3 are both zero has turns of both signs or is
+collinear), the order of the lexicographic comparison, and the skipped zero-length side (a side of zero length classifies
+every point as on the line and cuts nothing).
 
 ## Tests and gates
 
