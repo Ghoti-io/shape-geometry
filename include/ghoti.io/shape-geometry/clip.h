@@ -48,7 +48,7 @@
  *   contour is a closed polygon and is flagged closed.
  * - **CK3, exact decisions, one rounding.**  "Inside" is the closed quadrilateral: a point exactly on a side of `Q` is
  *   inside, so a contour that lies along the boundary is kept as it is.  Which side of a clip line a point lies on is
- *   decided exactly on the integer coordinates (a 66-bit determinant, no `double`).  An edge of the contour yields a
+ *   decided exactly on the integer coordinates (a determinant of two 64-bit products, no `double`).  An edge of the contour yields a
  *   crossing only when its end points lie strictly on opposite sides of a clip line; an end point on the line is kept
  *   as it is and is its own crossing.  The crossing is the exact rational intersection of the edge with the line
  *   through two points of `Q`, rounded once to 26.6 to nearest with ties upward (`floor(v + 1/2)` in each coordinate), by

@@ -115,7 +115,7 @@ TEST(FlatPathFromPoints, EveryWayTheSubpathsFailToTileThePointsIsRefusedAndNothi
   }
   GSHGEOM_Flat_Path * fp = nullptr;
   EXPECT_EQ(build({}, {{0, 1, 0}}, &fp), GSHGEOM_ERR_INVALID) << "subpaths for no points";
-  EXPECT_EQ(gshgeom_flat_path_from_points(nullptr, 3, kSubs.data(), 1, nullptr, nullptr, &fp), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_flat_path_from_points(nullptr, 7, kSubs.data(), 3, nullptr, nullptr, &fp), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_flat_path_from_points(kPts.data(), 7, nullptr, 1, nullptr, nullptr, &fp), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_flat_path_from_points(kPts.data(), 7, kSubs.data(), 3, nullptr, nullptr, nullptr), GSHGEOM_ERR_INVALID);
 }

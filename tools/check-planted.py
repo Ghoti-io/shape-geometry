@@ -2834,6 +2834,183 @@ PLANTS += [p for p in ARC_PLANTS if p[0] not in ARC_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
     PLANTS += ARC_UNSEEN_PLANTS
 
+# --- The clip to a convex quadrilateral (clip.h, src/clip/clip.c, CK1 to CK6) and the flat path from points ------------
+# The ids start with clip- (the clip) and fb- (the constructor).  Every rule and branch of the cut has a plant: the quadrilateral's
+# validity (convex, orientation, repeated points, the area), the closed half-plane, the walk (the crossing on leaving and on
+# entering, the kept end), the contour bookkeeping (a contour dropped, merged, re-oriented, the three-point floor, the flags),
+# the exact side and the crossing (the product, the carry, the division, the rounding half up, the canonical order), the limit
+# and the release of the scratch.  `make check-planted PLANT_ONLY='^clip'` runs these; the ones listed in CLIP_UNSEEN are
+# equivalent mutants (no input can tell them from the code, the cause stated below) and run with PLANT_UNSEEN=1.
+CL = "src/clip/clip.c"
+CT = ["testClip"]
+CTP = ["testClip", "probe"]
+CLIP_PLANTS = []
+
+
+def cp(pid, old, new, tests=CT, fname=CL):
+    CLIP_PLANTS.append((pid, "src", fname, old, new, tests))
+
+
+# the quadrilateral (CK1)
+cp("clip-quad-clockwise-refused", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (sigma <= 0 || (turn[1] == 0 && turn[3] == 0)) {")
+cp("clip-quad-counterclockwise-refused", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (sigma >= 0 || (turn[1] == 0 && turn[3] == 0)) {")
+cp("clip-quad-nonconvex-accepted", "      if (sigma != 0 && turn[i] != sigma) {\n        return GSHGEOM_ERR_INVALID; /* turns of both signs: not convex */\n      }\n", "      if (sigma != 0 && turn[i] != sigma) {\n        /* accepted */\n      }\n")
+cp("clip-quad-collinear-accepted", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (0) {")
+cp("clip-quad-turn-uses-wrong-corner", "gshgeom_orient2d_exact(as_point(quad[(i + 3) % 4]), as_point(quad[i]), as_point(quad[(i + 1) % 4]), &turn[i]);", "gshgeom_orient2d_exact(as_point(quad[(i + 3) % 4]), as_point(quad[i]), as_point(quad[(i + 2) % 4]), &turn[i]);")
+cp("clip-quad-sigma-ignored", "    sides[n].sigma = sigma;", "    sides[n].sigma = 1;")
+cp("clip-quad-repeated-side-cuts", "    if (a.x == b.x && a.y == b.y) {\n      continue;\n    }\n    sides[n].a = a;", "    sides[n].a = a;")
+cp("clip-quad-last-side-skipped", "  for (int i = 0; i < 4; i++) {\n    const Pt a = quad[i];", "  for (int i = 0; i < 3; i++) {\n    const Pt a = quad[i];")
+cp("clip-quad-side-reversed", "    sides[n].a = a;\n    sides[n].b = b;", "    sides[n].a = b;\n    sides[n].b = a;")
+cp("clip-quad-null-allowed", "  if (!path || !quad || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  Side sides[4];", "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  Side sides[4];")
+cp("clip-quad-judged-after-alloc", "  GSHGEOM_Result status = sides_of(quad, sides, &side_count);\n  if (status != GSHGEOM_OK) {\n    return status;\n  }\n  if (!alloc) {\n    alloc = gshgeom_allocator_default();\n  }", "  if (!alloc) {\n    alloc = gshgeom_allocator_default();\n  }\n  void * early = gcu_allocator_malloc(alloc, 8);\n  GSHGEOM_Result status = sides_of(quad, sides, &side_count);\n  gcu_allocator_free(alloc, early);\n  if (status != GSHGEOM_OK) {\n    return status;\n  }")
+# the half-plane (CK3: inside is closed)
+cp("clip-halfplane-open-prescan", "    if (classify(s, in[k]) < 0) {\n      any_out = 1;", "    if (classify(s, in[k]) <= 0) {\n      any_out = 1;")
+cp("clip-halfplane-open-keep", "    if (cur >= 0) {\n      const GSHGEOM_Result r = push(alloc, out, e);", "    if (cur > 0) {\n      const GSHGEOM_Result r = push(alloc, out, e);")
+cp("clip-halfplane-side-negated", "  return gshgeom_clip_side(s->a, s->b, p) * s->sigma;", "  return -gshgeom_clip_side(s->a, s->b, p) * s->sigma;")
+# the walk
+cp("clip-walk-no-entry-crossing", "    if (prev * cur < 0) {\n      Pt x;", "    if (prev > 0 && cur < 0) {\n      Pt x;")
+cp("clip-walk-no-exit-crossing", "    if (prev * cur < 0) {\n      Pt x;", "    if (prev < 0 && cur > 0) {\n      Pt x;")
+cp("clip-walk-previous-wrapped-wrong", "  int prev = classify(s, in[n - 1]);", "  int prev = classify(s, in[0]);")
+cp("clip-walk-from-point-wrong", "      const Pt from = in[k == 0 ? n - 1 : k - 1];", "      const Pt from = in[k == 0 ? 0 : k - 1];")
+cp("clip-walk-end-not-kept", "    if (cur >= 0) {\n      const GSHGEOM_Result r = push(alloc, out, e);\n      if (r != GSHGEOM_OK) {\n        return r;\n      }\n    }\n    prev = cur;", "    prev = cur;")
+cp("clip-walk-crossing-not-pushed", "      (*crossings)++;\n      const GSHGEOM_Result r = push(alloc, out, x);\n      if (r != GSHGEOM_OK) {\n        return r;\n      }", "      (*crossings)++;")
+cp("clip-walk-prev-not-advanced", "    prev = cur;\n  }\n  *what = CUT_MADE;", "  }\n  *what = CUT_MADE;")
+cp("clip-walk-crossing-order", "      const GSHGEOM_Result r = push(alloc, out, x);\n      if (r != GSHGEOM_OK) {\n        return r;\n      }\n    }\n    if (cur >= 0) {", "      const GSHGEOM_Result r = push(alloc, out, x);\n      if (r != GSHGEOM_OK) {\n        return r;\n      }\n    }\n    if (cur >= 0 && prev * cur >= 0) {")
+cp("clip-walk-counts-no-crossings", "      (*crossings)++;", "")
+cp("clip-cut-all-outside-kept", "  if (!any_in) {\n    *what = CUT_EMPTY;\n    return GSHGEOM_OK;\n  }", "  if (!any_in) {\n    *what = CUT_SAME;\n    return GSHGEOM_OK;\n  }")
+cp("clip-cut-same-shortcut-skipped", "  if (!any_out) {\n    *what = CUT_SAME;", "  if (!any_out && 0) {\n    *what = CUT_SAME;")
+cp("clip-cut-prescan-stops-early", "  for (size_t k = 0; k < n && !(any_in && any_out); k++) {", "  for (size_t k = 0; k < n && !any_in; k++) {")
+# contours: dropped, merged, re-oriented, the floor, the flags
+cp("clip-contour-last-dropped", "sp < subpaths; sp++) {", "sp + 1 < subpaths; sp++) {")
+cp("clip-contour-cut-triangle-dropped", "      if (count < 3) {\n        continue; /* a cut", "      if (count < 4) {\n        continue; /* a cut")
+cp("clip-contour-two-point-kept", "      if (count < 3) {\n        continue; /* a cut", "      if (count < 2) {\n        continue; /* a cut")
+cp("clip-contour-merged", "    status = gshgeom_flat_path_begin(result, cur[0]);", "    status = gshgeom_flat_path_point_count(result) ? gshgeom_flat_path_add(result, cur[0]) : gshgeom_flat_path_begin(result, cur[0]);")
+cp("clip-contour-reoriented", "      status = gshgeom_flat_path_add(result, cur[k]);", "      status = gshgeom_flat_path_add(result, cur[sp == 1 ? count - k : k]);")
+cp("clip-contour-reoriented-cut-only", "      status = gshgeom_flat_path_add(result, cur[k]);", "      status = gshgeom_flat_path_add(result, cur[changed ? count - k : k]);")
+cp("clip-contour-start-rotated", "    status = gshgeom_flat_path_begin(result, cur[0]);\n    for (size_t k = 1; status == GSHGEOM_OK && k < count; k++) {\n      status = gshgeom_flat_path_add(result, cur[k]);", "    status = gshgeom_flat_path_begin(result, cur[count - 1]);\n    for (size_t k = 0; status == GSHGEOM_OK && k + 1 < count; k++) {\n      status = gshgeom_flat_path_add(result, cur[k]);")
+cp("clip-contour-cut-left-open", "    if (status == GSHGEOM_OK && (changed || sub.closed)) {", "    if (status == GSHGEOM_OK && (sub.closed)) {")
+cp("clip-contour-copy-forced-closed", "    if (status == GSHGEOM_OK && (changed || sub.closed)) {", "    if (status == GSHGEOM_OK) {")
+cp("clip-contour-copy-counted-as-cut", "      local.contours_copied++;", "      local.contours_in++;")
+cp("clip-contour-cut-not-counted", "      local.contours_in++;\n      if (count < 3) {", "      if (count < 3) {")
+cp("clip-contour-stage-order-reversed", "    for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {\n      Cut what = CUT_SAME;\n      status = cut(alloc, &sides[i],", "    for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {\n      Cut what = CUT_SAME;\n      status = cut(alloc, &sides[side_count - 1 - i],")
+cp("clip-contour-last-side-never-cut", "    for (int i = 0; i < side_count && !empty", "    for (int i = 0; i + 1 < side_count && !empty")
+cp("clip-contour-empty-continues-cutting", "      if (what == CUT_EMPTY) {\n        empty = 1;", "      if (what == CUT_EMPTY) {\n        empty = 0;\n        count = 0;")
+cp("clip-contour-changed-not-recorded", "        which = 1 - which;\n        changed = 1;", "        which = 1 - which;")
+cp("clip-contour-buffer-not-swapped", "        which = 1 - which;\n        changed = 1;", "        changed = 1;")
+# the limit and the release
+cp("clip-limit-off-by-one", "    if (count > max_points - gshgeom_flat_path_point_count(result)) {", "    if (count >= max_points - gshgeom_flat_path_point_count(result)) {")
+cp("clip-limit-per-contour", "    if (count > max_points - gshgeom_flat_path_point_count(result)) {", "    if (count > max_points) {")
+cp("clip-limit-ignores-limits", "  const size_t max_points = (limits && limits->max_points) ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;", "  const size_t max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;")
+cp("clip-limit-error-lost", "      status = GSHGEOM_ERR_LIMIT;\n      break;", "      continue;")
+cp("clip-release-scratch-0", "  gcu_allocator_free(alloc, bufs[0].p);", "")
+cp("clip-release-scratch-1", "  gcu_allocator_free(alloc, bufs[1].p);", "")
+cp("clip-release-result-on-error", "  if (status != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(result);\n    return status;\n  }\n  if (stats) {", "  if (status != GSHGEOM_OK) {\n    return status;\n  }\n  if (stats) {")
+cp("clip-out-written-on-error", "  if (status != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(result);\n    return status;\n  }\n  if (stats) {", "  *out = result;\n  if (status != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(result);\n    return status;\n  }\n  if (stats) {")
+cp("clip-push-error-lost", "  const GSHGEOM_Result r = gshgeom_grow(alloc, &grown, &b->cap, b->n + 1, sizeof *b->p);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }", "  const GSHGEOM_Result r = gshgeom_grow(alloc, &grown, &b->cap, b->n + 1, sizeof *b->p);\n  if (r != GSHGEOM_OK) {\n    return GSHGEOM_OK;\n  }")
+# the exact side
+cp("clip-side-in-double", "int gshgeom_clip_side(Pt l0, Pt l1, Pt p) {\n  Prod p1;", "int gshgeom_clip_side(Pt l0, Pt l1, Pt p) {\n  {\n    const double v = ((double)l1.x - (double)l0.x) * ((double)p.y - (double)l0.y) - ((double)l1.y - (double)l0.y) * ((double)p.x - (double)l0.x);\n    return (v > 0) - (v < 0);\n  }\n  Prod p1;", CTP)
+cp("clip-side-sign-lost", "  return p1.neg ? -larger : larger;", "  return larger;")
+cp("clip-side-second-product-x", "  *p2 = prod((int64_t)l1.y - l0.y, (int64_t)p.x - l0.x);", "  *p2 = prod((int64_t)l1.y - l0.y, (int64_t)p.y - l0.y);")
+cp("clip-side-first-product-swapped", "  *p1 = prod((int64_t)l1.x - l0.x, (int64_t)p.y - l0.y);", "  *p1 = prod((int64_t)l1.x - l0.x, (int64_t)p.x - l0.x);")
+cp("clip-side-mixed-signs", "  if (p1.neg != p2.neg) {\n    return p1.neg ? -1 : 1;\n  }", "  if (p1.neg != p2.neg) {\n    return p1.neg ? 1 : -1;\n  }")
+cp("clip-side-equal-magnitudes", "  if (p1.m == p2.m) {\n    return 0;\n  }", "  if (p1.m == p2.m) {\n    return 1;\n  }")
+cp("clip-side-compare-reversed", "  const int larger = p1.m > p2.m ? 1 : -1; /* the sign of m1 - m2 */", "  const int larger = p1.m < p2.m ? 1 : -1; /* the sign of m1 - m2 */")
+cp("clip-side-zero-product-negative", "  p.neg = p.m != 0 && ((a < 0) != (b < 0));", "  p.neg = ((a < 0) != (b < 0));")
+cp("clip-side-difference-32-bit", "  *p1 = prod((int64_t)l1.x - l0.x, (int64_t)p.y - l0.y);", "  *p1 = prod((int32_t)(l1.x - l0.x), (int64_t)p.y - l0.y);", CTP)
+cp("clip-side-abs-of-min", "  return v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;", "  return v < 0 ? (uint64_t)(-(int32_t)v) : (uint64_t)v;", CTP)
+# the crossing (CK3)
+cp("clip-crossing-strictness", "  if (sa * sb >= 0) {\n    return 0;\n  }", "  if (sa * sb > 0) {\n    return 0;\n  }")
+cp("clip-crossing-uses-far-side-value", "  const U128 nx = mul128_64(fa.m, abs64(dx));\n  const U128 ny = mul128_64(fa.m, abs64(dy));", "  const U128 nx = mul128_64(fb.m, abs64(dx));\n  const U128 ny = mul128_64(fb.m, abs64(dy));")
+cp("clip-crossing-denominator-fa-only", "  const U128 den = add128(fa.m, fb.m);", "  const U128 den = fa.m;")
+cp("clip-crossing-denominator-difference", "  const U128 den = add128(fa.m, fb.m);", "  const U128 den = cmp128(fa.m, fb.m) >= 0 ? sub128(fa.m, fb.m) : sub128(fb.m, fa.m);")
+cp("clip-crossing-dx-sign-lost", "  const int64_t x = (int64_t)a.x + round_half_up(dx < 0, nx, den);", "  const int64_t x = (int64_t)a.x + round_half_up(0, nx, den);")
+cp("clip-crossing-dy-sign-lost", "  const int64_t y = (int64_t)a.y + round_half_up(dy < 0, ny, den);", "  const int64_t y = (int64_t)a.y + round_half_up(0, ny, den);")
+cp("clip-crossing-x-from-wrong-end", "  const int64_t x = (int64_t)a.x + round_half_up(dx < 0, nx, den);", "  const int64_t x = (int64_t)b.x + round_half_up(dx < 0, nx, den);")
+cp("clip-crossing-y-axis-swapped", "  out->x = (int32_t)x;\n  out->y = (int32_t)y;", "  out->x = (int32_t)y;\n  out->y = (int32_t)x;")
+cp("clip-crossing-side-values-of-wrong-line", "  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l1, b);", "  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l0, b);")
+cp("clip-crossing-narrow-numerator", "  const U128 nx = mul128_64(fa.m, abs64(dx));", "  const U128 nx = {0, fa.m.lo * abs64(dx)};", CTP)
+# the rounding (CK3: once, half up)
+cp("clip-round-floor", "  const U128 twice = add128(num, num);\n  const U128 d2 = add128(den, den);\n  S128 n = s_add(s_make(0, den), s_make(neg, twice));", "  const U128 twice = num;\n  const U128 d2 = den;\n  S128 n = s_make(neg, twice);")
+cp("clip-round-half-down", "  S128 n = s_add(s_make(0, den), s_make(neg, twice));", "  S128 n = s_add(s_add(s_make(0, den), s_make(neg, twice)), s_make(1, (U128){0, 1}));")
+cp("clip-round-half-away", "  S128 n = s_add(s_make(0, den), s_make(neg, twice));", "  S128 n = s_add(s_add(s_make(0, den), s_make(neg, twice)), s_make(neg, (U128){0, 1}));")
+cp("clip-round-toward-zero", "    if (!is_zero128(r)) {\n      q = add128(q, (U128){0, 1});\n    }\n    return -(int64_t)q.lo;", "    return -(int64_t)q.lo;")
+cp("clip-round-negative-sign-lost", "    return -(int64_t)q.lo;\n  }\n  return (int64_t)q.lo;", "    return (int64_t)q.lo;\n  }\n  return (int64_t)q.lo;")
+cp("clip-round-ceiling", "  const U128 twice = add128(num, num);\n  const U128 d2 = add128(den, den);\n  S128 n = s_add(s_make(0, den), s_make(neg, twice));", "  const U128 twice = add128(num, num);\n  const U128 d2 = add128(den, den);\n  S128 n = s_add(s_make(0, d2), s_make(neg, twice));")
+cp("clip-round-denominator-not-doubled", "  const U128 d2 = add128(den, den);", "  const U128 d2 = den;")
+cp("clip-round-twice-numerator-once", "  const U128 twice = add128(num, num);", "  const U128 twice = num;")
+cp("clip-round-remainder-ignored", "    if (!is_zero128(r)) {\n      q = add128(q, (U128){0, 1});\n    }", "    if (is_zero128(r)) {\n      q = add128(q, (U128){0, 1});\n    }")
+# not canonical: the arithmetic follows the traversal, and a tie goes away from the start
+cp("clip-crossing-direction-dependent", "  if (before(b, a)) {\n    const Pt t = a;\n    a = b;\n    b = t;\n  }\n  if (before(l1, l0)) {\n    const Pt t = l0;\n    l0 = l1;\n    l1 = t;\n  }\n  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l1, b);\n  /* The side values have opposite strict signs, so |fa - fb| = |fa| + |fb| and t = |fa| / (|fa| + |fb|). */\n  const U128 den = add128(fa.m, fb.m);\n  const int64_t dx = (int64_t)b.x - a.x;\n  const int64_t dy = (int64_t)b.y - a.y;\n  const U128 nx = mul128_64(fa.m, abs64(dx));\n  const U128 ny = mul128_64(fa.m, abs64(dy));\n  const int64_t x = (int64_t)a.x + round_half_up(dx < 0, nx, den);\n  const int64_t y = (int64_t)a.y + round_half_up(dy < 0, ny, den);",
+   "  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l1, b);\n  const U128 den = add128(fa.m, fb.m);\n  const int64_t dx = (int64_t)b.x - a.x;\n  const int64_t dy = (int64_t)b.y - a.y;\n  const U128 nx = mul128_64(fa.m, abs64(dx));\n  const U128 ny = mul128_64(fa.m, abs64(dy));\n  const int64_t rx = round_half_up(0, nx, den);\n  const int64_t ry = round_half_up(0, ny, den);\n  const int64_t x = (int64_t)a.x + (dx < 0 ? -rx : rx);\n  const int64_t y = (int64_t)a.y + (dy < 0 ? -ry : ry);")
+# the 128-bit arithmetic
+cp("clip-mul64-middle-carry", "  const uint64_t mid = (p00 >> 32) + (p01 & M32) + (p10 & M32);", "  const uint64_t mid = (p00 >> 32) + (p01 & M32);", CTP)
+cp("clip-mul64-high-carry", "  r.hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);", "  r.hi = p11 + (p01 >> 32) + (p10 >> 32);", CTP)
+cp("clip-add128-carry", "  r.hi = a.hi + b.hi + (r.lo < a.lo ? 1u : 0u);", "  r.hi = a.hi + b.hi;", CTP)
+cp("clip-sub128-borrow", "  r.hi = a.hi - b.hi - (a.lo < b.lo ? 1u : 0u);", "  r.hi = a.hi - b.hi;", CTP)
+cp("clip-cmp128-low-words", "  if (a.lo != b.lo) {\n    return a.lo < b.lo ? -1 : 1;\n  }\n  return 0;", "  return 0;")
+cp("clip-cmp128-high-first", "  if (a.hi != b.hi) {\n    return a.hi < b.hi ? -1 : 1;\n  }\n  if (a.lo", "  if (a.lo != b.lo) {\n    return a.lo < b.lo ? -1 : 1;\n  }\n  if (a.hi != b.hi) {\n    return a.hi < b.hi ? -1 : 1;\n  }\n  if (a.lo")
+cp("clip-mul128-high-word", "  r.hi += a.hi * b;", "", CTP)
+cp("clip-div-remainder-compare-strict", "    if (cmp128(rem, d) >= 0) {\n      rem = sub128(rem, d);", "    if (cmp128(rem, d) > 0) {\n      rem = sub128(rem, d);", CTP)
+cp("clip-div-quotient-high-bit", "      if (i >= 64) {\n        quo.hi |= UINT64_C(1) << (i - 64);", "      if (i > 64) {\n        quo.hi |= UINT64_C(1) << (i - 64);", CTP)
+cp("clip-div-remainder-shift-carry", "    rem.hi = (rem.hi << 1) | (rem.lo >> 63);", "    rem.hi = (rem.hi << 1);", CTP)
+cp("clip-div-bit-of-numerator", "  return (unsigned)(i >= 64 ? (a.hi >> (i - 64)) & 1u : (a.lo >> i) & 1u);", "  return (unsigned)(i > 64 ? (a.hi >> (i - 64)) & 1u : (a.lo >> i) & 1u);", CTP)
+cp("clip-div-bits-high", "  if (a.hi) {\n    n = 64;\n  }", "  if (a.hi) {\n    n = 63;\n  }", CTP)
+cp("clip-div-fast-path-remainder", "    r->lo = n.lo % d.lo;", "    r->lo = 0;")
+cp("clip-signed-add-order", "  if (cmp128(a.m, b.m) >= 0) {\n    return s_make(a.neg, sub128(a.m, b.m));\n  }\n  return s_make(b.neg, sub128(b.m, a.m));", "  return s_make(a.neg, sub128(a.m, b.m));", CTP)
+cp("clip-signed-zero-negative", "  r.neg = is_zero128(m) ? 0 : neg;", "  r.neg = neg;")
+# the equivalent mutants (CLIP_UNSEEN below): no input tells them from the code
+cp("clip-eq-fast-path-off", "  if (n.hi == 0 && d.hi == 0) {\n    q->hi = 0;", "  if (0 && n.hi == 0 && d.hi == 0) {\n    q->hi = 0;")
+cp("clip-eq-no-lexicographic-swap", "  if (before(b, a)) {\n    const Pt t = a;\n    a = b;\n    b = t;\n  }\n  if (before(l1, l0)) {\n    const Pt t = l0;\n    l0 = l1;\n    l1 = t;\n  }\n", "")
+cp("clip-eq-area-check-dropped", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (sigma == 0) {")
+cp("clip-eq-before-by-y-first", "  return a.x < b.x || (a.x == b.x && a.y < b.y);", "  return a.y < b.y || (a.y == b.y && a.x < b.x);")
+# Equivalent mutants: no input can tell them from the code, and the cause of each.
+#   clip-eq-fast-path-off                the 64-bit fast path of the division gives the answers of the long division
+#   clip-eq-no-lexicographic-swap        the exact rational is the same from either end; only a rounding that depends on the
+#                                        direction could tell (clip-crossing-direction-dependent is that one, and is caught)
+#   clip-eq-area-check-dropped           a quadrilateral whose turns at corners 1 and 3 are both zero has turns of both signs or is collinear
+#   clip-eq-before-by-y-first            the order only has to be one total order, the same from either end
+#   clip-quad-repeated-side-cuts         a side of zero length classifies every point as on the line and cuts nothing
+#   clip-quad-turn-uses-wrong-corner     the turn at corner i taken to corner i+2 is the turn at corner i-1: the same four turns
+#   clip-limit-per-contour               the result's own point cap refuses the same input one point later (flat_path_add)
+#   clip-limit-ignores-limits            the same: the precheck is an early exit, the cap is the result's
+#   clip-crossing-dx-sign-lost           after the lexicographic ordering dx is never negative
+#   clip-mul128-high-word                a side value is below 2^64, so the high word of the product's first factor is 0
+#   clip-div-quotient-high-bit           the quotient is below 2^34, so its bit 64 is never set
+#   clip-signed-zero-negative            every use compares magnitudes before it reads the sign of a zero
+#   fb-points-without-subpaths           the tiling checks refuse the same inputs (the end test, the count against what is left)
+CLIP_UNSEEN = {"clip-eq-fast-path-off", "clip-eq-no-lexicographic-swap", "clip-eq-area-check-dropped", "clip-eq-before-by-y-first",
+               "clip-quad-repeated-side-cuts", "clip-quad-turn-uses-wrong-corner", "clip-limit-per-contour", "clip-limit-ignores-limits",
+               "clip-crossing-dx-sign-lost", "clip-mul128-high-word", "clip-div-quotient-high-bit", "clip-signed-zero-negative",
+               "fb-points-without-subpaths"}
+
+FBC = "src/flatten/flatten.c"
+FBT = ["testFlat_build"]
+for _p in (
+    ("fb-gap-accepted", "subpaths[s].first != next || subpaths[s].count == 0 ||", "subpaths[s].count == 0 ||"),
+    ("fb-empty-subpath-accepted", "subpaths[s].first != next || subpaths[s].count == 0 ||", "subpaths[s].first != next ||"),
+    ("fb-count-wraps", "subpaths[s].count > point_count - next ||", ""),
+    ("fb-flag-two-accepted", "        (subpaths[s].closed != 0 && subpaths[s].closed != 1)) {", "        0) {"),
+    ("fb-cover-short-accepted", "  if (next != point_count) {\n    return GSHGEOM_ERR_INVALID;\n  }", "  if (next > point_count) {\n    return GSHGEOM_ERR_INVALID;\n  }"),
+    ("fb-limit-off-by-one", "  if (point_count > max_points) {", "  if (point_count >= max_points) {"),
+    ("fb-limit-after-alloc", "  if (point_count > max_points) {\n    return GSHGEOM_ERR_LIMIT;\n  }", "  if (point_count > max_points) {\n    const GSHGEOM_Allocator * al = alloc ? alloc : gshgeom_allocator_default();\n    gcu_allocator_free(al, gcu_allocator_malloc(al, 8));\n    return GSHGEOM_ERR_LIMIT;\n  }"),
+    ("fb-closed-flag-dropped", "    if (r == GSHGEOM_OK && subpaths[s].closed) {", "    if (r == GSHGEOM_OK && 0) {"),
+    ("fb-closed-flag-always", "    if (r == GSHGEOM_OK && subpaths[s].closed) {", "    if (r == GSHGEOM_OK) {"),
+    ("fb-first-point-of-next", "    r = begin_subpath(fp, points[subpaths[s].first]);", "    r = begin_subpath(fp, points[subpaths[s].first + subpaths[s].count - 1]);"),
+    ("fb-last-point-skipped", "    for (size_t k = 1; k < subpaths[s].count && r == GSHGEOM_OK; k++) {", "    for (size_t k = 1; k + 1 < subpaths[s].count && r == GSHGEOM_OK; k++) {"),
+    ("fb-leak-on-failure", "  if (r != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(fp);\n    return r;\n  }\n  *out = fp;", "  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  *out = fp;"),
+    ("fb-out-written-on-failure", "  if (r != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(fp);\n    return r;\n  }\n  *out = fp;", "  *out = fp;\n  if (r != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(fp);\n    return r;\n  }"),
+    ("fb-points-without-subpaths", "|| (point_count == 0) != (subpath_count == 0)) {", ") {"),
+    ("fb-null-points-with-count", "(point_count && !points) ||", ""),
+    ("fb-null-out", "  if (!out || (point_count && !points)", "  if ((point_count && !points)"),
+):
+    CLIP_PLANTS.append((_p[0], "src", FBC, _p[1], _p[2], FBT))
+
+CLIP_UNSEEN_PLANTS = [p for p in CLIP_PLANTS if p[0] in CLIP_UNSEEN]
+PLANTS += [p for p in CLIP_PLANTS if p[0] not in CLIP_UNSEEN]
+if os.environ.get("PLANT_UNSEEN"):
+    PLANTS += CLIP_UNSEEN_PLANTS
+
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:

@@ -43,14 +43,16 @@
  * four half-planes in turn, the result winds as the input inside the interior of the quadrilateral and zero outside it.
  *
  * **Exactness.**  The side of a point is the sign of a 2 by 2 determinant of 33-bit differences: two products of at
- * most 64 bits, compared as sign and magnitude, with no overflow.  The crossing is
- * `P = A + (B - A) t`, `t = |fA| / (|fA| + |fB|)` for the side values `fA`, `fB` of the end points (66-bit, opposite
- * signs), so each coordinate is `A + round(d |fA| / (|fA| + |fB|))` with `d` the coordinate's difference (33 bits): the
- * numerator is at most 99 bits and the denominator at most 67, and the rounding `floor(v + 1/2)` is
- * `floor((2 d |fA| + den) / (2 den))` in integers of at most 102 bits.  They are held in a 128-bit unsigned type built
- * from two `uint64_t` (the library avoids the compiler's 128-bit integer, which a 32-bit target lacks), with a signed
- * wrapper that keeps a sign and a magnitude, so no shift of a negative value occurs anywhere.  The result is an integer
- * function of the integers, so it is the same on every target (CK6).
+ * most 64 bits, compared as sign and magnitude, with no overflow.  The side value itself is twice the area of a triangle
+ * inside a square of side 2^32 - 1, so it is below 2^64 in magnitude.  The crossing is `P = A + (B - A) t`,
+ * `t = |fA| / (|fA| + |fB|)` for the side values `fA`, `fB` of the end points (opposite signs), so each coordinate is
+ * `A + round(d |fA| / (|fA| + |fB|))` with `d` the coordinate's difference (33 bits): the numerator is below 2^97 and the
+ * denominator below 2^65, and the rounding `floor(v + 1/2)` is `floor((2 d |fA| + den) / (2 den))` in integers below 2^99.  They
+ * are held in a 128-bit unsigned type built from two `uint64_t` (the library avoids the compiler's 128-bit integer, which
+ * a 32-bit target lacks), with a signed wrapper that keeps a sign and a magnitude, so no shift of a negative value
+ * occurs anywhere.  The quotient is below 2^34.  The result is an integer function of the integers, so it is the same on
+ * every target (CK6).  After the lexicographic ordering `d` is not negative for the x coordinate (the end points are
+ * ordered by x first); the y coordinate's can be, and the sign is carried for both.
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
@@ -243,7 +245,7 @@ int gshgeom_clip_side(Pt l0, Pt l1, Pt p) {
   return p1.neg ? -larger : larger;
 }
 
-/** The side value itself (up to 66 bits). */
+/** The side value itself (below 2^64 in magnitude). */
 static S128 side_value(Pt l0, Pt l1, Pt p) {
   Prod p1;
   Prod p2;
