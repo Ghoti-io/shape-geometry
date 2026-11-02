@@ -1455,5 +1455,92 @@ int main(void) {
     printf("shape-geometry.shapes-hash %016" PRIx64 "\n", gshgeom_hash_value(&shapes_total));
     printf("shape-geometry.shapes-count %lu\n", shapes_count);
   }
+
+  /* The clip section (clip.h, CK1 to CK6): random polygons clipped to random convex quadrilaterals, the result code and the
+   * clipped path's hash for each.  Its own generator and its own pair after the others, so nothing before it moves.  The
+   * cases draw, in this order: a scale class (small, a 2^16 span, or the whole int32 range), the quadrilateral's centre (2),
+   * its half sizes (2), a shear (1), its orientation (1) and whether its last point repeats (1); then the number of contours
+   * (1) and, for each, the number of points (1), each point's kind (1) and one or two coordinates, and the closed flag (1).
+   * The kinds put points on the quadrilateral's corners and sides, so the closed half-plane and the crossings that round
+   * (ties included, on the small lattice) are in it.  Crossings are 128-bit integer arithmetic (a 32-bit target and a
+   * big-endian one must agree), and no floating point is used by the clip, so a fused multiply-add cannot show here; the
+   * section sees byte order, a 64-bit product that wraps and a shift of a negative value. */
+  {
+    GSHGEOM_Hash clip_total;
+    unsigned long clip_count = 0;
+    gshgeom_hash_init(&clip_total);
+    uint64_t cs = UINT64_C(0xC11B5EED0DDF00D5);
+#define CLIP_NEXT() (cs ^= cs >> 12, cs ^= cs << 25, cs ^= cs >> 27, cs * UINT64_C(2685821657736338717))
+    for (unsigned round = 0; round < 600; round++) {
+      const unsigned klass = round % 3u;
+      const int64_t span = klass == 0 ? 300 : (klass == 1 ? ((int64_t)1 << 16) : ((int64_t)1 << 30));
+      const int64_t cx = (int64_t)(CLIP_NEXT() % (uint64_t)span) - span / 2;
+      const int64_t cy = (int64_t)(CLIP_NEXT() % (uint64_t)span) - span / 2;
+      const int64_t hx = 8 + (int64_t)(CLIP_NEXT() % (uint64_t)(span / 3));
+      const int64_t hy = 8 + (int64_t)(CLIP_NEXT() % (uint64_t)(span / 3));
+      const int64_t shear = (int64_t)(CLIP_NEXT() % (uint64_t)(2 * (hx / 4) + 1)) - hx / 4;
+      const unsigned flip = (unsigned)(CLIP_NEXT() % 2u);
+      const unsigned repeat = (unsigned)(CLIP_NEXT() % 6u);
+      GSHGEOM_Device_Point quad[4] = {{(int32_t)(cx - hx), (int32_t)(cy - hy)}, {(int32_t)(cx + hx), (int32_t)(cy - hy + shear)},
+          {(int32_t)(cx + hx + shear), (int32_t)(cy + hy)}, {(int32_t)(cx - hx), (int32_t)(cy + hy - shear)}};
+      if (flip) {
+        const GSHGEOM_Device_Point t0 = quad[0];
+        const GSHGEOM_Device_Point t1 = quad[1];
+        quad[0] = quad[3];
+        quad[1] = quad[2];
+        quad[2] = t1;
+        quad[3] = t0;
+      }
+      if (repeat == 0u) {
+        quad[3] = quad[2];
+      }
+      GSHGEOM_Device_Point pts[40];
+      GSHGEOM_Flat_Subpath subs[3];
+      size_t np = 0;
+      const unsigned nc = 1u + (unsigned)(CLIP_NEXT() % 3u);
+      for (unsigned c = 0; c < nc; c++) {
+        const unsigned n = 1u + (unsigned)(CLIP_NEXT() % 10u);
+        subs[c].first = np;
+        subs[c].count = n;
+        for (unsigned k = 0; k < n; k++) {
+          const unsigned kind = (unsigned)(CLIP_NEXT() % 8u);
+          if (kind == 0u) {
+            pts[np++] = quad[CLIP_NEXT() % 4u];
+          } else if (kind == 1u) {
+            const GSHGEOM_Device_Point a = quad[CLIP_NEXT() % 4u];
+            const GSHGEOM_Device_Point b = quad[(CLIP_NEXT() % 4u + 1u) % 4u];
+            const int64_t f = (int64_t)(CLIP_NEXT() % 9u);
+            pts[np].x = (int32_t)(a.x + ((int64_t)b.x - a.x) * f / 8);
+            pts[np].y = (int32_t)(a.y + ((int64_t)b.y - a.y) * f / 8);
+            np++;
+          } else {
+            const int64_t px = cx + (int64_t)(CLIP_NEXT() % (uint64_t)(2 * span)) - span;
+            const int64_t py = cy + (int64_t)(CLIP_NEXT() % (uint64_t)(2 * span)) - span;
+            pts[np].x = (int32_t)(px > INT32_MAX ? INT32_MAX : (px < INT32_MIN ? INT32_MIN : px));
+            pts[np].y = (int32_t)(py > INT32_MAX ? INT32_MAX : (py < INT32_MIN ? INT32_MIN : py));
+            np++;
+          }
+        }
+        subs[c].closed = (int)(CLIP_NEXT() % 4u != 0u);
+      }
+      GSHGEOM_Flat_Path * in = NULL;
+      if (gshgeom_flat_path_from_points(pts, np, subs, nc, NULL, NULL, &in) != GSHGEOM_OK) {
+        return fail("cannot build a flat path for the clip section");
+      }
+      GSHGEOM_Flat_Path * clipped = NULL;
+      const GSHGEOM_Result r = gshgeom_flat_path_clip_convex(in, quad, NULL, NULL, &clipped);
+      feed_arc_int((int)r, &clip_total, &clip_count);
+      if (r == GSHGEOM_OK) {
+        feed_arc_u64((uint64_t)gshgeom_flat_path_subpath_count(clipped), &clip_total, &clip_count);
+        feed_arc_u64((uint64_t)gshgeom_flat_path_point_count(clipped), &clip_total, &clip_count);
+        feed_arc_u64(gshgeom_flat_path_hash(clipped), &clip_total, &clip_count);
+        gshgeom_flat_path_destroy(clipped);
+      }
+      gshgeom_flat_path_destroy(in);
+    }
+#undef CLIP_NEXT
+    printf("shape-geometry.clip-hash %016" PRIx64 "\n", gshgeom_hash_value(&clip_total));
+    printf("shape-geometry.clip-count %lu\n", clip_count);
+  }
   return 0;
 }
