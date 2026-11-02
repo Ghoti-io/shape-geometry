@@ -405,12 +405,13 @@ test-watch: ## Watch sources and rerun the tests
 examples: $(APP_DIR)/$(TARGET) $(EXAMPLES) ## Build the examples
 
 # The fuzz targets (story 16; CAP-15, AD-19): fuzz_path (path building, maps, flattening, measuring) and fuzz_stroke
-# (the stroke expansion), each replayed over its committed corpus in an ordinary build: no libFuzzer, no clang. The
+# (the stroke expansion) and fuzz_clip (the clip to a convex quadrilateral), each replayed over its committed corpus in an ordinary build: no libFuzzer, no clang. The
 # replay fails on no input and on a corpus that misses one of the outcomes the target lists, and each corpus must be
 # what tools/gen-fuzz-corpus.py writes.
-FUZZ_TARGETS := path stroke
+FUZZ_TARGETS := path stroke clip
 FUZZ_INPUTS_path = $(shell find tests/fuzz/corpus/path -type f 2>/dev/null | sort)
 FUZZ_INPUTS_stroke = $(shell find tests/fuzz/corpus/stroke -type f 2>/dev/null | sort)
+FUZZ_INPUTS_clip = $(shell find tests/fuzz/corpus/clip -type f 2>/dev/null | sort)
 FUZZ_INPUTS = $(FUZZ_INPUTS_path)
 REPLAY := $(APP_DIR)/fuzz/replay_path$(EXE_EXTENSION)
 REPLAYS := $(foreach f,$(FUZZ_TARGETS),$(APP_DIR)/fuzz/replay_$(f)$(EXE_EXTENSION))
@@ -434,7 +435,7 @@ $(APP_DIR)/fuzz/replay_%_planted$(EXE_EXTENSION): tests/fuzz/fuzz_%.c tests/fuzz
 
 fuzz-replay: $(REPLAYS) $(REPLAYS_PLANTED) ## Feed every corpus file once through each fuzz entry point
 	@for f in $(FUZZ_TARGETS); do \
-		case $$f in path) inputs="$(FUZZ_INPUTS_path)";; stroke) inputs="$(FUZZ_INPUTS_stroke)";; esac; \
+		case $$f in path) inputs="$(FUZZ_INPUTS_path)";; stroke) inputs="$(FUZZ_INPUTS_stroke)";; clip) inputs="$(FUZZ_INPUTS_clip)";; esac; \
 		first=$$(printf '%s\n' $$inputs | head -n 1); \
 		if [ -z "$$inputs" ]; then printf 'fuzz-replay: the %s corpus is empty; this measures nothing\n' "$$f" >&2; exit 1; fi; \
 		if LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(APP_DIR)/fuzz/replay_$${f}_planted$(EXE_EXTENSION) $$inputs > $(BUILD_DIR)/fuzz-$$f-planted.out 2>&1; then \
@@ -781,6 +782,9 @@ test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAYS) ## Build with ASan+UBSan and
 	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
 			$(ASAN_APP_DIR)/fuzz/replay_stroke$(EXE_EXTENSION) $(FUZZ_INPUTS_stroke)
+	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
+		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
+			$(ASAN_APP_DIR)/fuzz/replay_clip$(EXE_EXTENSION) $(FUZZ_INPUTS_clip)
 	@printf '\nASan+UBSan suite clean.\n'
 
 ####################################################################

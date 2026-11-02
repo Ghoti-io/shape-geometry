@@ -8,12 +8,13 @@
 # Ghoti.io Shape Geometry is free software: you can redistribute it and/or modify it
 # under the terms of the GNU Lesser General Public License version 3 as
 # published by the Free Software Foundation.
-"""Write the seed corpora of the path and stroke fuzzers, deterministically (story 16; CAP-15, AD-19).
+"""Write the seed corpora of the path, stroke and clip fuzzers, deterministically (story 16; CAP-15, AD-19).
 
-    python3 tools/gen-fuzz-corpus.py            # write tests/fuzz/corpus/path/ and tests/fuzz/corpus/stroke/
+    python3 tools/gen-fuzz-corpus.py            # write tests/fuzz/corpus/path/, stroke/ and clip/
     python3 tools/gen-fuzz-corpus.py --check    # fail if the committed files differ
 
-The stroke corpus (tests/fuzz/fuzz_stroke.c) is described at stroke_files() below.
+The stroke corpus (tests/fuzz/fuzz_stroke.c) is described at stroke_files() below, and the clip corpus
+(tests/fuzz/fuzz_clip.c) at clip_files().
 
 Every file is an input of tests/fuzz/fuzz_path.c: an option byte (the dimension, the
 limits, whether an allocation fails), the allocation to fail, then a stream of ops,
@@ -436,6 +437,132 @@ def stroke_files():
     return out
 
 
+# --- the clip corpus (tests/fuzz/fuzz_clip.c) -------------------------------------------------------------------------
+#
+# A file is: an option byte (bit 0 the whole int32 range, bit 1 a small max_points, bit 2 a failing allocation), a byte for the
+# limit and the allocation to fail, a quadrilateral kind (0 a rectangle, 1 reversed, 2 a repeated point, 3 a bowtie, 4 a
+# sheared rectangle, 5 four raw points) with its centre, half sizes and shear (or the four points), the number of contours and
+# for each the number of points, each point's kind byte (0 a corner, 1 a point on a side, else a coordinate pair) and a closed
+# flag.  A coordinate is a byte below 12 (a table of degenerate values; below 21 in the wide range) or 200 and two bytes (a
+# 16-bit value, over four in the small range, times 32768 in the wide one).
+
+
+def cc(v):
+    """A small-range coordinate of value v (|v| <= 8191)."""
+    r = (v * 4) & 0xFFFF
+    return bytes([200, r >> 8, r & 255])
+
+
+def cw(v16):
+    """A wide-range coordinate of v16 * 32768."""
+    r = v16 & 0xFFFF
+    return bytes([200, r >> 8, r & 255])
+
+
+def clip_quad(kind, cx, cy, hx, hy, shear=0, wide=False):
+    c = cw if wide else cc
+    scale = 1 if not wide else 1
+    return (bytes([kind]) + c(cx) + c(cy) + c(2 * (hx - 1)) + c(2 * (hy - 1)) + bytes([shear & 255]))
+
+
+def clip_raw_quad(points, wide=False):
+    c = cw if wide else cc
+    return bytes([5]) + b"".join(c(x) + c(y) for x, y in points)
+
+
+def clip_poly(points, closed=1, wide=False):
+    """points: ('p', x, y), ('c', corner) or ('s', a, b, f)."""
+    c = cw if wide else cc
+    out = bytes([len(points)])
+    for pt in points:
+        if pt[0] == "p":
+            out += bytes([2]) + c(pt[1]) + c(pt[2])
+        elif pt[0] == "c":
+            out += bytes([0, pt[1]])
+        else:
+            out += bytes([1, pt[1], pt[2], pt[3]])
+    return out + bytes([closed])
+
+
+def clip_input(quad, polys, opts=0, fail=0):
+    return bytes([opts, fail]) + quad + bytes([len(polys) - 1]) + b"".join(polys)
+
+
+def clip_scripted():
+    out = {}
+    q = clip_quad(0, 20, 20, 30, 30)
+    inside = clip_poly([("p", 10, 10), ("p", 40, 12), ("p", 20, 40)])
+    cover = clip_poly([("p", -60, -60), ("p", 90, -60), ("p", 90, 90), ("p", -60, 90)])
+    hole = clip_poly([("p", 5, 5), ("p", 5, 35), ("p", 35, 35), ("p", 35, 5)])
+    cutting = clip_poly([("p", 0, 0), ("p", 120, 10), ("p", 30, 120)])
+    far = clip_poly([("p", 400, 400), ("p", 500, 400), ("p", 450, 500)])
+    out["invalid-collinear.bin"] = clip_input(clip_raw_quad([(0, 0), (10, 10), (20, 20), (30, 30)]), [inside])
+    out["invalid-bowtie.bin"] = clip_input(clip_quad(3, 20, 20, 30, 30), [inside])
+    out["invalid-one-point.bin"] = clip_input(clip_raw_quad([(5, 5)] * 4), [inside])
+    out["limit.bin"] = clip_input(q, [cutting], opts=2, fail=1)
+    out["oom-first.bin"] = clip_input(q, [cutting], opts=4, fail=0)
+    out["oom-later.bin"] = clip_input(q, [cutting, hole], opts=4, fail=3)
+    out["empty.bin"] = clip_input(q, [far])
+    out["inside-open.bin"] = clip_input(q, [clip_poly([("p", 10, 10), ("p", 40, 12), ("p", 20, 40)], closed=0)])
+    out["inside-closed.bin"] = clip_input(q, [inside, hole])
+    out["cut.bin"] = clip_input(q, [cutting, inside])
+    out["cover-and-hole.bin"] = clip_input(q, [cover, hole])
+    out["clockwise.bin"] = clip_input(clip_quad(1, 20, 20, 30, 30), [cover, inside])
+    out["repeated-point.bin"] = clip_input(clip_quad(2, 20, 20, 30, 30), [cutting, inside])
+    out["sheared.bin"] = clip_input(clip_quad(4, 20, 20, 30, 30, shear=24), [cutting, cover])
+    out["on-the-line.bin"] = clip_input(q, [clip_poly([("c", 0), ("c", 1), ("p", 60, 60), ("s", 1, 2, 4)])])
+    out["corners-and-sides.bin"] = clip_input(q, [clip_poly([("c", 0), ("s", 0, 1, 3), ("c", 2), ("s", 3, 0, 5)]),
+                                                  clip_poly([("s", 1, 2, 8), ("c", 3), ("p", 100, 100)], closed=0)])
+    wq = clip_quad(0, 100, 50, 200, 150, wide=True)
+    wp = clip_poly([("p", -300, -300), ("p", 300, -200), ("p", 100, 300)], wide=True)
+    out["wide.bin"] = clip_input(wq, [wp, wp], opts=1)
+    out["wide-extremes.bin"] = bytes([1, 0, 0]) + bytes([12, 13, 12, 14, 0, 0, 0, 0, 0]) + b"\x00\x01\x03\x02" + bytes([12, 13, 14, 15, 16]) + b"\x01"
+    out["wide-invalid.bin"] = clip_input(clip_raw_quad([(0, 0), (5, 5), (10, 10), (20, 20)], wide=True), [wp], opts=1)
+    out["wide-limit.bin"] = clip_input(wq, [wp], opts=3, fail=0)
+    return out
+
+
+def clip_biased(seed):
+    rng = Rng(seed)
+    opts = (1 if rng.below(5) == 0 else 0) | (2 if rng.below(8) == 0 else 0) | (4 if rng.below(8) == 0 else 0)
+    wide = opts & 1
+    c = cw if wide else cc
+    span = 120 if wide else 400
+    if rng.below(10) == 0:
+        quad = clip_raw_quad([(rng.below(2 * span) - span, rng.below(2 * span) - span) for _ in range(4)], bool(wide))
+    else:
+        quad = clip_quad(rng.below(5), rng.below(span) - span // 2, rng.below(span) - span // 2, 4 + rng.below(span // 4),
+                         4 + rng.below(span // 4), rng.below(40) - 20, bool(wide))
+    polys = []
+    for _ in range(1 + rng.below(3)):
+        pts = []
+        for _ in range(1 + rng.below(9)):
+            k = rng.below(6)
+            if k == 0:
+                pts.append(("c", rng.below(4)))
+            elif k == 1:
+                pts.append(("s", rng.below(4), rng.below(4), rng.below(9)))
+            else:
+                pts.append(("p", rng.below(2 * span) - span, rng.below(2 * span) - span))
+        polys.append(clip_poly(pts, rng.below(4) != 0, bool(wide)))
+    return clip_input(quad, polys, opts=opts, fail=rng.below(24))
+
+
+CLIP_BIASED_FILES = 100
+CLIP_PLAIN_FILES = 30
+
+
+def clip_files():
+    out = {}
+    for i in range(CLIP_BIASED_FILES):
+        out["biased-%03d.bin" % i] = clip_biased(i + 1)
+    for i in range(CLIP_PLAIN_FILES):
+        rng = Rng(9000 + i)
+        out["plain-%03d.bin" % i] = bytes(rng.byte() for _ in range(3 + 20 + rng.below(200)))
+    out.update(clip_scripted())
+    return out
+
+
 def check_or_write(root, want, check):
     if check:
         have = sorted(os.listdir(root)) if os.path.isdir(root) else []
@@ -459,6 +586,7 @@ def main():
     check = "--check" in sys.argv
     check_or_write(os.path.join(base, "path"), files(), check)
     check_or_write(os.path.join(base, "stroke"), stroke_files(), check)
+    check_or_write(os.path.join(base, "clip"), clip_files(), check)
 
 
 if __name__ == "__main__":
