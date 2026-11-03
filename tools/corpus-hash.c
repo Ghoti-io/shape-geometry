@@ -198,6 +198,20 @@ static void feed_arc_u64(uint64_t v, GSHGEOM_Hash * h, unsigned long * n) {
   gshgeom_hash_u64(h, v);
 }
 
+/* The lattice section's row receiver: the row's j and its indices go into the hash. */
+typedef struct Lat_Rows {
+  GSHGEOM_Hash * h;
+  unsigned long * n;
+} Lat_Rows;
+
+static int lat_row_hash(void * ctx, int64_t j, int64_t lo, int64_t hi) {
+  Lat_Rows * lr = ctx;
+  feed_arc_u64((uint64_t)j, lr->h, lr->n);
+  feed_arc_u64((uint64_t)lo, lr->h, lr->n);
+  feed_arc_u64((uint64_t)hi, lr->h, lr->n);
+  return 0;
+}
+
 /* The end point of the last element of @p path (an arc's authoritative end, a curve's last control point). */
 static GSHGEOM_Point path_end(const GSHGEOM_Path * path) {
   const size_t n = gshgeom_path_element_count(path);
@@ -1541,6 +1555,147 @@ int main(void) {
 #undef CLIP_NEXT
     printf("shape-geometry.clip-hash %016" PRIx64 "\n", gshgeom_hash_value(&clip_total));
     printf("shape-geometry.clip-count %lu\n", clip_count);
+  }
+
+  /* The lattice section (lattice.h, LT1 to LT4): the copies of random lattices under random maps, the translation of a copy at
+   * large indices, and the period of random integer lattices.  Its own generator and its own pair after the others.  The
+   * copies are decided by exact sums of products and a gallop on integers, the translation is two products and two sums in
+   * double, the period is integer arithmetic: a target that fuses a multiply-add, widens a double, wraps a 64-bit product or
+   * reads a byte order differently shows here.  Every double is made from an integer and a division, so no libm and no
+   * parsing is involved.  The cases draw, in this order: a class, the map's four entries, its translation (2), the cell (4),
+   * the steps (2), the repeat flags (2), the rectangle (4) and the limit. */
+  {
+    GSHGEOM_Hash lat_total;
+    unsigned long lat_count = 0;
+    gshgeom_hash_init(&lat_total);
+    uint64_t ls = UINT64_C(0x1A771CE0FF1CE5ED);
+#define LAT_NEXT() (ls ^= ls >> 12, ls ^= ls << 25, ls ^= ls >> 27, ls * UINT64_C(2685821657736338717))
+#define LAT_INT(lo, hi) ((int64_t)(lo) + (int64_t)(LAT_NEXT() % (uint64_t)((hi) - (lo) + 1)))
+    for (unsigned round = 0; round < 480; round++) {
+      const unsigned klass = round % 4u;
+      const double den = klass == 0 ? 16.0 : (klass == 1 ? 97.0 : (klass == 2 ? 31.0 : 7.0));
+      double m[4];
+      for (;;) {
+        for (int k = 0; k < 4; k++) {
+          m[k] = (double)LAT_INT(-48, 48) / den;
+        }
+        const double det = m[0] * m[3] - m[1] * m[2];
+        if (det > 0.2 || det < -0.2) {
+          break;
+        }
+      }
+      const int64_t ti = LAT_INT(-4000, 4000);
+      const int64_t tj = LAT_INT(-4000, 4000);
+      double t0 = (double)ti / 17.0;
+      double t1 = (double)tj / 17.0;
+      if (klass == 2u) {
+        t0 += 1000000.0;
+        t1 -= 250000.0;
+      }
+      const int64_t i0 = LAT_INT(-200, 200);
+      const int64_t i1 = LAT_INT(-200, 200);
+      const int64_t i2 = LAT_INT(3, 120);
+      const int64_t i3 = LAT_INT(3, 120);
+      const double cx = (double)i0 / 13.0;
+      const double cy = (double)i1 / 13.0;
+      const double cw = (double)i2 / 11.0;
+      const double ch = (double)i3 / 11.0;
+      const uint64_t keep_x = LAT_NEXT() % 3u;
+      const double step_x = (double)LAT_INT(5, 140) / 11.0;
+      const uint64_t keep_y = LAT_NEXT() % 3u;
+      const double step_y = (double)LAT_INT(5, 140) / 11.0;
+      double sx = keep_x == 0u ? cw : step_x;
+      double sy = keep_y == 0u ? ch : step_y;
+      if (klass == 3u) {
+        sx /= 4096.0;
+        sy /= 4096.0; /* steps that make many copies: the limit is met */
+      }
+      GSHGEOM_Map map;
+      const double ma[4] = {m[0], m[1], m[2], m[3]};
+      const double mt[2] = {t0, t1};
+      if (gshgeom_map_from_matrix(2, ma, mt, &map) != GSHGEOM_OK) {
+        return fail("cannot build a map for the lattice section");
+      }
+      GSHGEOM_Lattice lat;
+      lat.x = cx;
+      lat.y = cy;
+      lat.w = cw;
+      lat.h = ch;
+      lat.x_step = sx;
+      lat.y_step = sy;
+      const uint64_t no_rx = LAT_NEXT() % 6u;
+      const uint64_t no_ry = LAT_NEXT() % 6u;
+      lat.repeat_x = no_rx == 0u ? 0u : 1u;
+      lat.repeat_y = no_ry == 0u ? 0u : 1u;
+      const int64_t bx = klass == 2u ? 1000000 : 0;
+      const int64_t by = klass == 2u ? -250000 : 0;
+      const int64_t ox = LAT_INT(-300, 300);
+      const int64_t oy = LAT_INT(-300, 300);
+      const int64_t x0 = bx + ox;
+      const int64_t y0 = by + oy;
+      const int64_t rw = LAT_INT(0, 400);
+      const int64_t rh = LAT_INT(0, 400);
+      const int64_t rect[4] = {x0, y0, x0 + rw, y0 + rh};
+      const uint64_t limits[3] = {64u, 4096u, (uint64_t)1 << 20};
+      const uint64_t max_count = limits[LAT_NEXT() % 3u];
+      Lat_Rows lr = {&lat_total, &lat_count};
+      uint64_t count = 0;
+      const GSHGEOM_Result r = gshgeom_lattice_each(&map, &lat, rect, max_count, lat_row_hash, &lr, &count);
+      feed_arc_int((int)r, &lat_total, &lat_count);
+      feed_arc_u64(count, &lat_total, &lat_count);
+      /* the translation of the copies at the ends of a row, as bits */
+      double w[2];
+      const int64_t wi = LAT_INT(-1000000, 1000000);
+      const int64_t wj = LAT_INT(-1000000, 1000000);
+      if (gshgeom_lattice_translation(&map, &lat, wi, wj, w) == GSHGEOM_OK) {
+        feed_arc_u64(gshgeom_f64_bits(w[0]), &lat_total, &lat_count);
+        feed_arc_u64(gshgeom_f64_bits(w[1]), &lat_total, &lat_count);
+      }
+      double q[8];
+      if (gshgeom_lattice_quad(&map, &lat, q) == GSHGEOM_OK) {
+        for (int k = 0; k < 8; k++) {
+          feed_arc_u64(gshgeom_f64_bits(q[k]), &lat_total, &lat_count);
+        }
+      }
+      double cell[4];
+      const int64_t ci = LAT_INT(-1000000, 1000000);
+      const int64_t cj = LAT_INT(-1000000, 1000000);
+      if (gshgeom_lattice_cell(&lat, ci, cj, cell) == GSHGEOM_OK) {
+        for (int k = 0; k < 4; k++) {
+          feed_arc_u64(gshgeom_f64_bits(cell[k]), &lat_total, &lat_count);
+        }
+      }
+    }
+    /* the period of random integer lattices, and the reduction of random points */
+    for (unsigned round = 0; round < 400; round++) {
+      const int64_t big = (round % 4u == 3u) ? 40000 : 40;
+      const int64_t a0 = LAT_INT(-big, big);
+      const int64_t a1 = LAT_INT(-big, big);
+      const int64_t b0 = LAT_INT(-big, big);
+      const int64_t b1 = LAT_INT(-big, big);
+      const int64_t a[2] = {a0, a1};
+      const int64_t b[2] = {b0, b1};
+      GSHGEOM_Lattice_Period pd;
+      const GSHGEOM_Result r = gshgeom_lattice_period(a, b, &pd);
+      feed_arc_int((int)r, &lat_total, &lat_count);
+      if (r == GSHGEOM_OK) {
+        feed_arc_u64((uint64_t)pd.p, &lat_total, &lat_count);
+        feed_arc_u64((uint64_t)pd.r, &lat_total, &lat_count);
+        feed_arc_u64((uint64_t)pd.s, &lat_total, &lat_count);
+        for (int k = 0; k < 4; k++) {
+          int64_t rep[2];
+          const int64_t rx = LAT_INT(-1000000000, 1000000000);
+          const int64_t ry = LAT_INT(-1000000000, 1000000000);
+          gshgeom_lattice_reduce(&pd, rx, ry, rep);
+          feed_arc_u64((uint64_t)rep[0], &lat_total, &lat_count);
+          feed_arc_u64((uint64_t)rep[1], &lat_total, &lat_count);
+        }
+      }
+    }
+#undef LAT_INT
+#undef LAT_NEXT
+    printf("shape-geometry.lattice-hash %016" PRIx64 "\n", gshgeom_hash_value(&lat_total));
+    printf("shape-geometry.lattice-count %lu\n", lat_count);
   }
   return 0;
 }

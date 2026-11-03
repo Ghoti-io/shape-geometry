@@ -9,7 +9,7 @@
 # HASH_FILE is tests/corpus/geometry.hash, whose `hash` and `count` lines are
 # the committed values, and whose `predicate-hash` and `predicate-count` lines are the predicate section's (a hash of its
 # own, so the first pair never moves) and whose `vertex-hash` and `vertex-count` lines are the vertex section's, a third; the arc,
-# arc-vertex and conic pairs follow in the same way, and the shapes pair and the clip pair after them.
+# arc-vertex and conic pairs follow in the same way, and the shapes pair, the clip pair and the lattice pair after them.
 # No value may be empty, so a probe that crashed, or a
 # hash file that was emptied, fails rather than comparing nothing with nothing.
 probe="${1:?usage: check-corpus-hash.sh PROBE HASH_FILE}"
@@ -48,6 +48,10 @@ got_klhash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.clip-hash"{print $2
 got_klcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.clip-count"{print $2}')
 want_klhash=$(awk '$1=="clip-hash"{print $2}' "$file" 2>/dev/null)
 want_klcount=$(awk '$1=="clip-count"{print $2}' "$file" 2>/dev/null)
+got_lthash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.lattice-hash"{print $2}')
+got_ltcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.lattice-count"{print $2}')
+want_lthash=$(awk '$1=="lattice-hash"{print $2}' "$file" 2>/dev/null)
+want_ltcount=$(awk '$1=="lattice-count"{print $2}' "$file" 2>/dev/null)
 if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$got_count" ] ||
    [ -z "$want_phash" ] || [ -z "$want_pcount" ] || [ -z "$got_phash" ] || [ -z "$got_pcount" ] ||
    [ -z "$want_vhash" ] || [ -z "$want_vcount" ] || [ -z "$got_vhash" ] || [ -z "$got_vcount" ] ||
@@ -55,7 +59,8 @@ if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$g
    [ -z "$want_avhash" ] || [ -z "$want_avcount" ] || [ -z "$got_avhash" ] || [ -z "$got_avcount" ] ||
    [ -z "$want_chash" ] || [ -z "$want_ccount" ] || [ -z "$got_chash" ] || [ -z "$got_ccount" ] ||
    [ -z "$want_shash" ] || [ -z "$want_scount" ] || [ -z "$got_shash" ] || [ -z "$got_scount" ] ||
-   [ -z "$want_klhash" ] || [ -z "$want_klcount" ] || [ -z "$got_klhash" ] || [ -z "$got_klcount" ]; then
+   [ -z "$want_klhash" ] || [ -z "$want_klcount" ] || [ -z "$got_klhash" ] || [ -z "$got_klcount" ] ||
+   [ -z "$want_lthash" ] || [ -z "$want_ltcount" ] || [ -z "$got_lthash" ] || [ -z "$got_ltcount" ]; then
   printf 'check-corpus-hash: nothing to compare (probe %s/%s, predicate %s/%s and vertex %s/%s, committed %s/%s, %s/%s and %s/%s in %s)\n' \
     "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$want_hash" "$want_count" "$want_phash" "$want_pcount" \
     "$want_vhash" "$want_vcount" "$file" >&2
@@ -101,4 +106,9 @@ if [ "$got_klhash" != "$want_klhash" ] || [ "$got_klcount" != "$want_klcount" ];
     "$got_klhash" "$got_klcount" "$want_klhash" "$want_klcount" >&2
   exit 1
 fi
-printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount"
+if [ "$got_lthash" != "$want_lthash" ] || [ "$got_ltcount" != "$want_ltcount" ]; then
+  printf 'check-corpus-hash: FAIL: lattice %s over %s results, committed %s over %s\n' \
+    "$got_lthash" "$got_ltcount" "$want_lthash" "$want_ltcount" >&2
+  exit 1
+fi
+printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s; lattice %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount" "$got_lthash" "$got_ltcount"
