@@ -20,6 +20,10 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   decided exactly and every crossing the exact intersection rounded once to 26.6, half up, in 128-bit integer arithmetic, so
   the result is the same bits on every target; and `gshgeom_flat_path_from_points`, which builds a flat path from explicit
   points and subpaths.
+- The copies of a repeated cell (`lattice.h`): which copies of a lattice meet a closed rectangle, in lattice order and as rows,
+  decided exactly (the same set on every target, and a count that does not visit the copies, so a step of `2^-64` is a limit
+  and not a stall); the translation of a copy as a product and two sums with no accumulation; and the integer period of a
+  lattice of whole-pixel steps (its Hermite normal form and the reduction into one period).
 - Along-path parametrization: a measured path built once from a model path (any
   curve kind, 2D or 3D, any number of subpaths) gives its arc length and, at any
   distance along it, the point, the unit tangent and the left normal. The arc

@@ -1084,6 +1084,114 @@ redundant area test (a quadrilateral whose fan triangles at corners 1 and 3 are 
 collinear), the order of the lexicographic comparison, and the skipped zero-length side (a side of zero length classifies
 every point as on the line and cuts nothing).
 
+## The copies of a lattice
+
+`lattice.h` answers three questions a renderer of repeated pictures (a pattern, a hatch) asks, so that every renderer draws
+the same set of copies and forms each copy's position with the same bits: which copies of a lattice meet a rectangle
+(LT1), where one copy is (LT2), and, for a lattice of whole-pixel steps, what its period is (LT3).  LT4 is the determinism
+rule, below.  The rules are stated in the header; this section gives the arguments.
+
+### The set of copies (LT1)
+
+A lattice is a cell `[x, x + w] x [y, y + h]` and two steps; the map `M` takes its space to the device.  Write `Q_k` for
+the four corners of the cell of copy `(0, 0)` under the linear part of `M` (each coordinate `fl(m00 px + m01 py)`, product
+and sum rounded, no fused multiply-add), `tau` for the translation of `M`, and `A = (fl(m00 x_step), fl(m10 x_step))`,
+`B = (fl(m01 y_step), fl(m11 y_step))` for the device step vectors.  All of these are doubles.  A copy `(i, j)` **meets the
+rectangle** `R` when the convex hull of the four *exact* points `Q_k + tau + i A + j B` meets `R`, which is closed.
+Nothing is rounded in the decision: the points are the exact sums of the doubles, and the sign of every test is the exact
+sign of a sum of products of doubles.
+
+**A row is an interval.**  Let `H` be the convex hull of the `Q_k` and `K = R - H = {r - q}`, the Minkowski difference.  The
+hull of the copy meets `R` exactly when `w = tau + i A + j B` is in `K`, because `H + w` meets `R` if and only if some `r - q`
+equals `w`.  `K` is convex (a Minkowski sum of two convex sets).  For a fixed `j` the points `w(i) = (tau + j B) + i A` lie on
+a line at equal spacing, and the integers `i` for which equally spaced points of a line lie in a convex set are consecutive
+integers: if `w(a)` and `w(c)` are in `K` then so is every point between them.  The rows of a lattice are therefore reported
+as `i_lo .. i_hi`.  The rows themselves are not always consecutive: the lattice points in a thin convex region can lie in
+rows 0 and 2 and miss row 1, and a row with none is not reported.  (The tests keep a named case.)
+
+**The constraints.**  `K = R + (-H)` is a convex polygon, and a convex polygon is the intersection of the half-planes
+`u . w <= h_K(u)` over its edge normals `u`, where `h_K(u) = h_R(u) + h_{-H}(u) = max_r u . r - min_k u . Q_k` (the support
+function of a Minkowski sum is the sum of the support functions).  The edge normals of `K` are those of `R` (the two axes,
+both signs) and those of `H`.  An edge of `H` joins two of the four `Q_k`, so its normal is among the normals of the six
+segments between them, both signs; any further direction `u` gives a half-plane that contains `K`, so using all twelve of
+those and the four axis directions, sixteen in all, gives `K` exactly.  Each constraint is `c i + e j + g <= 0` with
+`c = u . A`, `e = u . B` and `g = u . tau - u . r + u . Q_k` for the extreme corner `r` of `R` and the extreme point `Q_k`
+of the quadrilateral for `u`, picked by exact comparisons.  `c`, `e` and `g` are exact sums of products of doubles.
+
+**The search.**  For a fixed row, `S(i) = c i + (e j + g)` is monotone in `i`, so the set where `S <= 0` is a ray.  The end
+of the ray is estimated in `double` as `-(e j + g) / c` from the three coefficients, each rounded once from the exact sum, and
+then *made exact*: the predicate `S(i) <= 0` is evaluated exactly (a filter decides when the rounded value of `S` is
+farther from zero than its error bound, `2^-48` of the sum of the absolute terms, and the exact sum decides the rest), the
+predicate is monotone, and a gallop from the estimate in steps of 1, 2, 4 until the sign changes, followed by a bisection,
+finds the last (or first) integer where it holds.  The estimate decides only how many steps this takes; a wrong estimate costs
+steps and never a wrong answer, and the clamp to the index range `+-(2^53 - 1)` (indices an exact double can hold) is the
+only place an index is cut.  A constraint with `c = 0` exactly does not involve `i` and decides the whole row.
+
+**The rows.**  Both axes repeating, the integers `j` that have a row are among those between the two supporting lines of `K`
+parallel to `A`.  Their direction is `v = (-A_y, A_x)`: `v . A = 0` and `v . B = det(A, B)`, so the constraint from `v`
+(and from `-v`) involves `j` alone, and the same search gives the first and last `j` exactly.  A row in the strip may have no
+integer `i`; it is then not reported.  Step vectors that are parallel (`det(A, B) = 0` exactly) are refused, as is a
+singular linear part.  With one axis not repeating the index on it is 0: a single row (x repeats), a column of rows of one
+copy each (y repeats), or one copy (neither), found by the same search with the other index fixed at 0.
+
+**The cost, and the limit.**  The count is the sum of the row lengths, found without visiting a copy, and rows are produced in
+lattice order, so a lattice whose first row holds more than `max_count` copies is `ERR_LIMIT` in time independent of the
+lattice: a step of `2^-64` under a full target is one row of `2^53` or more copies and returns at once.  The call reports at
+most `max_count` copies (whole rows, and a last row cut to the room that is left), and the count it returns is `max_count + 1`
+when there are more.  A lattice whose strip has many rows that hold nothing (steps that are huge in one direction and tiny in
+the other) would take time in the number of rows, not copies; the rows visited, empty ones included, are bounded by
+`2 max_count + 65536` and one more is `ERR_LIMIT` as well, a function of the inputs alone, so the answer does not depend on
+the machine.  A row costs a constant number of constraint evaluations (sixteen constraints, a few filtered evaluations each,
+and an exact one only where a copy touches the rectangle).
+
+**What is and is not the drawn position.**  The set above is defined on the exact positions, because only then is a row an
+interval and the decision independent of how the sums round.  The *drawn* position of a copy is LT2's rounded sum, which
+differs from the exact one by a few units in the last place of its magnitude, so a copy that touches the rectangle without
+area may be drawn at a position that no longer touches it.  A copy that is not reported is therefore never one whose drawn
+position overlaps the rectangle by more than that rounding.
+
+### The position of a copy (LT2)
+
+The translation of copy `(i, j)` is `((tau + i a) + j b)` per component with `a`, `b` the step vectors formed once, `i` and
+`j` converted to double exactly (`|i| < 2^53`), each operation rounded once and nothing fused.  There is no accumulation, so the
+position of copy 1,000,000 carries one rounding of a product and two of sums and not a million roundings.  The cell of copy
+`(i, j)` in the source space has `left = x + i x_step` and, when `x_step` equals `w`, `right = x + (i + 1) x_step`, the very
+double the next cell's `left` is, so abutting cells share their edge to the bit; otherwise `right = left + w`.
+
+### The period (LT3)
+
+For integer step vectors `a`, `b` with determinant `D != 0` the lattice `L = Z a + Z b` of whole-pixel translations has index
+`|D|` in `Z^2`.  The lattice's projection to `y` is generated by `s = gcd(a_1, b_1)`, the sublattice with `y = 0` by `(p, 0)`
+where `p = |D| / s` (the vectors of `L` with `y = 0` are the multiples of `(b_1, -a_1) / s` combined, whose `x` is `D / s`), and
+the extended Euclid algorithm gives integers `u`, `v` with `u a_1 + v b_1 = s`, so that `(u a_0 + v b_0, s)` is in `L`: its `x`
+reduced modulo `p` is `r`.  Then `L` is generated by `(p, 0)` and `(r, s)` (their span has the right index `p s = |D|` and is
+contained in `L`), the Hermite normal form.  The reduction `rep(x, y) = ((x - k r) mod p, y - k s)` with `k = floor(y / s)`
+subtracts `k` copies of `(r, s)` to bring `y` into `[0, s)` and then multiples of `(p, 0)` to bring `x` into `[0, p)`, so it
+is constant on the classes of `Z^2 / L`, and since the window `[0, p) x [0, s)` has `p s = |D|` points, one in each class.
+The arithmetic is in 64-bit integers: components are below `2^31`, so a determinant is below `2^63`; `|D|` is at most `2^31`
+(`ERR_LIMIT` past it, far beyond any raster), so `p` and `r` are below `2^31` and `(k mod p) r < 2^62`; the Euclid coefficients
+are at most `2^31` and their products with the components below `2^62`.
+
+### Determinism (LT4)
+
+The only floating-point operations that decide anything are the formulas above (two products and a sum for a corner, a
+product for a step, two sums and two products for a position) and the rounded estimate of the search, whose value cannot
+change the answer.  There is no libm, no `long double`, no fused multiply-add, and 64-bit integers are converted to double only
+through two 32-bit halves, so a 32-bit x87 host makes no x87 instruction for them.  `lattice-hash` in the cross-target probe
+hashes 480 random lattices (rows, counts, limits, translations, quads, cells) and 400 random integer lattices (the period and
+reductions).
+
+### What checks it
+
+`tests/lattice_oracle.h` decides the same question by geometry and not by the half-plane method (a point of the hull in the
+rectangle, a segment of the hull meeting a side, a corner of the rectangle in a triangle of the hull's points) in exact
+rationals and, for inputs that are multiples of `2^-6`, in 64-bit integers fast enough to visit every index of a window; the
+tests compare every row of 60 random dyadic lattices to every index of the window and the end of every row of 200 random
+non-dyadic ones to the exact rationals.  `tools/gen-lattice-vectors.py` restates the definition in Python fractions and prints
+`tests/lattice_vectors.h` (40 lattices, 40 translations, 17 periods).  The period is checked exhaustively on named and random
+lattices (periodicity, a window of exactly one point per class).  The plants of `tools/check-planted.py` (ids `lat-`) cover
+each rule and branch.
+
 ## Tests and gates
 
 `make test` runs the unit tests and the gates; `make check-planted` builds
