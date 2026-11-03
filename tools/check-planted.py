@@ -3011,6 +3011,284 @@ if os.environ.get("PLANT_UNSEEN"):
     PLANTS += CLIP_UNSEEN_PLANTS
 
 
+# --- The copies of a lattice (lattice.h, src/lattice/lattice.c, LT1 to LT4) -------------------------------------------------------
+# The ids start with lat-.  Every rule and branch has a plant: the cell (the shared edge, the index range, the axes), the
+# translation (the product, the order of the sums, which step goes with which index), the quad (the corners, the rows of the
+# linear part), the validity checks, the constraints (each of the sixteen directions, the choice of the extreme corner and
+# point, the sign of each term), the exact sign and its filter, the search (the direction, the gallop, the bisection, the
+# clamps), the rows (the strip, the row bound, each repeat case), the report (the limit, the cut row, the stop) and the period
+# (the Hermite form, the sign of the Euclid coefficients, the reduction).  `make check-planted PLANT_ONLY='^lat-'` runs them;
+# the ones in LAT_UNSEEN are equivalent mutants (the cause is stated beside the list) and run with PLANT_UNSEEN=1.
+LT = "src/lattice/lattice.c"
+LTT = ["testLattice"]
+LTP = ["testLattice", "probe"]
+LAT_PLANTS = []
+
+
+def lp(pid, old, new, tests=LTT):
+    LAT_PLANTS.append((pid, "src", LT, old, new, tests))
+
+
+# LT2: the cell
+lp("lat-cell-right-always-left-plus-w", "l->x_step == l->w ? l->x + i2d(i + 1) * l->x_step : left + l->w", "left + l->w")
+lp("lat-cell-bottom-always-top-plus-h", "l->y_step == l->h ? l->y + i2d(j + 1) * l->y_step : top + l->h", "top + l->h")
+lp("lat-cell-abut-test-uses-wrong-size", "l->y_step == l->h ? l->y", "l->y_step == l->w ? l->y")
+lp("lat-cell-top-uses-x-step", "const double top = l->y + i2d(j) * l->y_step;", "const double top = l->y + i2d(j) * l->x_step;")
+lp("lat-cell-index-limit-loose", "i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double left",
+   "i > INDEX_MAX + 1 || j < -INDEX_MAX || j > INDEX_MAX || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double left")
+lp("lat-cell-index-limit-tight", "i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double left",
+   "i >= INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double left")
+lp("lat-cell-y-index-unchecked", "i < -INDEX_MAX || i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double left",
+   "i < -INDEX_MAX || i > INDEX_MAX || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  const double left")
+lp("lat-cell-nonfinite-accepted", "  if (!is_fin(left) || !is_fin(top) || !is_fin(right) || !is_fin(bottom)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  out[0] = left;", "  out[0] = left;")
+lp("lat-valid-width-may-be-zero", "      !(l->w > 0.0) || !(l->h > 0.0)", "      !(l->w >= 0.0) || !(l->h > 0.0)")
+lp("lat-valid-height-may-be-negative", "      !(l->w > 0.0) || !(l->h > 0.0)", "      !(l->w > 0.0) || !(l->h != 0.0)")
+lp("lat-valid-negative-step-accepted", "l->x_step < 0.0 || l->y_step < 0.0 ||", "l->y_step < 0.0 ||")
+lp("lat-valid-repeat-two-accepted", "l->repeat_x > 1u || l->repeat_y > 1u) {", "l->repeat_y > 1u) {")
+lp("lat-valid-zero-step-on-repeating-axis", "return (l->repeat_x == 0u || l->x_step > 0.0) && (l->repeat_y == 0u || l->y_step > 0.0);", "return 1;")
+lp("lat-valid-zero-step-refused-when-not-repeating", "return (l->repeat_x == 0u || l->x_step > 0.0) && (l->repeat_y == 0u || l->y_step > 0.0);", "return l->x_step > 0.0 && l->y_step > 0.0;")
+lp("lat-valid-nonfinite-step-accepted", "!is_fin(l->x_step) || !is_fin(l->y_step) ||", "")
+# LT2: steps, translation, quad
+lp("lat-steps-b-uses-x-step", "  b[0] = m->m[0][1] * l->y_step;", "  b[0] = m->m[0][1] * l->x_step;")
+lp("lat-steps-a-uses-column-one", "  a[0] = m->m[0][0] * l->x_step;", "  a[0] = m->m[0][1] * l->x_step;")
+lp("lat-steps-a-y-uses-row-zero", "  a[1] = m->m[1][0] * l->x_step;", "  a[1] = m->m[0][0] * l->x_step;")
+lp("lat-steps-b-y-uses-column-zero", "  b[1] = m->m[1][1] * l->y_step;", "  b[1] = m->m[1][0] * l->y_step;")
+lp("lat-translation-order-of-sums", "(m->t[0] + di * a[0]) + dj * b[0]", "(m->t[0] + dj * b[0]) + di * a[0]")
+lp("lat-translation-y-order-of-sums", "(m->t[1] + di * a[1]) + dj * b[1]", "(m->t[1] + dj * b[1]) + di * a[1]")
+lp("lat-translation-x-drops-j", "(m->t[0] + di * a[0]) + dj * b[0]", "(m->t[0] + di * a[0])")
+lp("lat-translation-y-drops-tau", "(m->t[1] + di * a[1]) + dj * b[1]", "(0.0 + di * a[1]) + dj * b[1]")
+lp("lat-translation-swapped-indices", "(m->t[0] + di * a[0]) + dj * b[0]", "(m->t[0] + dj * a[0]) + di * b[0]")
+lp("lat-translation-sum-fused", "(m->t[0] + di * a[0]) + dj * b[0]", "m->t[0] + (di * a[0] + dj * b[0])")
+lp("lat-translation-nonfinite-accepted", "  if (!is_fin(x) || !is_fin(y)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  out[0] = x;", "  out[0] = x;")
+lp("lat-translation-index-unchecked", "  if (!out || i < -INDEX_MAX || i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !map_ok(m) || !lattice_valid(l)) {", "  if (!out || !map_ok(m) || !lattice_valid(l)) {")
+lp("lat-map-dim-unchecked", "  return m && m->dim == 2 && gshgeom_map_check(m) == GSHGEOM_OK;", "  return m && gshgeom_map_check(m) == GSHGEOM_OK;")
+lp("lat-map-unvalidated", "  return m && m->dim == 2 && gshgeom_map_check(m) == GSHGEOM_OK;", "  return m && m->dim == 2;")
+lp("lat-quad-corner-order", "  const double px[4] = {c[0], c[2], c[2], c[0]};", "  const double px[4] = {c[0], c[2], c[0], c[2]};")
+lp("lat-quad-uses-left-for-right", "  const double px[4] = {c[0], c[2], c[2], c[0]};", "  const double px[4] = {c[0], c[0], c[2], c[0]};")
+lp("lat-quad-y-row-wrong", "    q[2 * k + 1] = m->m[1][0] * px[k] + m->m[1][1] * py[k];", "    q[2 * k + 1] = m->m[1][1] * px[k] + m->m[1][0] * py[k];")
+lp("lat-quad-x-row-wrong", "    q[2 * k] = m->m[0][0] * px[k] + m->m[0][1] * py[k];", "    q[2 * k] = m->m[0][1] * px[k] + m->m[0][0] * py[k];")
+lp("lat-quad-bottom-uses-top", "  const double py[4] = {c[1], c[1], c[3], c[3]};", "  const double py[4] = {c[1], c[1], c[1], c[3]};")
+lp("lat-quad-nonfinite-accepted", "    if (!is_fin(q[2 * k]) || !is_fin(q[2 * k + 1])) {\n      return GSHGEOM_ERR_INVALID;\n    }\n", "")
+# LT1: the argument checks
+lp("lat-each-count-null-allowed", "  if (!count || !rect || !map_ok(map) || !lattice_valid(l) || max_count > (uint64_t)INDEX_MAX) {", "  if (!rect || !map_ok(map) || !lattice_valid(l) || max_count > (uint64_t)INDEX_MAX) {")
+lp("lat-each-max-count-unbounded", "|| max_count > (uint64_t)INDEX_MAX) {", ") {")
+lp("lat-each-max-count-bound-off-by-one", "|| max_count > (uint64_t)INDEX_MAX) {", "|| max_count >= (uint64_t)INDEX_MAX) {")
+lp("lat-each-rect-bound-loose", "    if (rect[k] > TWO53 || rect[k] < -TWO53) {", "    if (rect[k] > TWO53 + 1 || rect[k] < -TWO53) {")
+lp("lat-each-rect-negative-bound-loose", "    if (rect[k] > TWO53 || rect[k] < -TWO53) {", "    if (rect[k] > TWO53 || rect[k] < -TWO53 - 1) {")
+lp("lat-each-rect-x-order-unchecked", "  if (rect[0] > rect[2] || rect[1] > rect[3]) {", "  if (rect[1] > rect[3]) {")
+lp("lat-each-rect-y-order-unchecked", "  if (rect[0] > rect[2] || rect[1] > rect[3]) {", "  if (rect[0] > rect[2]) {")
+lp("lat-each-singular-map-accepted", "    if (gshgeom_exact_sign(t, n) == 0) {\n      return GSHGEOM_ERR_INVALID;\n    }\n  }\n  Ctx cx;", "  }\n  Ctx cx;")
+lp("lat-each-determinant-term-sign", "    gshgeom_exact_put(t, &n, 1, 2, map->m[0][1], map->m[1][0], 0.0);\n    if", "    gshgeom_exact_put(t, &n, 0, 2, map->m[0][1], map->m[1][0], 0.0);\n    if")
+lp("lat-each-step-nonfinite-accepted", "  if (!is_fin(cx.A[0]) || !is_fin(cx.A[1]) || !is_fin(cx.B[0]) || !is_fin(cx.B[1])) {", "  if (0) {")
+lp("lat-each-parallel-steps-accepted", "    if (gshgeom_exact_sign(t, n) == 0) {\n      return GSHGEOM_ERR_INVALID; /* parallel", "    if (0) {\n      return GSHGEOM_ERR_INVALID; /* parallel")
+lp("lat-each-parallel-test-on-wrong-pair", "    gshgeom_exact_put(t, &n, 0, 2, cx.A[0], cx.B[1], 0.0);\n    gshgeom_exact_put(t, &n, 1, 2, cx.A[1], cx.B[0], 0.0);", "    gshgeom_exact_put(t, &n, 0, 2, cx.A[0], cx.B[0], 0.0);\n    gshgeom_exact_put(t, &n, 1, 2, cx.A[1], cx.B[1], 0.0);")
+lp("lat-each-parallel-checked-without-both-axes", "  if (rx && ry) {\n    GSHGEOM_ExactTerm t[2];", "  if (rx || ry) {\n    GSHGEOM_ExactTerm t[2];")
+# the directions
+lp("lat-dir-plus-x-missing", "    dir_set(&d, 1.0, 0.0, 0.0, 0.0);\n    con_build(&cx, d, &ks[nk++]);", "    dir_set(&d, 1.0, 0.0, 0.0, 0.0);")
+lp("lat-dir-minus-x-missing", "    dir_set(&d, 0.0, 1.0, 0.0, 0.0);\n    con_build(&cx, d, &ks[nk++]);", "    dir_set(&d, 0.0, 1.0, 0.0, 0.0);")
+lp("lat-dir-plus-y-missing", "    dir_set(&d, 0.0, 0.0, 1.0, 0.0);\n    con_build(&cx, d, &ks[nk++]);", "    dir_set(&d, 0.0, 0.0, 1.0, 0.0);")
+lp("lat-dir-minus-y-missing", "    dir_set(&d, 0.0, 0.0, 0.0, 1.0);\n    con_build(&cx, d, &ks[nk++]);", "    dir_set(&d, 0.0, 0.0, 0.0, 1.0);")
+lp("lat-dir-pair-normal-missing", "        dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);\n        con_build(&cx, d, &ks[nk++]);", "        dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);")
+lp("lat-dir-pair-opposite-normal-missing", "        dir_set(&d, cx.Q[b][1], cx.Q[a][1], cx.Q[a][0], cx.Q[b][0]);\n        con_build(&cx, d, &ks[nk++]);", "        dir_set(&d, cx.Q[b][1], cx.Q[a][1], cx.Q[a][0], cx.Q[b][0]);")
+lp("lat-dir-normal-not-rotated", "        dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);", "        dir_set(&d, cx.Q[a][0], cx.Q[b][0], cx.Q[b][1], cx.Q[a][1]);")
+lp("lat-dir-pairs-from-one-vertex", "      for (int b = a + 1; b < 4; b++) {\n        if (cx.Q[a][0]", "      for (int b = a + 1; b < 2; b++) {\n        if (cx.Q[a][0]")
+lp("lat-dir-pair-last-vertex-skipped", "    for (int a = 0; a < 4; a++) {\n      for (int b = a + 1; b < 4; b++) {", "    for (int a = 0; a < 3; a++) {\n      for (int b = a + 1; b < 3; b++) {")
+lp("lat-dir-equal-points-not-skipped", "        if (cx.Q[a][0] == cx.Q[b][0] && cx.Q[a][1] == cx.Q[b][1]) {\n          continue;\n        }\n", "")
+# the constraint: extreme corner and point, the terms
+lp("lat-con-extreme-corner-is-minimum", "    dot_terms(t, &n, 0, &u, cx->R[c][0], cx->R[c][1], 0, 0.0);\n    dot_terms(t, &n, 1, &u, cx->R[best][0], cx->R[best][1], 0, 0.0);\n    if (gshgeom_exact_sign(t, n) > 0) {", "    dot_terms(t, &n, 0, &u, cx->R[c][0], cx->R[c][1], 0, 0.0);\n    dot_terms(t, &n, 1, &u, cx->R[best][0], cx->R[best][1], 0, 0.0);\n    if (gshgeom_exact_sign(t, n) < 0) {")
+lp("lat-con-extreme-corner-first-only", "    if (gshgeom_exact_sign(t, n) > 0) {\n      best = c;", "    if (0) {\n      best = c;")
+lp("lat-con-extreme-corner-skips-last", "  int best = 0;\n  for (int c = 1; c < 4; c++) {", "  int best = 0;\n  for (int c = 1; c < 3; c++) {")
+lp("lat-con-extreme-point-is-maximum", "    if (gshgeom_exact_sign(t, n) < 0) {\n      best = c;", "    if (gshgeom_exact_sign(t, n) > 0) {\n      best = c;")
+lp("lat-con-extreme-point-first-only", "    if (gshgeom_exact_sign(t, n) < 0) {\n      best = c;", "    if (0) {\n      best = c;")
+lp("lat-con-extreme-point-skips-last", "  best = 0;\n  for (int c = 1; c < 4; c++) {", "  best = 0;\n  for (int c = 1; c < 3; c++) {")
+lp("lat-con-extreme-corner-ties-to-later", "    if (gshgeom_exact_sign(t, n) > 0) {\n      best = c;", "    if (gshgeom_exact_sign(t, n) >= 0) {\n      best = c;")
+lp("lat-con-g-rect-term-added", "  dot_sum(&sum, 1, &u, k->r[0], k->r[1]);", "  dot_sum(&sum, 0, &u, k->r[0], k->r[1]);")
+lp("lat-con-g-point-term-subtracted", "  dot_sum(&sum, 0, &u, k->q[0], k->q[1]);\n  k->g", "  dot_sum(&sum, 1, &u, k->q[0], k->q[1]);\n  k->g")
+lp("lat-con-g-tau-dropped", "  dot_sum(&sum, 0, &u, cx->tau[0], cx->tau[1]);\n  dot_sum(&sum, 1, &u, k->r[0], k->r[1]);", "  dot_sum(&sum, 1, &u, k->r[0], k->r[1]);")
+lp("lat-con-c-from-b", "  dot_sum(&sum, 0, &u, cx->A[0], cx->A[1]);\n  k->c", "  dot_sum(&sum, 0, &u, cx->B[0], cx->B[1]);\n  k->c")
+lp("lat-con-e-from-a", "  dot_sum(&sum, 0, &u, cx->B[0], cx->B[1]);\n  k->e", "  dot_sum(&sum, 0, &u, cx->A[0], cx->A[1]);\n  k->e")
+lp("lat-con-dot-uses-sum-of-operands", "  gshgeom_exact_sum_add(s, !neg, 2, f2);\n  gshgeom_exact_sum_add(s, neg, 2, f3);", "  gshgeom_exact_sum_add(s, neg, 2, f2);\n  gshgeom_exact_sum_add(s, neg, 2, f3);")
+lp("lat-con-dot-y-sign", "  gshgeom_exact_sum_add(s, !neg, 2, f4);", "  gshgeom_exact_sum_add(s, neg, 2, f4);")
+lp("lat-con-exact-c-sign-from-b", "  dot_terms(t, &n, 0, &u, cx->A[0], cx->A[1], 0, 0.0);\n  k->cs", "  dot_terms(t, &n, 0, &u, cx->B[0], cx->B[1], 0, 0.0);\n  k->cs")
+lp("lat-con-exact-e-sign-from-a", "  dot_terms(t, &n, 0, &u, cx->B[0], cx->B[1], 0, 0.0);\n  k->es", "  dot_terms(t, &n, 0, &u, cx->A[0], cx->A[1], 0, 0.0);\n  k->es")
+lp("lat-dot-terms-x-sign", "  gshgeom_exact_put(t, n, !neg, f, u->ux0, px, m);", "  gshgeom_exact_put(t, n, neg, f, u->ux0, px, m);")
+lp("lat-dot-terms-y-sign", "  gshgeom_exact_put(t, n, !neg, f, u->uy0, py, m);", "  gshgeom_exact_put(t, n, neg, f, u->uy0, py, m);")
+lp("lat-dot-terms-x-and-y-swapped", "  gshgeom_exact_put(t, n, neg, f, u->uy1, py, m);", "  gshgeom_exact_put(t, n, neg, f, u->uy1, px, m);")
+lp("lat-filter-range-lower", "return a == 0.0 || (a >= 0x1p-900 && a <= 0x1p900);", "return 1;")
+lp("lat-filter-trusts-underflowed-c", "(k->c != 0.0 || k->cs == 0) &&\n      (k->e != 0.0 || k->es == 0);", "1;")
+# con_sign
+lp("lat-sign-i-term-uses-j", "  dot_terms(t, &n, 0, &k->u, k->A[0], k->A[1], 1, di);", "  dot_terms(t, &n, 0, &k->u, k->A[0], k->A[1], 1, dj);")
+lp("lat-sign-j-term-uses-i", "  dot_terms(t, &n, 0, &k->u, k->B[0], k->B[1], 1, dj);", "  dot_terms(t, &n, 0, &k->u, k->B[0], k->B[1], 1, di);")
+lp("lat-sign-j-term-uses-a", "  dot_terms(t, &n, 0, &k->u, k->B[0], k->B[1], 1, dj);", "  dot_terms(t, &n, 0, &k->u, k->A[0], k->A[1], 1, dj);")
+lp("lat-sign-tau-dropped", "  dot_terms(t, &n, 0, &k->u, k->tau[0], k->tau[1], 0, 0.0);\n  dot_terms(t, &n, 0, &k->u, k->A[0]", "  dot_terms(t, &n, 0, &k->u, k->A[0]")
+lp("lat-sign-rect-term-added", "  dot_terms(t, &n, 1, &k->u, k->r[0], k->r[1], 0, 0.0);", "  dot_terms(t, &n, 0, &k->u, k->r[0], k->r[1], 0, 0.0);")
+lp("lat-sign-point-term-subtracted", "  dot_terms(t, &n, 0, &k->u, k->q[0], k->q[1], 0, 0.0);\n  return", "  dot_terms(t, &n, 1, &k->u, k->q[0], k->q[1], 0, 0.0);\n  return")
+lp("lat-sign-filter-bound-zero", "const double bound = abs_sum * 0x1p-48;", "const double bound = abs_sum * 0.0;")
+lp("lat-sign-filter-positive-wrong", "    if (s > bound) {\n      return 1;", "    if (s > bound) {\n      return -1;")
+lp("lat-sign-filter-negative-wrong", "    if (s < -bound) {\n      return -1;", "    if (s < -bound) {\n      return 1;")
+lp("lat-sign-filter-ignores-g", "(k->g < 0.0 ? -k->g : k->g);", "0.0;")
+lp("lat-sign-filter-ignores-j-term", "(ci < 0.0 ? -ci : ci) + (ej < 0.0 ? -ej : ej) +", "(ci < 0.0 ? -ci : ci) +")
+lp("lat-sign-filter-drops-g-from-sum", "const double s = (ci + ej) + k->g;", "const double s = ci + ej;")
+lp("lat-sign-filter-always-on", "  if (k->filter) {\n    const double ci", "  if (1) {\n    const double ci")
+# the search
+lp("lat-search-dir-inverted", "    p.dir = cvs > 0 ? 1 : -1;", "    p.dir = cvs > 0 ? -1 : 1;")
+lp("lat-search-estimate-sign", "    const double vstar = -(co * i2d(other) + k->g) / cv;", "    const double vstar = (co * i2d(other) + k->g) / cv;")
+lp("lat-search-estimate-ignores-other", "    const double vstar = -(co * i2d(other) + k->g) / cv;", "    const double vstar = -(k->g) / cv;")
+lp("lat-search-estimate-zero", "    const int64_t est = d2i_floor_clamped(p.dir > 0 ? vstar : -vstar);", "    const int64_t est = 0;")
+lp("lat-search-estimate-wrong-direction", "    const int64_t est = d2i_floor_clamped(p.dir > 0 ? vstar : -vstar);", "    const int64_t est = d2i_floor_clamped(vstar);")
+lp("lat-search-var-i-uses-e", "    const double cv = var == 0 ? k->c : k->e;", "    const double cv = var == 0 ? k->e : k->c;")
+lp("lat-search-var-j-uses-c", "    const double co = var == 0 ? k->e : k->c;", "    const double co = var == 0 ? k->c : k->e;")
+lp("lat-search-sign-var-wrong", "    const int cvs = var == 0 ? k->cs : k->es;", "    const int cvs = var == 0 ? k->es : k->cs;")
+lp("lat-search-absent-variable-ignored", "      if (con_sign(k, var == 0 ? 0 : other, var == 0 ? other : 0) > 0) {\n        return 0;\n      }\n      continue;", "      continue;")
+lp("lat-search-absent-variable-open-test", "      if (con_sign(k, var == 0 ? 0 : other, var == 0 ? other : 0) > 0) {", "      if (con_sign(k, var == 0 ? 0 : other, var == 0 ? other : 0) >= 0) {")
+lp("lat-search-absent-variable-wrong-index", "      if (con_sign(k, var == 0 ? 0 : other, var == 0 ? other : 0) > 0) {", "      if (con_sign(k, 0, 0) > 0) {")
+lp("lat-search-upper-bound-lost", "      h = t < h ? t : h;", "      h = h;")
+lp("lat-search-lower-bound-lost", "      l = -t > l ? -t : l;", "      l = l;")
+lp("lat-search-upper-bound-last-wins", "      h = t < h ? t : h;", "      h = t;")
+lp("lat-search-lower-bound-last-wins", "      l = -t > l ? -t : l;", "      l = -t;")
+lp("lat-search-lower-bound-sign", "      l = -t > l ? -t : l;", "      l = t > l ? t : l;")
+lp("lat-search-none-not-empty", "    if (t < -INDEX_MAX) {\n      return 0;\n    }", "    if (t < -INDEX_MAX - 1) {\n      return 0;\n    }")
+lp("lat-search-empty-not-detected-early", "    if (l > h) {\n      return 0;\n    }\n  }", "  }")
+lp("lat-search-empty-interval-reported", "  *hi = h;\n  return l <= h;", "  *hi = h;\n  return 1;")
+lp("lat-search-feasible-sign-strict", "  return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) <= 0;", "  return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) < 0;")
+lp("lat-search-feasible-var-swapped", "  return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) <= 0;", "  return con_sign(p->k, p->var == 0 ? p->other : v, p->var == 0 ? v : p->other) <= 0;")
+lp("lat-search-feasible-dir-ignored", "  const int64_t v = p->dir > 0 ? t : -t;", "  const int64_t v = t;")
+lp("lat-search-gallop-up-never-doubles", "        good = cand;\n        step *= 2;\n      } else {\n        bad = cand;", "        good = cand;\n      } else {\n        bad = cand;")
+lp("lat-search-gallop-up-clamp", "      const int64_t cand = good + step > INDEX_MAX ? INDEX_MAX : good + step;", "      const int64_t cand = good + step;")
+lp("lat-search-gallop-down-clamp", "      const int64_t cand = bad - step < -INDEX_MAX ? -INDEX_MAX : bad - step;", "      const int64_t cand = bad - step;")
+lp("lat-search-all-feasible-not-returned", "    if (bad == INDEX_MAX + 1) {\n      return INDEX_MAX;\n    }", "    if (bad == INDEX_MAX + 1) {\n      return INDEX_MAX - 1;\n    }")
+lp("lat-search-none-feasible-not-returned", "    if (good == -INDEX_MAX - 1) {\n      return good;\n    }", "    if (good == -INDEX_MAX - 1) {\n      return -INDEX_MAX;\n    }")
+lp("lat-search-bisect-stops-early", "  while (bad - good > 1) {", "  while (bad - good > 2) {")
+lp("lat-search-bisect-takes-bad", "    if (feasible(p, mid)) {\n      good = mid;\n    } else {\n      bad = mid;\n    }\n  }\n  return good;", "    if (feasible(p, mid)) {\n      good = mid;\n    } else {\n      bad = mid;\n    }\n  }\n  return bad;")
+lp("lat-search-bisect-mid-rounds-up", "    const int64_t mid = good + (bad - good) / 2;", "    const int64_t mid = good + (bad - good + 1) / 2;")
+lp("lat-search-feasible-start-gallop-skipped", "  if (feasible(p, est)) {\n    good = est;", "  if (0) {\n    good = est;")
+lp("lat-search-gallop-down-start-bad", "    bad = est;\n    good = -INDEX_MAX - 1;", "    bad = est + 1;\n    good = -INDEX_MAX - 1;")
+lp("lat-index-clamp-high", "  if (x >= i2d(INDEX_MAX)) {\n    return INDEX_MAX;", "  if (x >= i2d(INDEX_MAX)) {\n    return INDEX_MAX - 1;")
+lp("lat-index-clamp-low", "  if (x <= -i2d(INDEX_MAX)) {\n    return -INDEX_MAX;", "  if (x <= -i2d(INDEX_MAX)) {\n    return -INDEX_MAX + 1;")
+lp("lat-index-nan-estimate", "  if (!(x == x)) {\n    return 0;\n  }", "")
+lp("lat-index-floor-of-negative", "  if (i2d(t) > x) {\n    t--;\n  }", "")
+lp("lat-index-trunc-fraction-bit", "  const uint64_t v = e >= 0 ? m << e : m >> (-e);", "  const uint64_t v = e >= 0 ? m << e : m >> (-e - 1);")
+lp("lat-index-trunc-sign", "  return neg ? -(int64_t)v : (int64_t)v;", "  return (int64_t)v;")
+lp("lat-index-trunc-below-one", "  if (ex < 1023) {\n    return 0;\n  }", "  if (ex < 1022) {\n    return 0;\n  }")
+lp("lat-i2d-low-word-signed", "  const uint32_t lo = (uint32_t)((uint64_t)v & 0xffffffffu);\n  return (double)hi * 4294967296.0 + (double)lo;", "  const int32_t lo = (int32_t)((uint64_t)v & 0xffffffffu);\n  return (double)hi * 4294967296.0 + (double)lo;")
+# the enumeration
+lp("lat-each-point-case-index-ignored", "    if (interval(ks, nk, 0, 0, &lo, &hi) && lo <= 0 && 0 <= hi) {", "    if (interval(ks, nk, 0, 0, &lo, &hi)) {")
+lp("lat-each-point-case-is-row", "      (void)emit_row(&em, 0, 0, 0);", "      (void)emit_row(&em, 0, lo, hi);")
+lp("lat-each-x-only-reports-j-one", "      if (emit_row(&em, 0, lo, hi) == EMIT_LIMIT) {", "      if (emit_row(&em, 1, lo, hi) == EMIT_LIMIT) {")
+lp("lat-each-x-only-limit-lost", "      if (emit_row(&em, 0, lo, hi) == EMIT_LIMIT) {\n        result = GSHGEOM_ERR_LIMIT;\n      }", "      (void)emit_row(&em, 0, lo, hi);")
+lp("lat-each-y-only-solves-for-i", "    if (interval(ks, nk, 1, 0, &lo, &hi)) {\n      const uint64_t len", "    if (interval(ks, nk, 0, 0, &lo, &hi)) {\n      const uint64_t len")
+lp("lat-each-y-only-count-limit-off-by-one", "        if (len > max_count) {\n          em.count = max_count + 1u;", "        if (len >= max_count) {\n          em.count = max_count + 1u;")
+lp("lat-each-y-only-count-not-len", "          em.count = len;", "          em.count = len - 1u;")
+lp("lat-each-y-only-row-index", "          const int s = emit_row(&em, j, 0, 0);", "          const int s = emit_row(&em, j, j, j);")
+lp("lat-each-y-only-stop-ignored", "          if (s == EMIT_STOP) {\n            break;\n          }\n        }\n      }\n    }\n  } else {", "        }\n      }\n    }\n  } else {")
+lp("lat-each-y-only-limit-ignored", "          if (s == EMIT_LIMIT) {\n            result = GSHGEOM_ERR_LIMIT;\n            break;\n          }\n          if (s == EMIT_STOP) {\n            break;\n          }\n        }\n      }\n    }\n  } else {", "          if (s == EMIT_STOP) {\n            break;\n          }\n        }\n      }\n    }\n  } else {")
+lp("lat-each-strip-from-b", "    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[0]);", "    dir_set(&d, 0.0, cx.B[1], cx.B[0], 0.0);\n    con_build(&cx, d, &vk[0]);")
+lp("lat-each-strip-plus-missing", "    con_build(&cx, d, &vk[0]);\n    dir_set(&d, cx.A[1], 0.0, 0.0, cx.A[0]);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;", "    con_build(&cx, d, &vk[0]);\n    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;")
+lp("lat-each-strip-minus-missing", "    dir_set(&d, cx.A[1], 0.0, 0.0, cx.A[0]);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;", "    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;")
+lp("lat-each-strip-normal-not-rotated", "    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[0]);", "    dir_set(&d, 0.0, cx.A[0], cx.A[1], 0.0);\n    con_build(&cx, d, &vk[0]);")
+lp("lat-each-strip-one-constraint", "    if (interval(vk, 2, 1, 0, &jlo, &jhi)) {", "    if (interval(vk, 1, 1, 0, &jlo, &jhi)) {")
+lp("lat-each-strip-solves-for-i", "    if (interval(vk, 2, 1, 0, &jlo, &jhi)) {", "    if (interval(vk, 2, 0, 0, &jlo, &jhi)) {")
+lp("lat-each-rows-skip-first", "      for (int64_t j = jlo; j <= jhi; j++) {", "      for (int64_t j = jlo + 1; j <= jhi; j++) {")
+lp("lat-each-rows-skip-last", "      for (int64_t j = jlo; j <= jhi; j++) {", "      for (int64_t j = jlo; j < jhi; j++) {")
+lp("lat-each-row-uses-subset-of-constraints", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          continue;\n        }", "        if (!interval(ks, nk > 4 ? nk - 2 : nk, 0, j, &lo, &hi)) {\n          continue;\n        }")
+lp("lat-each-row-wrong-fixed-index", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          continue;\n        }", "        if (!interval(ks, nk, 0, 0, &lo, &hi)) {\n          continue;\n        }")
+lp("lat-each-row-empty-ends-the-scan", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          continue;\n        }", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          break;\n        }")
+lp("lat-each-row-budget-is-count", "      const uint64_t budget = 2u * max_count + GSHGEOM_LATTICE_ROW_WORK;", "      const uint64_t budget = max_count;")
+lp("lat-each-row-budget-no-work-term", "      const uint64_t budget = 2u * max_count + GSHGEOM_LATTICE_ROW_WORK;", "      const uint64_t budget = 2u * max_count;")
+lp("lat-each-row-budget-inclusive", "        if (++visited > budget) {", "        if (++visited >= budget) {")
+lp("lat-each-row-budget-never", "        if (++visited > budget) {", "        if (++visited > budget && 0) {")
+lp("lat-each-row-budget-count-not-limit", "          em.count = max_count + 1u;\n          result = GSHGEOM_ERR_LIMIT;\n          break;\n        }\n        int64_t lo;", "          result = GSHGEOM_ERR_LIMIT;\n          break;\n        }\n        int64_t lo;")
+lp("lat-each-row-stop-ignored", "        if (s == EMIT_STOP) {\n          break;\n        }\n      }\n    }\n  }\n  *count", "      }\n    }\n  }\n  *count")
+lp("lat-each-row-limit-ignored", "        const int s = emit_row(&em, j, lo, hi);\n        if (s == EMIT_LIMIT) {\n          result = GSHGEOM_ERR_LIMIT;\n          break;\n        }", "        const int s = emit_row(&em, j, lo, hi);\n        if (s == EMIT_LIMIT) {\n          break;\n        }")
+lp("lat-each-count-not-written", "  *count = em.count;\n  return result;", "  return result;")
+# emit
+lp("lat-emit-row-length-off-by-one", "  const uint64_t len = (uint64_t)(hi - lo) + 1u;\n  const uint64_t room", "  const uint64_t len = (uint64_t)(hi - lo);\n  const uint64_t room")
+lp("lat-emit-limit-at-bound", "  if (len > room) {", "  if (len >= room) {")
+lp("lat-emit-limit-never-cut", "    if (room > 0 && e->fn) {", "    if (0) {")
+lp("lat-emit-cut-row-zero-reported", "    if (room > 0 && e->fn) {", "    if (e->fn) {")
+lp("lat-emit-cut-row-one-short", "      (void)e->fn(e->ctx, j, lo, lo + (int64_t)room - 1);", "      (void)e->fn(e->ctx, j, lo, lo + (int64_t)room - 2);")
+lp("lat-emit-cut-row-from-hi", "      (void)e->fn(e->ctx, j, lo, lo + (int64_t)room - 1);", "      (void)e->fn(e->ctx, j, hi - (int64_t)room + 1, hi);")
+lp("lat-emit-limit-count", "    e->count = e->max + 1u;\n    return EMIT_LIMIT;", "    e->count = e->max;\n    return EMIT_LIMIT;")
+lp("lat-emit-count-not-added", "  e->count += len;\n  if", "  if")
+lp("lat-emit-stop-code", "  if (e->fn && e->fn(e->ctx, j, lo, hi)) {\n    return EMIT_STOP;", "  if (e->fn && e->fn(e->ctx, j, lo, hi)) {\n    return EMIT_GO;")
+# LT3
+lp("lat-period-component-bound-loose", "    if (a[k] <= -lim || a[k] >= lim || b[k] <= -lim || b[k] >= lim) {", "    if (a[k] < -lim || a[k] >= lim || b[k] <= -lim || b[k] >= lim) {")
+lp("lat-period-b-bound-unchecked", "    if (a[k] <= -lim || a[k] >= lim || b[k] <= -lim || b[k] >= lim) {", "    if (a[k] <= -lim || a[k] >= lim) {")
+lp("lat-period-det-zero-accepted", "  if (det == 0) {\n    return GSHGEOM_ERR_INVALID;\n  }", "")
+lp("lat-period-det-term-swapped", "  const int64_t det = a[0] * b[1] - a[1] * b[0];", "  const int64_t det = a[0] * b[1] + a[1] * b[0];")
+lp("lat-period-bound-exclusive", "  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {", "  if (adet >= GSHGEOM_LATTICE_PERIOD_MAX) {")
+lp("lat-period-bound-unchecked", "  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {\n    return GSHGEOM_ERR_LIMIT;\n  }", "")
+lp("lat-period-abs-det-dropped", "  const int64_t adet = det < 0 ? -det : det;", "  const int64_t adet = det;")
+lp("lat-period-euclid-start-swapped", "  int64_t r0 = a[1] < 0 ? -a[1] : a[1];\n  int64_t r1 = b[1] < 0 ? -b[1] : b[1];", "  int64_t r0 = b[1] < 0 ? -b[1] : b[1];\n  int64_t r1 = a[1] < 0 ? -a[1] : a[1];")
+lp("lat-period-euclid-coefficients-swapped", "  const int64_t u = a[1] < 0 ? -s0 : s0;\n  const int64_t v = b[1] < 0 ? -t0 : t0;", "  const int64_t u = a[1] < 0 ? -t0 : t0;\n  const int64_t v = b[1] < 0 ? -s0 : s0;")
+lp("lat-period-u-sign-ignored", "  const int64_t u = a[1] < 0 ? -s0 : s0;", "  const int64_t u = s0;")
+lp("lat-period-v-sign-ignored", "  const int64_t v = b[1] < 0 ? -t0 : t0;", "  const int64_t v = t0;")
+lp("lat-period-r-from-wrong-column", "  const int64_t rr = u * a[0] + v * b[0];", "  const int64_t rr = u * a[1] + v * b[1];")
+lp("lat-period-r-uses-sum-of-wrong-sign", "  const int64_t rr = u * a[0] + v * b[0];", "  const int64_t rr = u * a[0] - v * b[0];")
+lp("lat-period-p-not-divided", "  out->p = adet / g;", "  out->p = adet;")
+lp("lat-period-s-is-one", "  out->s = g;", "  out->s = 1;")
+lp("lat-period-r-not-reduced", "  out->r = floor_mod(rr, out->p);", "  out->r = rr;")
+lp("lat-period-r-truncated-mod", "  out->r = floor_mod(rr, out->p);", "  out->r = rr % out->p;")
+lp("lat-period-euclid-quotient-update", "    tmp = s0 - q * s1;", "    tmp = s0 + q * s1;")
+lp("lat-period-euclid-t-update", "    tmp = t0 - q * t1;", "    tmp = t0 + q * t1;")
+lp("lat-period-euclid-remainder", "    int64_t tmp = r0 - q * r1;", "    int64_t tmp = r0 + q * r1;")
+lp("lat-reduce-truncating-division", "  const int64_t k = floor_div(y, pd->s);", "  const int64_t k = y / pd->s;")
+lp("lat-reduce-truncating-mod", "  out[0] = floor_mod(x - km * pd->r, pd->p);", "  out[0] = (x - km * pd->r) % pd->p;")
+lp("lat-reduce-k-not-reduced-mod-p", "  const int64_t km = floor_mod(k, pd->p);", "  const int64_t km = k;")
+lp("lat-reduce-shear-sign", "  out[0] = floor_mod(x - km * pd->r, pd->p);", "  out[0] = floor_mod(x + km * pd->r, pd->p);")
+lp("lat-reduce-shear-dropped", "  out[0] = floor_mod(x - km * pd->r, pd->p);", "  out[0] = floor_mod(x, pd->p);")
+lp("lat-reduce-y-not-reduced", "  out[1] = y - k * pd->s;", "  out[1] = y;")
+lp("lat-reduce-y-uses-p", "  out[1] = y - k * pd->s;", "  out[1] = y - k * pd->p;")
+lp("lat-floor-div-not-floored", "  return (a % p != 0 && a < 0) ? q - 1 : q;", "  return q;")
+lp("lat-floor-div-adjusts-positive", "  return (a % p != 0 && a < 0) ? q - 1 : q;", "  return (a % p != 0) ? q - 1 : q;")
+lp("lat-floor-mod-not-floored", "  return m < 0 ? m + p : m;", "  return m;")
+lp("lat-period-args-null-allowed", "  if (!a || !b || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  for", "  for")
+
+LAT_PLANTS = [p for p in LAT_PLANTS if p is not None]
+# The mutants no test sees, and why.  Equivalent: no input can tell the mutant from the code.  Estimate-only: the mutant changes only
+# the first guess of a search, which a gallop and a bisection on the exact predicate correct from any start, so the answer is the
+# same and only the number of steps could differ.  Not found: a filter whose margin or range is weakened can matter only for an
+# input whose exact constraint value is within 2^-48 of the sum of its terms (or in the underflow range), and none was built.
+#   lat-search-estimate-sign, -estimate-ignores-other, -estimate-zero, -estimate-wrong-direction, lat-search-var-i-uses-e,
+#   lat-search-var-j-uses-c, lat-index-clamp-high, lat-index-clamp-low, lat-index-floor-of-negative, lat-index-trunc-fraction-bit,
+#   lat-index-trunc-sign, lat-index-trunc-below-one       estimate-only
+#   lat-index-nan-estimate                 estimate-only: a NaN estimate becomes a garbage index, and the gallop from any index (out of
+#                                          range included) brackets the answer in at most 64 doublings
+#   lat-search-gallop-up-never-doubles     estimate-only (a step that does not double only takes more steps)
+#   lat-search-gallop-up-clamp, lat-search-gallop-down-clamp   the unclamped candidate is feasible (or infeasible) as the clamped one is, and
+#                                          the search returns the range's end either way
+#   lat-search-gallop-down-start-bad       the bound one above an infeasible index is infeasible too
+#   lat-search-bisect-mid-rounds-up        the midpoint is strictly between the ends whichever way it rounds while the gap is above 1
+#   lat-search-bisect-stops-early          not found: it differs only when the gallop ends with a gap of exactly 2 whose midpoint is feasible, which
+#                                          needs the estimate to be two indices off, so an index above about 2^52 with cancelling terms;
+#                                          400 random cases there (TheEstimate...NearTwoToThe52) made none
+#   lat-search-none-not-empty, lat-search-empty-not-detected-early, lat-search-empty-interval-reported
+#                                          an interval whose ends cross is empty by the test that follows in the loop and by the one at
+#                                          its end: either one alone decides, and there is at least one constraint
+#   lat-con-extreme-corner-ties-to-later   a tie names a corner with the same u . r
+#   lat-dir-equal-points-not-skipped       the direction of two equal points is zero and its constraint is 0 <= 0
+#   lat-dir-pair-last-vertex-skipped, lat-each-row-uses-subset-of-constraints
+#                                          the normals of the pairs that include the fourth point are those of the first three for a
+#                                          parallelogram; they differ only by the rounding of Q, by less than an ulp
+#   lat-valid-nonfinite-step-accepted      a step that is not finite is refused as well by the cell (NaN) and by the step vector (inf)
+#   lat-filter-range-lower, lat-filter-trusts-underflowed-c, lat-sign-filter-bound-zero, lat-sign-filter-ignores-g,
+#   lat-sign-filter-ignores-j-term, lat-sign-filter-always-on      not found (see above)
+LAT_UNSEEN = {"lat-search-estimate-sign", "lat-search-estimate-ignores-other", "lat-search-estimate-zero", "lat-search-estimate-wrong-direction",
+              "lat-search-var-i-uses-e", "lat-search-var-j-uses-c", "lat-index-clamp-high", "lat-index-clamp-low", "lat-index-floor-of-negative",
+              "lat-index-trunc-fraction-bit", "lat-index-trunc-sign", "lat-index-trunc-below-one", "lat-index-nan-estimate",
+              "lat-search-gallop-up-never-doubles", "lat-search-gallop-up-clamp", "lat-search-gallop-down-clamp",
+              "lat-search-gallop-down-start-bad", "lat-search-bisect-mid-rounds-up", "lat-search-bisect-stops-early", "lat-search-none-not-empty",
+              "lat-search-empty-not-detected-early", "lat-search-empty-interval-reported", "lat-con-extreme-corner-ties-to-later",
+              "lat-dir-equal-points-not-skipped", "lat-dir-pair-last-vertex-skipped", "lat-each-row-uses-subset-of-constraints",
+              "lat-valid-nonfinite-step-accepted", "lat-filter-range-lower", "lat-filter-trusts-underflowed-c", "lat-sign-filter-bound-zero",
+              "lat-sign-filter-ignores-g", "lat-sign-filter-ignores-j-term", "lat-sign-filter-always-on"}
+LAT_UNSEEN_PLANTS = [p for p in LAT_PLANTS if p[0] in LAT_UNSEEN]
+PLANTS += [p for p in LAT_PLANTS if p[0] not in LAT_UNSEEN]
+if os.environ.get("PLANT_UNSEEN"):
+    PLANTS += LAT_UNSEEN_PLANTS
+
+
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
