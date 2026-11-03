@@ -38,6 +38,8 @@
 #include <cstring>
 #include <vector>
 
+__extension__ typedef __int128 i128;
+
 namespace {
 
 namespace lo = lattice_oracle;
@@ -420,10 +422,6 @@ TEST(Lattice, SkewedAndRotatedCellsAgreeAtTheEdgesInExactRationals) {
       EXPECT_TRUE(lo::meets_rat(g, mid, r.j, rect)) << k;
     }
     EXPECT_EQ(total(c.rows), c.count);
-    if (!c.rows.empty()) {
-      // the rows just outside the first and last row (within the strip) have none, or are not rows of the answer
-      EXPECT_FALSE(lo::meets_rat(g, c.rows.front().lo, c.rows.front().j - 1, rect) && false);
-    }
   }
 }
 
@@ -522,7 +520,7 @@ TEST(Lattice, ASparseLatticeWhoseRowsAreMostlyEmptyIsLimitedByTheRowBound) {
   // A in x is huge and B in y tiny: the strip has about 4096 / 2^-30 rows and each holds at most a copy now and then.
   const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
   const GSHGEOM_Lattice l = make_lattice(0, 0, 1, 1, 0x1p+40, 0x1p-30);
-  const int64_t rect[4] = {0, 0, 4096, 4096};
+  const int64_t rect[4] = {5, 0, 4096, 4096};  // x = 5 .. 4096 touches no cell (they are at 0 .. 1 and 2^40 ..): every row is empty
   uint64_t n = 0;
   const auto t0 = std::chrono::steady_clock::now();
   const GSHGEOM_Result r = gshgeom_lattice_each(&m, &l, rect, 1000, nullptr, nullptr, &n);
@@ -771,13 +769,13 @@ TEST(LatticePeriod, LargeComponentsKeepTheArithmeticInRange) {
 TEST(LatticePeriod, ArgumentsAreChecked) {
   GSHGEOM_Lattice_Period p = {7, 7, 7};
   const int64_t a[2] = {1, 0}, b[2] = {0, 1}, z[2] = {2, 0}, par[2] = {4, 0};
-  const int64_t huge[2] = {(int64_t)1 << 31, 0};
+  const int64_t huge[2] = {(int64_t)1 << 31, 1};
   EXPECT_EQ(gshgeom_lattice_period(nullptr, b, &p), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_lattice_period(a, nullptr, &p), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_lattice_period(a, b, nullptr), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(gshgeom_lattice_period(z, par, &p), GSHGEOM_ERR_INVALID);  // D = 0
   EXPECT_EQ(gshgeom_lattice_period(huge, b, &p), GSHGEOM_ERR_INVALID);
-  const int64_t neg_huge[2] = {-((int64_t)1 << 31), 0};
+  const int64_t neg_huge[2] = {-((int64_t)1 << 31), 1};
   EXPECT_EQ(gshgeom_lattice_period(a, neg_huge, &p), GSHGEOM_ERR_INVALID);
   EXPECT_EQ(p.p, 7);
   // the determinant bound is inclusive
@@ -785,6 +783,348 @@ TEST(LatticePeriod, ArgumentsAreChecked) {
   EXPECT_EQ(gshgeom_lattice_period(e, f, &p), GSHGEOM_OK);
   const int64_t g[2] = {1 << 16, 0}, h[2] = {0, (1 << 15) + 1};
   EXPECT_EQ(gshgeom_lattice_period(g, h, &p), GSHGEOM_ERR_LIMIT);
+}
+
+TEST(Lattice, ValidationOfTheLatticeAndTheMapIsComplete) {
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
+  double c[4];
+  GSHGEOM_Lattice l = make_lattice(0, 0, 1, 1, 1, 1);
+  // a step that is never read may be anything finite, but not negative and not infinite
+  GSHGEOM_Lattice bad = l;
+  bad.repeat_x = 0;
+  bad.x_step = -1;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  bad.x_step = INFINITY;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  bad.x_step = NAN;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  bad = l;
+  bad.repeat_y = 0;
+  bad.y_step = INFINITY;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  bad = l;
+  bad.repeat_x = 2;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  bad = l;
+  bad.h = INFINITY;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  bad = l;
+  bad.y = -INFINITY;
+  EXPECT_EQ(gshgeom_lattice_cell(&bad, 0, 0, c), GSHGEOM_ERR_INVALID);
+  // a cell edge that overflows
+  const GSHGEOM_Lattice huge = make_lattice(1e308, 0, 1, 1, 1e308, 1);
+  EXPECT_EQ(gshgeom_lattice_cell(&huge, 2, 0, c), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_cell(&huge, 0, 0, c), GSHGEOM_OK);
+  // a quad that overflows: a large map under a large cell
+  const GSHGEOM_Map big = make_map(0x1p+100, 0, 0, 0x1p+100, 0, 0);
+  const GSHGEOM_Lattice wide = make_lattice(1e300, 0, 1, 1, 1, 1);
+  double q[8];
+  EXPECT_EQ(gshgeom_lattice_quad(&big, &wide, q), GSHGEOM_ERR_INVALID);
+  const int64_t rect[4] = {0, 0, 8, 8};
+  uint64_t n = 0;
+  EXPECT_EQ(gshgeom_lattice_each(&big, &wide, rect, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  // a map that is not a valid map: an entry that is not finite, or past the map limit
+  GSHGEOM_Map nan_map = m;
+  nan_map.m[0][0] = NAN;
+  EXPECT_EQ(gshgeom_lattice_each(&nan_map, &l, rect, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  GSHGEOM_Map past = m;
+  past.m[1][1] = 0x1p+101;
+  EXPECT_EQ(gshgeom_lattice_each(&past, &l, rect, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  double t[2];
+  EXPECT_EQ(gshgeom_lattice_translation(&nan_map, &l, 0, 0, t), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_quad(&past, &l, q), GSHGEOM_ERR_INVALID);
+  // a step that is not finite
+  GSHGEOM_Lattice inf_step = l;
+  inf_step.x_step = INFINITY;
+  EXPECT_EQ(gshgeom_lattice_each(&m, &inf_step, rect, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  // a step vector that overflows: m = 2^100, x_step = 2^1000
+  const GSHGEOM_Lattice overflow = make_lattice(0, 0, 1, 1, 0x1p+1000, 1);
+  EXPECT_EQ(gshgeom_lattice_each(&big, &overflow, rect, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  // the rectangle's negative bound is inclusive: -2^53 is accepted and -2^53 - 1 is not
+  const int64_t low_ok[4] = {-((int64_t)1 << 53), 0, 0, 8};
+  const int64_t low_bad[4] = {-((int64_t)1 << 53) - 1, 0, 0, 8};
+  EXPECT_NE(gshgeom_lattice_each(&m, &l, low_ok, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, low_bad, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  const int64_t y_bad[4] = {0, 0, 8, ((int64_t)1 << 53) + 1};
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, y_bad, 10, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+}
+
+TEST(Lattice, ASingularMapIsRefusedWhicheverAxesRepeatAndAParallelPairOnlyWhenBothDo) {
+  uint64_t n = 0;
+  const int64_t rect[4] = {0, 0, 8, 8};
+  // singular with one axis repeating: 1 2 / 2 4 has determinant 0 (and 1*4 + 2*2 = 8 if the sign of a term were wrong)
+  const GSHGEOM_Map singular = make_map(1, 2, 2, 4, 0, 0);
+  for (uint32_t rx = 0; rx < 2; rx++) {
+    for (uint32_t ry = 0; ry < 2; ry++) {
+      const GSHGEOM_Lattice l = make_lattice(0, 0, 1, 1, 1, 1, rx, ry);
+      EXPECT_EQ(gshgeom_lattice_each(&singular, &l, rect, 100, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID) << rx << ry;
+    }
+  }
+  // a nonsingular map whose step vectors underflow to parallel ones: A = (1, 0), B = (2^-1060, 0), the map 1 1 / 0 2^-40
+  const GSHGEOM_Map thin = make_map(1, 1, 0, 0x1p-40, 0, 0);
+  const GSHGEOM_Lattice both = make_lattice(0, 0, 1, 1, 1, 0x1p-1060, 1, 1);
+  EXPECT_EQ(gshgeom_lattice_each(&thin, &both, rect, 100, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  // the same lattice with one axis not repeating has no parallel pair
+  const GSHGEOM_Lattice x_only = make_lattice(0, 0, 1, 1, 1, 0x1p-1060, 1, 0);
+  EXPECT_NE(gshgeom_lattice_each(&thin, &x_only, rect, 100, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+  const GSHGEOM_Lattice y_only = make_lattice(0, 0, 1, 1, 1, 0x1p-1060, 0, 1);
+  EXPECT_NE(gshgeom_lattice_each(&thin, &y_only, rect, 100, nullptr, nullptr, &n), GSHGEOM_ERR_INVALID);
+}
+
+TEST(Lattice, AConstraintWithoutTheVariableDecidesTheWholeRow) {
+  // x only: the cell row is at y = 0 .. 4 and the rectangle is above it, so no copy meets it however far in x it reaches
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
+  const int64_t above[4] = {0, 10, 100, 20};
+  Collected c = run(m, make_lattice(0, 0, 4, 4, 4, 4, 1, 0), above);
+  EXPECT_EQ(c.count, 0u);
+  EXPECT_TRUE(c.rows.empty());
+  // y only: the column of cells is at x = 0 .. 4, the rectangle is to its right
+  const int64_t right[4] = {10, 0, 20, 100};
+  c = run(m, make_lattice(0, 0, 4, 4, 4, 4, 0, 1), right);
+  EXPECT_EQ(c.count, 0u);
+  // touching the row from above is a hit
+  const int64_t touch[4] = {0, 4, 100, 20};
+  c = run(m, make_lattice(0, 0, 4, 4, 4, 4, 1, 0), touch);
+  EXPECT_GT(c.count, 0u);
+}
+
+TEST(Lattice, ADegenerateQuadrilateralOfEqualPointsStillGivesTheCopies) {
+  // The map squeezes y by 2^-60 and the cell is 2^-1030 tall, so the product underflows: the quad is a segment and two of its four
+  // points are equal.  The copies are those of the segment's lattice.
+  const GSHGEOM_Map m = make_map(1, 0, 0, 0x1p-60, 0, 0);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 4, 0x1p-1030, 4, 1);
+  const int64_t rect[4] = {2, 0, 10, 0};
+  const Collected c = run(m, l, rect);
+  ASSERT_EQ(c.status, GSHGEOM_OK);
+  ASSERT_FALSE(c.rows.empty());
+  const double mm[4] = {1, 0, 0, 0x1p-60};
+  const double tt[2] = {0, 0};
+  const double cell[4] = {0, 0, 4, 0x1p-1030};
+  const double steps[2] = {4, 1};
+  const lo::Geometry g = lo::geometry_of(mm, tt, cell, steps);
+  for (const Row & r : c.rows) {
+    EXPECT_TRUE(lo::meets_rat(g, r.lo, r.j, rect));
+    EXPECT_TRUE(lo::meets_rat(g, r.hi, r.j, rect));
+    EXPECT_FALSE(lo::meets_rat(g, r.lo - 1, r.j, rect));
+    EXPECT_FALSE(lo::meets_rat(g, r.hi + 1, r.j, rect));
+  }
+}
+
+TEST(Lattice, CoefficientsThatUnderflowStillGiveTheRightCopies) {
+  // Everything is about 2^-600: the dot products of the directions with the step vectors are about 2^-1200, which a double
+  // cannot hold, so the filter must not trust them and the exact sum decides.
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
+  const double s = 0x1p-600;
+  const GSHGEOM_Lattice l = make_lattice(0, 0, s, s, s, s);
+  const int64_t rect[4] = {0, 0, 0, 0};
+  const Collected c = run(m, l, rect);
+  ASSERT_EQ(c.status, GSHGEOM_OK);
+  // cell (i, j) spans [i s, (i + 1) s] x [j s, (j + 1) s]: it holds the origin for i, j in {-1, 0}
+  ASSERT_EQ(c.rows.size(), 2u);
+  EXPECT_EQ(c.rows[0], (Row{-1, -1, 0}));
+  EXPECT_EQ(c.rows[1], (Row{0, -1, 0}));
+  EXPECT_EQ(c.count, 4u);
+  // and the same under a rotation by a quarter turn and a scale by 2^-40, so that no direction is an axis
+  const GSHGEOM_Map r = make_map(0, -0x1p-40, 0x1p-40, 0, 0, 0);
+  const Collected d = run(r, l, rect);
+  ASSERT_EQ(d.status, GSHGEOM_OK);
+  EXPECT_EQ(d.count, 4u);
+}
+
+TEST(Lattice, TheCopiesAtTheEndsOfTheIndexRangeAreReportedAndNoneBeyond) {
+  // A = 2^-60, so index i is at i 2^-60; tau puts index 2^53 - 1 at 0 and the cell is 2^-10 wide: the copies from 2^53 - 1 - 2^50 to
+  // 2^53 - 1 touch the point 0 (the cell of copy i spans [(i - IMAX) A, (i - IMAX) A + w] and holds 0 for i - IMAX in [-2^50, 0]).
+  const int64_t imax = GSHGEOM_LATTICE_INDEX_MAX;
+  const double a = 0x1p-60;
+  const GSHGEOM_Map hi_map = make_map(1, 0, 0, 1, -(double)imax * a, 0);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 0x1p-10, 1, a, 1, 1, 0);
+  const int64_t rect[4] = {0, 0, 0, 0};
+  const uint64_t all = (uint64_t)GSHGEOM_LATTICE_INDEX_MAX;
+  const Collected hi = run(hi_map, l, rect, all);
+  ASSERT_EQ(hi.status, GSHGEOM_OK);
+  ASSERT_EQ(hi.rows.size(), 1u);
+  EXPECT_EQ(hi.rows[0].hi, imax);
+  EXPECT_EQ(hi.rows[0].lo, imax - ((int64_t)1 << 50));
+  // the mirror image: tau puts index -(2^53 - 1) at -w, so the copies from -(2^53 - 1) up to -(2^53 - 1) + 2^50 meet 0
+  const GSHGEOM_Map lo_map = make_map(1, 0, 0, 1, (double)imax * a - 0x1p-10, 0);
+  const Collected low = run(lo_map, l, rect, all);
+  ASSERT_EQ(low.status, GSHGEOM_OK);
+  ASSERT_EQ(low.rows.size(), 1u);
+  EXPECT_EQ(low.rows[0].lo, -imax);
+  EXPECT_EQ(low.rows[0].hi, -imax + ((int64_t)1 << 50));
+  // a rectangle no copy can reach: nothing, whatever the step (every constraint is infeasible over the whole range)
+  const int64_t far[4] = {100, 0, 200, 0};
+  const Collected none = run(hi_map, l, far);
+  EXPECT_EQ(none.status, GSHGEOM_OK);
+  EXPECT_EQ(none.count, 0u);
+  const Collected none2 = run(make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 1, 1, a, 1, 1, 0), far);
+  EXPECT_EQ(none2.count, 0u);
+}
+
+TEST(Lattice, HugeIndicesWithCancellingTermsAgreeWithTheOracleAtTheEndsOfEveryRow) {
+  // Lattices whose position is the difference of two large products, so that the rounded evaluation of a constraint cancels and an
+  // estimate is off by several indices: the ends of every row are checked in exact rationals.
+  Rng rng{UINT64_C(0x0DDBA11C0FFEE123)};
+  for (int k = 0; k < 60; k++) {
+    const double eps = (double)rng.range(1, 40) * 0x1p-52;
+    const double m[4] = {1.0, -(1.0 + eps), 0.0, 1.0};
+    const double xs = (double)rng.range(1, 30) / 10.0;
+    const double ys = (double)rng.range(1, 30) / 10.0;
+    const int64_t j0 = rng.range(100000, 3000000);
+    const double t[2] = {(double)rng.range(-5, 5) / 7.0, -(double)j0 * ys};
+    const double cell[4] = {0.0, 0.0, (double)rng.range(1, 20) / 7.0, (double)rng.range(1, 20) / 7.0};
+    const double steps[2] = {xs, ys};
+    const GSHGEOM_Map map = make_map(m[0], m[1], m[2], m[3], t[0], t[1]);
+    const GSHGEOM_Lattice l = make_lattice(cell[0], cell[1], cell[2], cell[3], xs, ys);
+    const int64_t rect[4] = {rng.range(-3, 3), rng.range(-3, 3), 6, 6};
+    const lo::Geometry g = lo::geometry_of(m, t, cell, steps);
+    const Collected c = run(map, l, rect);
+    ASSERT_EQ(c.status, GSHGEOM_OK) << k;
+    ASSERT_FALSE(c.rows.empty()) << k;
+    for (const Row & r : c.rows) {
+      EXPECT_TRUE(lo::meets_rat(g, r.lo, r.j, rect)) << k;
+      EXPECT_TRUE(lo::meets_rat(g, r.hi, r.j, rect)) << k;
+      EXPECT_FALSE(lo::meets_rat(g, r.lo - 1, r.j, rect)) << k;
+      EXPECT_FALSE(lo::meets_rat(g, r.hi + 1, r.j, rect)) << k;
+    }
+    if (::testing::Test::HasFailure()) return;
+  }
+}
+
+TEST(Lattice, AnEstimateThatIsOffByIndicesIsCorrectedAtTheEndsOfARowAtIndicesNearTwoToThe52) {
+  // A = about 2^-60 and tau = -(i0 A) with i0 near 2^52: the rounded coefficients put the estimate of the end of the row a few indices
+  // off, and the gallop and the bisection find the exact end, checked in exact rationals.
+  Rng rng{UINT64_C(0x5EED5EED12345679)};
+  for (int k = 0; k < 400; k++) {
+    const double a = 0x1p-60 * (1.0 + (double)rng.range(1, 1000000) / 1048576.0);
+    const int64_t i0 = ((int64_t)1 << 52) + rng.range(1, ((int64_t)1 << 52) - ((int64_t)1 << 44));
+    const double tau = -(double)i0 * a;  // rounded: the copy i0 is within an ulp of 0
+    const double w = (double)rng.range(1, 1000) * 0x1p-20 * (1.0 + 1.0 / 3.0);
+    const double m[4] = {1.0, 0.0, 0.0, 1.0};
+    const double t[2] = {tau, 0.0};
+    const double cell[4] = {0.0, 0.0, w, 1.0};
+    const double steps[2] = {a, 1.0};
+    const GSHGEOM_Map map = make_map(m[0], m[1], m[2], m[3], t[0], t[1]);
+    const GSHGEOM_Lattice l = make_lattice(cell[0], cell[1], cell[2], cell[3], steps[0], steps[1], 1, 0);
+    const int64_t rect[4] = {0, 0, 0, 0};
+    const lo::Geometry g = lo::geometry_of(m, t, cell, steps);
+    const Collected c = run(map, l, rect, (uint64_t)GSHGEOM_LATTICE_INDEX_MAX);
+    ASSERT_EQ(c.status, GSHGEOM_OK) << k;
+    ASSERT_EQ(c.rows.size(), 1u) << k;
+    const Row & r = c.rows[0];
+    EXPECT_TRUE(lo::meets_rat(g, r.lo, 0, rect)) << k;
+    EXPECT_TRUE(lo::meets_rat(g, r.hi, 0, rect)) << k;
+    EXPECT_FALSE(lo::meets_rat(g, r.lo - 1, 0, rect)) << k;
+    EXPECT_FALSE(lo::meets_rat(g, r.hi + 1, 0, rect)) << k;
+    if (::testing::Test::HasFailure()) return;
+  }
+}
+
+TEST(Lattice, TheRowBoundCountsRowsAndIsInclusive) {
+  // x_step = 2^40 puts every copy but index 0 far away and the rectangle misses index 0: every row is empty.  Rows j with
+  // [j, j + 1] meeting [0, R] are j = -1 .. R, R + 2 of them.  With max_count 0 the bound is GSHGEOM_LATTICE_ROW_WORK rows.
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 1, 1, 0x1p+40, 1);
+  const int64_t work = (int64_t)GSHGEOM_LATTICE_ROW_WORK;
+  uint64_t n = 99;
+  const int64_t exactly[4] = {5, 0, 5, work - 2};  // work rows
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, exactly, 0, nullptr, nullptr, &n), GSHGEOM_OK);
+  EXPECT_EQ(n, 0u);
+  const int64_t one_more[4] = {5, 0, 5, work - 1};  // work + 1 rows
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, one_more, 0, nullptr, nullptr, &n), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(n, 1u);
+  // the bound grows with max_count: two rows more for each copy allowed
+  const int64_t more[4] = {5, 0, 5, work + 2 * 10 - 2};
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, more, 10, nullptr, nullptr, &n), GSHGEOM_OK);
+  const int64_t too_many[4] = {5, 0, 5, work + 2 * 10 - 1};
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, too_many, 10, nullptr, nullptr, &n), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(n, 11u);
+}
+
+TEST(Lattice, AColumnOfCopiesHonorsTheLimitTheStopAndTheCutWithARowFunction) {
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
+  const GSHGEOM_Lattice col = make_lattice(0, 0, 5, 5, 5, 5, 0, 1);
+  const int64_t rect[4] = {0, 0, 20, 20};  // 6 copies
+  uint64_t n = 0;
+  // count only at the bound: exactly 6 is fine and 5 is the limit
+  EXPECT_EQ(gshgeom_lattice_each(&m, &col, rect, 6, nullptr, nullptr, &n), GSHGEOM_OK);
+  EXPECT_EQ(n, 6u);
+  // with a row function: the limit cuts at max_count copies and reports max_count + 1
+  std::vector<Row> rows;
+  EXPECT_EQ(gshgeom_lattice_each(&m, &col, rect, 4, collect_row, &rows, &n), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(n, 5u);
+  ASSERT_EQ(rows.size(), 4u);
+  EXPECT_EQ(rows.back().j, 2);  // -1, 0, 1, 2
+  // a stop after two rows
+  struct S {
+    int rows = 0;
+  } s;
+  auto stop_after_two = [](void * ctx, int64_t, int64_t, int64_t) {
+    S * p = static_cast<S *>(ctx);
+    return ++p->rows == 2 ? 1 : 0;
+  };
+  EXPECT_EQ(gshgeom_lattice_each(&m, &col, rect, 100, stop_after_two, &s, &n), GSHGEOM_OK);
+  EXPECT_EQ(s.rows, 2);
+  EXPECT_EQ(n, 2u);
+}
+
+TEST(Lattice, ACutRowKeepsItsFirstIndexAndTheLimitReportsOneMore) {
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0, 0);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 4, 4, 4, 4);
+  const int64_t rect[4] = {1, 1, 15, 15};  // 4 rows of 4 copies: i = 0 .. 3
+  uint64_t n = 0;
+  std::vector<Row> rows;
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, rect, 14, collect_row, &rows, &n), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(n, 15u);
+  ASSERT_EQ(rows.size(), 4u);
+  EXPECT_EQ(rows.back().lo, 0);  // the cut row starts where the whole row does
+  EXPECT_EQ(rows.back().hi, 1);  // and keeps the room that was left: 14 - 12 = 2
+}
+
+TEST(LatticePeriod, TheComponentBoundIsExclusiveOnBothVectorsAndBothSides) {
+  GSHGEOM_Lattice_Period p;
+  const int64_t lim = (int64_t)1 << 31;
+  const int64_t ok[2] = {1, 1}, unit[2] = {1, 0};
+  const int64_t at_a_neg[2] = {-lim, 1}, at_a_pos[2] = {lim, 1};
+  // a determinant of 1 so that only the bound can refuse: b = (x, 1), a = (1, 0)
+  EXPECT_EQ(gshgeom_lattice_period(unit, at_a_neg, &p), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_period(unit, at_a_pos, &p), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_period(at_a_neg, ok, &p), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_period(at_a_pos, ok, &p), GSHGEOM_ERR_INVALID);
+  const int64_t in_neg[2] = {-lim + 1, 1}, in_pos[2] = {lim - 1, 1};
+  EXPECT_EQ(gshgeom_lattice_period(unit, in_neg, &p), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_lattice_period(unit, in_pos, &p), GSHGEOM_OK);
+  // the y components too
+  const int64_t y_neg[2] = {1, -lim}, y_pos[2] = {1, lim};
+  EXPECT_EQ(gshgeom_lattice_period(unit, y_neg, &p), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_period(unit, y_pos, &p), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_period(y_neg, ok, &p), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_period(y_pos, ok, &p), GSHGEOM_ERR_INVALID);
+}
+
+TEST(LatticePeriod, TheReductionOfAFarPointDoesNotWrapTheProduct) {
+  // a = (123456789, 1), b = (1000000007, 0): s = 1, p = 1000000007 (a prime, so that a product wrapped at 2^64 shows), r = 123456789.  y = 2^60 gives k = 2^60: k * r would not fit in 64 bits, so
+  // the shear is taken modulo p first.
+  const int64_t a[2] = {123456789, 1}, b[2] = {1000000007, 0};
+  GSHGEOM_Lattice_Period p;
+  ASSERT_EQ(gshgeom_lattice_period(a, b, &p), GSHGEOM_OK);
+  EXPECT_EQ(p.s, 1);
+  EXPECT_EQ(p.p, 1000000007);
+  EXPECT_EQ(p.r, 123456789);
+  const int64_t ys[] = {(int64_t)1 << 60, ((int64_t)1 << 60) + 12345, -((int64_t)1 << 60) - 7, 4611686018427387903};
+  for (int64_t y : ys) {
+    for (int64_t x : {int64_t(0), int64_t(999), -((int64_t)1 << 40), (int64_t)1 << 61}) {
+      int64_t out[2];
+      gshgeom_lattice_reduce(&p, x, y, out);
+      // the exact value with 128-bit arithmetic
+      const i128 k = y;  // floor(y / s) with s = 1
+      i128 xx = (i128)x - (k % p.p) * p.r;
+      i128 m = xx % p.p;
+      if (m < 0) m += p.p;
+      EXPECT_EQ((int64_t)m, out[0]) << x << " " << y;
+      EXPECT_EQ(out[1], 0);
+    }
+  }
 }
 
 int main(int argc, char ** argv) {
