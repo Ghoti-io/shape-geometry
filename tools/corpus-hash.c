@@ -1794,10 +1794,13 @@ int main(void) {
         case 3: r = gshgeom_path_rational_quadratic_to(path, q1, q2, w4); break;
         case 4: r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4); break;
         default: {
+          /* every draw its own statement: the order of a call's arguments is the compiler's */
           const double rx = 1.0 + (double)(next() % 9u);
           const double ry = 1.0 + (double)(next() % 9u);
-          r = gshgeom_path_arc_endpoint_to(path, q1, rx, ry, (double)(next() % 8u) * 45.0, GSHGEOM_ANGLE_DEGREES,
-              (int)(next() & 1u), (int)(next() & 1u), NULL);
+          const double phi = (double)(next() % 8u) * 45.0;
+          const int large = (int)(next() & 1u);
+          const int sweep = (int)(next() & 1u);
+          r = gshgeom_path_arc_endpoint_to(path, q1, rx, ry, phi, GSHGEOM_ANGLE_DEGREES, large, sweep, NULL);
           break;
         }
         }
