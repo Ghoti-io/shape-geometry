@@ -1845,5 +1845,105 @@ int main(void) {
     printf("shape-geometry.devbox-hash %016" PRIx64 "\n", gshgeom_hash_value(&box_total));
     printf("shape-geometry.devbox-count %lu\n", box_count);
   }
+
+  /* The hatch section (hatch.h, HX4 to HX8): random hatches over random regions under random maps.  Each round hashes the lines of
+   * the use, the hash of the pieces and the hash of their expansion (round, square and butt caps, both width spaces), and a
+   * round that is refused hashes the refusal.  The positions are exact sums of products, one division and sums in double, a
+   * rotation by gshgeom_sincos, a lowered dash array and the stroke expansion: a target that fuses a multiply-add, widens a
+   * double or reads a byte order differently shows here.  Every double is an integer over a power of two or ten. */
+  {
+    GSHGEOM_Hash h_total;
+    unsigned long h_count = 0;
+    gshgeom_hash_init(&h_total);
+    uint64_t hs = UINT64_C(0x4A7C4ED0B1A5E5ED);
+#define H_NEXT() (hs ^= hs >> 12, hs ^= hs << 25, hs ^= hs >> 27, hs * UINT64_C(2685821657736338717))
+#define H_INT(lo, hi) ((int64_t)(lo) + (int64_t)(H_NEXT() % (uint64_t)((hi) - (lo) + 1)))
+    static const double h_angles[] = {0.0, 90.0, 180.0, 270.0, 45.0, 135.0, 30.0, 60.0, 17.0, 1.0e6};
+    static const double h_dashes[][4] = {{2.0, -1.0, 0.0, 0.0}, {1.0, -0.5, 0.0, -0.5}, {0.0, -1.25, 0.0, 0.0}, {-1.0, 0.0, 0.0, 0.0}, {0.5, -0.5, 1.0, -2.0}, {3.0, 0.0, -2.0, 0.0}};
+    static const unsigned h_dash_n[] = {2, 4, 2, 2, 4, 3};
+    static const double h_maps[][6] = {{1, 0, 0, 1, 0, 0}, {2, 0, 0, 2, 5, 3}, {1, 0, 0, -1, 0, 20}, {0, -1, 1, 0, 20, 0}, {2, 0, 0, 1, 0, 0}, {0.5, 0, 0, 0.5, 1, 1}, {1, 0, 0, 1, 2.25, -3.5}, {0.8, 0.3, -0.2, 1.1, 3.1, 0.7}};
+    for (unsigned round = 0; round < 360; round++) {
+      GSHGEOM_Path * region = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &region) != GSHGEOM_OK) {
+        return fail("cannot make a path for the hatch section");
+      }
+      const double rx = (double)H_INT(0, 8) / 4.0, ry = (double)H_INT(0, 8) / 4.0;
+      const double rw = (double)H_INT(24, 60) / 4.0, rh = (double)H_INT(24, 60) / 4.0;
+      const unsigned shape = (unsigned)(H_NEXT() % 4u);
+      GSHGEOM_Result pr = gshgeom_path_add_rect(region, rx, ry, rw, rh, 0, 0);
+      if (pr == GSHGEOM_OK && shape == 1u) {
+        pr = gshgeom_path_add_rect(region, rx + 2.0, ry + 2.0, rw / 2.0, rh / 2.0, 1, 0); /* a hole */
+      } else if (pr == GSHGEOM_OK && shape == 2u) {
+        pr = gshgeom_path_add_ellipse(region, rx + rw / 2.0, ry + rh / 2.0, rw / 3.0, rh / 3.0, 0, 0);
+      } else if (pr == GSHGEOM_OK && shape == 3u) {
+        pr = gshgeom_path_add_rect(region, rx + rw / 2.0, ry + rh / 2.0, rw / 2.0, rh / 2.0, 0, 0);
+      }
+      if (pr != GSHGEOM_OK) {
+        return fail("cannot build a hatch region");
+      }
+      GSHGEOM_Hatch_Family fam[2];
+      double dash_store[2][4];
+      const unsigned nf = (H_NEXT() % 4u) == 0u ? 2u : 1u;
+      for (unsigned fi = 0; fi < nf; fi++) {
+        GSHGEOM_Hatch_Family * f = &fam[fi];
+        memset(f, 0, sizeof *f);
+        f->angle = h_angles[H_NEXT() % 10u];
+        f->origin_x = (double)H_INT(-8, 8) / 4.0;
+        f->origin_y = (double)H_INT(-8, 8) / 4.0;
+        f->offset_along = (double)H_INT(-6, 6) / 8.0;
+        f->offset_across = (double)H_INT(-12, 12) / 8.0;
+        const unsigned pat = (unsigned)(H_NEXT() % 8u);
+        if (pat < 6u) {
+          for (unsigned q = 0; q < 4; q++) {
+            dash_store[fi][q] = h_dashes[pat][q];
+          }
+          f->dash_count = h_dash_n[pat];
+          f->dashes = dash_store[fi];
+        }
+      }
+      GSHGEOM_Hatch hatch;
+      memset(&hatch, 0, sizeof hatch);
+      hatch.angle_unit = GSHGEOM_ANGLE_DEGREES;
+      hatch.nesting = (uint32_t)(H_NEXT() % 3u);
+      const double *hm = h_maps[H_NEXT() % 8u], *cm = h_maps[H_NEXT() % 8u];
+      const double hl[4] = {hm[0], hm[1], hm[2], hm[3]}, ht[2] = {hm[4], hm[5]};
+      const double cl[4] = {cm[0], cm[1], cm[2], cm[3]}, ct[2] = {cm[4], cm[5]};
+      GSHGEOM_Map chain;
+      if (gshgeom_map_from_matrix(2, hl, ht, &hatch.map) != GSHGEOM_OK || gshgeom_map_from_matrix(2, cl, ct, &chain) != GSHGEOM_OK) {
+        return fail("cannot build a hatch map");
+      }
+      hatch.family_count = nf;
+      hatch.families = fam;
+      GSHGEOM_Hatch_Pieces * pieces = NULL;
+      const GSHGEOM_Fill_Rule rule = (H_NEXT() % 2u) ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
+      const GSHGEOM_Result r = gshgeom_hatch_pieces(region, rule, &hatch, &chain, 4096, NULL, NULL, &pieces);
+      feed_arc_u64((uint64_t)r, &h_total, &h_count);
+      if (r == GSHGEOM_OK) {
+        feed_arc_u64(gshgeom_hatch_pieces_lines(pieces), &h_total, &h_count);
+        feed_arc_u64((uint64_t)gshgeom_hatch_pieces_count(pieces), &h_total, &h_count);
+        feed_arc_u64(gshgeom_hatch_pieces_hash(pieces), &h_total, &h_count);
+        for (unsigned c = 0; c < 3; c++) {
+          GSHGEOM_Stroke st;
+          gshgeom_stroke_init(&st);
+          st.width = (c == 2u ? 1.0 : 0.4);
+          st.width_space = c == 2u ? GSHGEOM_STROKE_WIDTH_DEVICE : GSHGEOM_STROKE_WIDTH_LOCAL;
+          st.cap = c;
+          GSHGEOM_Stroke_Outline * o = NULL;
+          const GSHGEOM_Result er = gshgeom_hatch_expand_pieces(pieces, &st, &chain, GSHGEOM_FLATTEN_TOLERANCE, NULL, NULL, &o);
+          feed_arc_u64((uint64_t)er, &h_total, &h_count);
+          if (er == GSHGEOM_OK) {
+            feed_arc_u64(gshgeom_stroke_outline_hash(o), &h_total, &h_count);
+          }
+          gshgeom_stroke_outline_destroy(o);
+        }
+      }
+      gshgeom_hatch_pieces_destroy(pieces);
+      gshgeom_path_destroy(region);
+    }
+#undef H_INT
+#undef H_NEXT
+    printf("shape-geometry.hatch-hash %016" PRIx64 "\n", gshgeom_hash_value(&h_total));
+    printf("shape-geometry.hatch-count %lu\n", h_count);
+  }
   return 0;
 }

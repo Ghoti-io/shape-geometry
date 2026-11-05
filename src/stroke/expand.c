@@ -442,6 +442,21 @@ static GSHGEOM_Result stroke_sub(GSHGEOM_SK_Ctx * c, const Reader * rd, size_t i
 GSHGEOM_Result gshgeom_sk_solid_sub(GSHGEOM_SK_Ctx * c, const GSHGEOM_SK_Reader * rd, size_t i) {
   const Sub * s = &rd->subs[i];
   if (s->seg_count == 0) {
+    if (c->dot_dirs) {
+      /* HX7: a hatch's dot is a dash of the pattern, drawn whatever `degenerate` says, along the line it lies on. */
+      if (!s->draws) {
+        return GSHGEOM_OK;
+      }
+      if (c->dot_i >= c->dot_n) {
+        return GSHGEOM_ERR_INTERNAL;
+      }
+      const double dx = c->dot_dirs[2 * c->dot_i];
+      const double dy = c->dot_dirs[2 * c->dot_i + 1];
+      c->dot_i++;
+      GSHGEOM_SK_Vec d = c->local ? gshgeom_sk_v(dx, dy)
+                                  : gshgeom_sk_v(c->map.m[0][0] * dx + c->map.m[0][1] * dy, c->map.m[1][0] * dx + c->map.m[1][1] * dy);
+      return gshgeom_sk_degenerate(c, s->start, d);
+    }
     if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_OMIT) {
       return GSHGEOM_OK;
     }
@@ -495,8 +510,8 @@ typedef struct CurveReq {
 /** The expansion of stroke.h (@p cr NULL: 26.6 polygons in @p po) or of stroke_curves.h (curves in @p pc). */
 static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const CurveReq * cr, const GSHGEOM_Allocator * alloc,
-    const GSHGEOM_Limits * limits, int depth_cap, int conform, int * redo, GSHGEOM_Stroke_Outline ** po,
-    GSHGEOM_Stroke_Curves ** pc) {
+    const GSHGEOM_Limits * limits, int depth_cap, int conform, int * redo, const double * dirs, size_t dir_count,
+    GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc) {
   GSHGEOM_Result r = gshgeom_map_check(map);
   if (r != GSHGEOM_OK) {
     return r;
@@ -543,6 +558,8 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
     double lim = cr->t * 0x1p40;
     c.mag_limit = lim < GSHGEOM_SK_MAG_LIMIT ? lim : GSHGEOM_SK_MAG_LIMIT;
   }
+  c.dot_dirs = dirs;
+  c.dot_n = dir_count;
   c.map = *map;
   c.local = c.st.width_space == GSHGEOM_STROKE_WIDTH_LOCAL;
   c.work_cap = 4 * c.limits.max_points + 4096;
@@ -711,9 +728,26 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
     return GSHGEOM_ERR_INVALID;
   }
   int redo = 0;
-  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, out, NULL);
+  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, NULL, 0, out, NULL);
   if (r == GSHGEOM_OK && redo) {
-    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 0, &redo, out, NULL);
+    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 0, &redo, NULL, 0, out, NULL);
+  }
+  return r;
+}
+
+GSHGEOM_Result gshgeom_stroke_expand_dots(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map,
+    int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, const double * dirs, size_t dir_count,
+    GSHGEOM_Stroke_Outline ** out) {
+  if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || (dir_count && !dirs)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  /* a non-NULL pointer even for no dots: the hatch's degenerate subpaths are all dots */
+  static const double none[2] = {0.0, 0.0};
+  const double * d = dirs ? dirs : none;
+  int redo = 0;
+  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 1, &redo, d, dir_count, out, NULL);
+  if (r == GSHGEOM_OK && redo) {
+    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 0, &redo, d, dir_count, out, NULL);
   }
   return r;
 }
@@ -730,7 +764,7 @@ GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerli
   }
   CurveReq cr = {tolerance, form};
   int redo = 0;
-  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, 0, &redo, NULL, out);
+  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, 0, &redo, NULL, 0, NULL, out);
 }
 
 GSHGEOM_Result gshgeom_stroke_curves_expand(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,

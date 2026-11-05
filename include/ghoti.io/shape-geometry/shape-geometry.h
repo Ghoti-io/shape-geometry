@@ -37,6 +37,7 @@
 #include <ghoti.io/shape-geometry/fill.h>
 #include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/hash.h>
+#include <ghoti.io/shape-geometry/hatch.h>
 #include <ghoti.io/shape-geometry/lattice.h>
 #include <ghoti.io/shape-geometry/macros.h>
 #include <ghoti.io/shape-geometry/map.h>

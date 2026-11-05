@@ -196,6 +196,9 @@ typedef struct GSHGEOM_SK_Ctx {
   size_t snap_cap, snap_n;
   int conform;                   ///< Emit conforming pieces (whole-stroke pass one); 0: every piece inflated, as before.
   int inflated;                  ///< An inflated piece was emitted while conforming: pass one is void, and is redone with 0.
+  const double * dot_dirs;       ///< A hatch's dots (hatch.c, HX7): the model-space direction (x, y) of each degenerate subpath, in order; NULL for a stroke.
+  size_t dot_n;                  ///< How many directions there are.
+  size_t dot_i;                  ///< The next one to use.
 } GSHGEOM_SK_Ctx;
 
 /** The outline (stroke.h, SG16). */
@@ -230,6 +233,16 @@ struct GSHGEOM_Stroke_Curves {
  * ::GSHGEOM_STROKE_MAX_DEPTH): the seam a test forces the cap through, since no
  * ordinary input reaches the real one.  Not exported; the tests link the archive.
  */
+/**
+ * The expansion of a hatch's pieces (hatch.h, HX7, HX8): ::gshgeom_stroke_expand_with_tolerance of a centerline whose
+ * degenerate subpaths are the hatch's dots, each drawn (whatever the style's `degenerate` says) along its own direction
+ * from @p dirs (two doubles each, in the centerline's space, in the order the degenerate subpaths come) instead of SG11's
+ * effective tangent.  A centerline with a degenerate subpath beyond the @p dir_count directions is ::GSHGEOM_ERR_INTERNAL.
+ */
+GSHGEOM_Result gshgeom_stroke_expand_dots(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map,
+    int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, const double * dirs, size_t dir_count,
+    GSHGEOM_Stroke_Outline ** out);
+
 GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
     int depth_cap, GSHGEOM_Stroke_Outline ** out);

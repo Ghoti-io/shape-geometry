@@ -56,6 +56,10 @@ got_lthash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.lattice-hash"{print
 got_ltcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.lattice-count"{print $2}')
 want_lthash=$(awk '$1=="lattice-hash"{print $2}' "$file" 2>/dev/null)
 want_ltcount=$(awk '$1=="lattice-count"{print $2}' "$file" 2>/dev/null)
+got_hthash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hatch-hash"{print $2}')
+got_htcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hatch-count"{print $2}')
+want_hthash=$(awk '$1=="hatch-hash"{print $2}' "$file" 2>/dev/null)
+want_htcount=$(awk '$1=="hatch-count"{print $2}' "$file" 2>/dev/null)
 if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$got_count" ] ||
    [ -z "$want_phash" ] || [ -z "$want_pcount" ] || [ -z "$got_phash" ] || [ -z "$got_pcount" ] ||
    [ -z "$want_vhash" ] || [ -z "$want_vcount" ] || [ -z "$got_vhash" ] || [ -z "$got_vcount" ] ||
@@ -64,7 +68,8 @@ if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$g
    [ -z "$want_chash" ] || [ -z "$want_ccount" ] || [ -z "$got_chash" ] || [ -z "$got_ccount" ] ||
    [ -z "$want_shash" ] || [ -z "$want_scount" ] || [ -z "$got_shash" ] || [ -z "$got_scount" ] ||
    [ -z "$want_klhash" ] || [ -z "$want_klcount" ] || [ -z "$got_klhash" ] || [ -z "$got_klcount" ] ||
-   [ -z "$want_lthash" ] || [ -z "$want_ltcount" ] || [ -z "$got_lthash" ] || [ -z "$got_ltcount" ]; then
+   [ -z "$want_lthash" ] || [ -z "$want_ltcount" ] || [ -z "$got_lthash" ] || [ -z "$got_ltcount" ] ||
+   [ -z "$want_hthash" ] || [ -z "$want_htcount" ] || [ -z "$got_hthash" ] || [ -z "$got_htcount" ]; then
   printf 'check-corpus-hash: nothing to compare (probe %s/%s, predicate %s/%s and vertex %s/%s, committed %s/%s, %s/%s and %s/%s in %s)\n' \
     "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$want_hash" "$want_count" "$want_phash" "$want_pcount" \
     "$want_vhash" "$want_vcount" "$file" >&2
@@ -121,4 +126,9 @@ if [ -z "$want_dbhash" ] || [ -z "$want_dbcount" ] || [ -z "$got_dbhash" ] || [ 
     "$got_dbhash" "$got_dbcount" "$want_dbhash" "$want_dbcount" >&2
   exit 1
 fi
-printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s; lattice %s over %s; devbox %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount" "$got_lthash" "$got_ltcount" "$got_dbhash" "$got_dbcount"
+if [ "$got_hthash" != "$want_hthash" ] || [ "$got_htcount" != "$want_htcount" ]; then
+  printf 'check-corpus-hash: FAIL: hatch %s over %s results, committed %s over %s\n' \
+    "$got_hthash" "$got_htcount" "$want_hthash" "$want_htcount" >&2
+  exit 1
+fi
+printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s; lattice %s over %s; devbox %s over %s; hatch %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount" "$got_lthash" "$got_ltcount" "$got_dbhash" "$got_dbcount" "$got_hthash" "$got_htcount"

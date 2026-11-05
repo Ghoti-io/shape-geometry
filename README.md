@@ -24,6 +24,11 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   decided exactly (the same set on every target, and a count that does not visit the copies, so a step of `2^-64` is a limit
   and not a stall); the translation of a copy as a product and two sums with no accumulation; and the integer period of a
   lattice of whole-pixel steps (its Hermite normal form and the reduction into one period).
+- Hatching (`hatch.h`): families of parallel lines (the pattern definition lines of a CAD hatch: angle, origin, offsets along
+  and across, dash elements) trimmed exactly to a closed region (its fill rule, or the outermost ring, or everything inside the
+  outer loops), dashed by the one pattern that runs without a restart along the whole line, and returned as the pieces a
+  plotter follows or stroked by the stroke expansion into one outline; the side of every point is decided exactly, so a line
+  along an edge or through a vertex is drawn once and the same on every target.
 - Along-path parametrization: a measured path built once from a model path (any
   curve kind, 2D or 3D, any number of subpaths) gives its arc length and, at any
   distance along it, the point, the unit tangent and the left normal. The arc

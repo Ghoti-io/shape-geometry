@@ -1232,6 +1232,92 @@ non-dyadic ones to the exact rationals.  `tools/gen-lattice-vectors.py` restates
 lattices (periodicity, a window of exactly one point per class).  The plants of `tools/check-planted.py` (ids `lat-`) cover
 each rule and branch.
 
+## Hatches
+
+`hatch.h` (HX2 and HX4 to HX12, HX16) turns a closed region and a set of line families into **pieces** (the pen-down
+segments, in local space) and into the **outline** of their stroke.  A hatch is geometry: a plotter follows the pieces, a CAD
+writer emits the families, a PDF or SVG writer strokes the pieces as a path, and a raster sink fills the outline.  Nothing here
+makes a tile.  The definition is `hatch.h`'s comment; this section records the readings it needed, the method, and what
+checks it.
+
+### Sources and the readings they left open
+
+The families are the pattern definition lines of the DXF HATCH entity (the Autodesk DXF Reference, "Pattern Data": groups 53
+angle, 43 and 44 base point, 45 and 46 offset, 79 and 49 dashes) with the sense of each value taken from the AutoCAD
+hatch pattern definition (`angle, x-origin, y-origin, delta-x, delta-y, dash-1, ...`): a line is of infinite length with the
+dash pattern superimposed on it; `delta-y` is the spacing of the members of a family, measured perpendicular to the lines;
+`delta-x` is the displacement between members in the direction of the line and matters to dashed lines only; a positive
+dash is pen-down, a negative one a space, and zero a dot.  Neither text says whether the values stored in an entity are already
+scaled and rotated by the entity's pattern scale and angle (groups 41 and 52), so a front end lowers its entity by choosing: bake
+them into the families or put them in the hatch map `H`; both draw the same lines (`H` is the general place).  The reference does
+not say what a line that lies along a boundary edge does, nor whether the dash pattern restarts at a boundary; the library
+draws such a line once, where the edge has an interior side (the closed region), and runs the pattern without a restart, the
+latter being what "of infinite length, with the pattern superimposed" says.  Hatch styles (group 75): `Normal` is the
+even-odd fill, `Outer` hatches the outermost ring and `Ignore` everything inside the outer loops (`nesting`); group 77 (double)
+adds a second family at the angle plus 90 degrees, which a front end writes out.  SVG 2 has no hatch: the published text
+(painting chapter) lists `linearGradient`, `radialGradient` and `pattern` as the paint servers, and the proposed `hatch` element
+is not in it.
+
+### The method (HX4, HX5)
+
+A line is the device line through a double point `A_k` with a double direction `w`, and it is decided exactly which side of
+it every contour point is on (a filter on a rounded evaluation, then an exact sum of products).  The region is read along
+the line shifted infinitesimally to its left and to its right, which turns every degenerate case (a vertex on the line, an
+edge along it, a vertex where the line only touches) into the ordinary one of a line that crosses edges at isolated points:
+a point on the line counts as right of the left-shifted line and left of the right-shifted one.  At each crossing the
+winding number and the crossed contour's own parity change by one; between consecutive distinct positions the region's
+membership is read from them (`RULE`: nonzero or odd winding; `OUTER`: exactly one contour's interior; `IGNORE`: at least
+one).  The trim intervals are the union of the two readings, which is the closure of the region meeting the line, and an
+isolated touching point is no interval.  A position is the vertex's projection (so a vertex shared by two edges is one
+position) or an edge crossing interpolated in `double`; positions within 2^-26 pixel are one, so an interval or a gap that
+short is neither (the positions are computed, and two crossings of different edges at one real point must not leave a
+sliver).  This is the one place the definition meets rounding, and the oracle and the vectors are held clear of it.
+
+The rotation is `gshgeom_sincos`, exact at a quarter turn; `n` is the left normal; line `k` starts at `O + (k dx) u + (k dy) n`
+in hatch space with the origin applied before the map.  The lines of a use are those meeting the closed box of the contours,
+found from an estimate that is then decided by the exact test of the four corners, so the count is the same whatever the
+estimate's error, and a count past the limit is refused before a line is made.
+
+### Dashes (HX6)
+
+S3's lowering (`gshgeom_stroke_dashes_from_dxf`) and positions (`gshgeom_stroke_dash_each`) are used as they are.  The
+pattern runs along the whole line from its base point and is not restarted at an interval, so the window handed to
+`dash_each` starts one period before the first interval (the unbroken pattern, and S3's half-open tie at a window's start,
+which could make a spurious dot, falls outside every interval) and ends one period after the last (S3 makes no entry that
+begins at the end of its window, which would lose a dot lying exactly on the last boundary).  Each dash is cut by the
+intervals; a cut of at most 2^-26 pixel is dropped.  A dot is kept when it lies in an interval, ends included, and at an end
+to within 2^-46 of the larger of the period, 1 and the line's largest trim position: SG30 starts a line that begins with a space
+and ends with a dot one unit in the last place after that dot, so a dot that belongs at a multiple of the period lies that much
+before it, and it is then placed on the interval's end.
+
+### The stroke (HX7, HX8)
+
+The pieces are stroked by the stroke expansion itself: each is an open two-point subpath of an explicit path in local space, in
+the order of emission, and `gshgeom_stroke_expand_dots` is `gshgeom_stroke_expand_with_tolerance` of that path.  A dot is a
+degenerate subpath, and the expansion is told the direction of each (the mapped direction of its line) instead of using SG11's
+effective tangent, and draws it whatever `degenerate` says: a dash of the pattern is not a degenerate subpath.  There is no
+second construction of a body, a cap or a union, so the claim that hatching goes through strokes is true by the code, and the
+test that the hatch outline's hash equals the stroke expansion's of the explicit pieces guards the path building and the dots.
+
+### What checks it
+
+`tests/hatch_oracle.h` decides the trim set and the dash positions by the definition in exact rationals: every position where
+an edge meets the line is a breakpoint, each stretch between two is tested at two exact points 2^-100 to either side of its
+midpoint with the winding and parity taken by a ray, and the dashes are the pattern laid on the infinite line.
+`tools/gen-hatch-vectors.py` restates it in Python fractions and prints `tests/hatch_vectors.h` (77 cases: nine regions
+including nesting to three levels, a bowtie, touching squares and a slit; sixteen families including dashed, dotted, staggered,
+negative and crossed ones; six map pairs).  The tests compare the pieces to both, 260 random hatches (count, order, kind and
+position within 2^-40) to the oracle, the outline's fill to the definition of the stroke of the pieces at every point outside a
+0.12 pixel band, and cover the check's order and bounds, the limits, the statuses, the curved boundary against its tolerance,
+the quarter turn and the origin.  `fuzz_hatch` drives all of it from bytes (the replay gate over 148 seeds), and the
+probe hashes 360 random hatches (`hatch-hash`, `hatch-count`).  The plants of `tools/check-planted.py` (ids `hx-`) cover each
+rule and branch.
+
+### The revision
+
+`GSHGEOM_HATCH_REVISION` is 1 and is in no hash.  A change to HX4 to HX7 is a new revision; before the library's first
+release exactly one is live and none selectable.
+
 ## Tests and gates
 
 `make test` runs the unit tests and the gates; `make check-planted` builds

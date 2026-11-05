@@ -8,7 +8,7 @@
 # Ghoti.io Shape Geometry is free software: you can redistribute it and/or modify it
 # under the terms of the GNU Lesser General Public License version 3 as
 # published by the Free Software Foundation.
-"""Write the seed corpora of the path, stroke and clip fuzzers, deterministically (story 16; CAP-15, AD-19).
+"""Write the seed corpora of the path, stroke, clip and hatch fuzzers, deterministically (story 16; CAP-15, AD-19).
 
     python3 tools/gen-fuzz-corpus.py            # write tests/fuzz/corpus/path/, stroke/ and clip/
     python3 tools/gen-fuzz-corpus.py --check    # fail if the committed files differ
@@ -563,6 +563,126 @@ def clip_files():
     return out
 
 
+# --- the hatch corpus (tests/fuzz/fuzz_hatch.c) -----------------------------------------------------------------------
+#
+# A file is: an option byte (bit 0 a small max_points, bit 1 a failing allocation, bit 2 a small line limit, bit 3 device
+# width, bits 4 and 5 the cap, bit 6 degenerate omit, bit 7 even-odd), a byte for the limit and the allocation to fail, the hatch
+# map and the chain (a kind byte below 7, then four values and two for kind 4), the angle unit, the nesting, the family count (mod
+# 4) with each family's angle, origin x and y, offsets along and across and its dash count with the dashes, the style's width,
+# and the contours (a count, then for each a kind byte, x, y, w and h).  A value is a byte below 24 (a table of degenerate and
+# round numbers, in fuzz_hatch.c), 24 for NaN, 25 for infinity, or 30 and a 16-bit value over 8.
+
+HV = {0: 0.0, 0.25: 1, 0.5: 2, 1.0: 3, 1.5: 4, 2.0: 5, 3.0: 6, 4.0: 7, 7.5: 8, 10.0: 9, -1.0: 10, -2.0: 11, 90.0: 16, 45.0: 17,
+      30.0: 18, 5.0: 22, 12.0: 23}
+
+
+def hv(x):
+    """A value: a table byte if x is in the table, else the three-byte form."""
+    if x == 0:
+        return bytes([0])
+    if x in HV:
+        return bytes([HV[x]])
+    r = int(round(x * 8)) & 0xFFFF
+    return bytes([30, r >> 8, r & 255])
+
+
+def hmap(kind, *vals):
+    return bytes([kind]) + b"".join(hv(v) for v in vals)
+
+
+H_ID = hmap(0)
+H_SCALE = hmap(1)
+H_ROT = hmap(2)
+H_SING = hmap(3)
+H_3D = hmap(5)
+H_FLIP = hmap(6)
+
+
+def hfam(angle, ox, oy, dx, dy, dashes=()):
+    return hv(angle) + hv(ox) + hv(oy) + hv(dx) + hv(dy) + bytes([len(dashes)]) + b"".join(hv(d) for d in dashes)
+
+
+def hcontour(kind, x, y, w, h):
+    return bytes([kind]) + hv(x) + hv(y) + hv(w) + hv(h)
+
+
+def hatch_input(fams, contours, opts=0, fail=0, hm=H_ID, cm=H_ID, unit=1, nesting=0, width=0.5):
+    return (bytes([opts, fail]) + hm + cm + bytes([unit, nesting, len(fams)]) + b"".join(fams) + hv(width) +
+            bytes([len(contours) - 1]) + b"".join(contours))
+
+
+def hatch_scripted():
+    out = {}
+    sq = hcontour(0, 0, 0, 10, 10)
+    hole = hcontour(0, 3, 3, 4, 4)
+    tri = hcontour(2, 0, 0, 12, 9)
+    solid = hfam(0, 0, 0, 0, 2.0)
+    diag = hfam(45, 0, 0, 0, 1.5)
+    dashed = hfam(0, 0, 0, 0, 2.0, (3.0, -1.0))
+    dotted = hfam(0, 0, 0, 0, 1.5, (0, -2.0))
+    out["solid.bin"] = hatch_input([solid], [sq])
+    out["diag-round.bin"] = hatch_input([diag], [sq, hole], opts=1 << 4 | 0)
+    out["dashed-square.bin"] = hatch_input([dashed, diag], [sq], opts=2 << 4)
+    out["dots-square-cap.bin"] = hatch_input([dotted], [sq], opts=2 << 4)
+    out["dots-round.bin"] = hatch_input([dotted], [tri], opts=1 << 4)
+    out["dots-omit.bin"] = hatch_input([dotted], [sq], opts=(1 << 4) | 64)
+    out["outer.bin"] = hatch_input([solid], [sq, hole], nesting=1)
+    out["ignore.bin"] = hatch_input([solid, dashed], [sq, hole], nesting=2)
+    out["device.bin"] = hatch_input([dashed], [sq], opts=8 | (1 << 4), width=1.0)
+    out["even-odd.bin"] = hatch_input([solid], [sq, hole], opts=128)
+    out["scaled.bin"] = hatch_input([dashed], [tri], hm=H_SCALE, cm=H_ROT)
+    out["flipped.bin"] = hatch_input([diag], [sq], hm=H_FLIP, cm=H_SCALE)
+    out["zero-width.bin"] = hatch_input([solid], [sq], width=0)
+    out["singular-hatch.bin"] = hatch_input([solid], [sq], hm=H_SING)
+    out["singular-chain.bin"] = hatch_input([solid], [sq], cm=H_SING)
+    out["3d.bin"] = hatch_input([solid], [sq], hm=H_3D)
+    out["no-family.bin"] = hatch_input([], [sq])
+    out["bad-nesting.bin"] = hatch_input([solid], [sq], nesting=3)
+    out["bad-unit.bin"] = hatch_input([solid], [sq], unit=4)
+    out["zero-spacing.bin"] = hatch_input([hfam(0, 0, 0, 0, 0), hfam(90, 0, 0, 0, 2.0)], [sq])
+    out["no-lines.bin"] = hatch_input([hfam(0, 100, 100, 0, 2.0)], [hcontour(0, 0, 0, 0, 0)])
+    out["line-limit.bin"] = hatch_input([solid], [sq], opts=4, fail=1)
+    out["point-limit.bin"] = hatch_input([dashed], [sq], opts=1, fail=0)
+    out["oom-first.bin"] = hatch_input([solid], [sq], opts=2, fail=0)
+    out["oom-later.bin"] = hatch_input([dashed], [sq, hole], opts=2, fail=7)
+    out["bad-values.bin"] = hatch_input([bytes([24, 0, 0, 0, 3, 0])], [sq])
+    out["infinite-dash.bin"] = hatch_input([bytes([0, 0, 0, 0, 3, 1, 25])], [sq])
+    out["spaces-only.bin"] = hatch_input([hfam(0, 0, 0, 0, 2.0, (-1.0, -2.0))], [sq])
+    return out
+
+
+def hatch_random(seed):
+    rng = Rng(seed)
+    vals = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 7.5, 10.0, -1.0, -2.0, 5.0, 12.0]
+    angles = [0, 90, 45, 30, 17.0, 135.0, 180.0, 270.0]
+    fams = []
+    for _ in range(1 + rng.below(3)):
+        nd = rng.below(6)
+        dashes = tuple(vals[rng.below(len(vals))] * (1 if rng.below(3) else 0) for _ in range(nd))
+        fams.append(hfam(angles[rng.below(len(angles))] if angles[rng.below(len(angles))] in HV else 45, vals[rng.below(len(vals))] - 1.0,
+                         vals[rng.below(len(vals))] - 1.0, [0, 0.5, 1.5, -1.0][rng.below(4)], vals[rng.below(len(vals))], dashes))
+    contours = [hcontour(rng.below(3), vals[rng.below(len(vals))] - 1.0, vals[rng.below(len(vals))] - 1.0, vals[rng.below(len(vals))] + 4.0,
+                         vals[rng.below(len(vals))] + 4.0) for _ in range(1 + rng.below(3))]
+    maps = [H_ID, H_SCALE, H_ROT, H_FLIP, H_ID]
+    opts = rng.below(256) & ~2 if rng.below(4) else rng.below(256)
+    return hatch_input(fams, contours, opts=opts, fail=rng.below(40), hm=maps[rng.below(5)], cm=maps[rng.below(5)],
+                       unit=1 if rng.below(5) else rng.below(5), nesting=rng.below(3), width=[0.25, 0.5, 1.0, 1.5][rng.below(4)])
+
+
+HATCH_RANDOM_FILES = 90
+HATCH_PLAIN_FILES = 30
+
+
+def hatch_files():
+    out = hatch_scripted()
+    for i in range(HATCH_RANDOM_FILES):
+        out["random-%03d.bin" % i] = hatch_random(i + 1)
+    for i in range(HATCH_PLAIN_FILES):
+        rng = Rng(19000 + i)
+        out["plain-%03d.bin" % i] = bytes(rng.byte() for _ in range(40 + rng.below(160)))
+    return out
+
+
 def check_or_write(root, want, check):
     if check:
         have = sorted(os.listdir(root)) if os.path.isdir(root) else []
@@ -587,6 +707,7 @@ def main():
     check_or_write(os.path.join(base, "path"), files(), check)
     check_or_write(os.path.join(base, "stroke"), stroke_files(), check)
     check_or_write(os.path.join(base, "clip"), clip_files(), check)
+    check_or_write(os.path.join(base, "hatch"), hatch_files(), check)
 
 
 if __name__ == "__main__":
