@@ -48,6 +48,10 @@ got_klhash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.clip-hash"{print $2
 got_klcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.clip-count"{print $2}')
 want_klhash=$(awk '$1=="clip-hash"{print $2}' "$file" 2>/dev/null)
 want_klcount=$(awk '$1=="clip-count"{print $2}' "$file" 2>/dev/null)
+got_dbhash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.devbox-hash"{print $2}')
+got_dbcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.devbox-count"{print $2}')
+want_dbhash=$(awk '$1=="devbox-hash"{print $2}' "$file" 2>/dev/null)
+want_dbcount=$(awk '$1=="devbox-count"{print $2}' "$file" 2>/dev/null)
 got_lthash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.lattice-hash"{print $2}')
 got_ltcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.lattice-count"{print $2}')
 want_lthash=$(awk '$1=="lattice-hash"{print $2}' "$file" 2>/dev/null)
@@ -111,4 +115,10 @@ if [ "$got_lthash" != "$want_lthash" ] || [ "$got_ltcount" != "$want_ltcount" ];
     "$got_lthash" "$got_ltcount" "$want_lthash" "$want_ltcount" >&2
   exit 1
 fi
-printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s; lattice %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount" "$got_lthash" "$got_ltcount"
+if [ -z "$want_dbhash" ] || [ -z "$want_dbcount" ] || [ -z "$got_dbhash" ] || [ -z "$got_dbcount" ] ||
+   [ "$got_dbhash" != "$want_dbhash" ] || [ "$got_dbcount" != "$want_dbcount" ]; then
+  printf 'check-corpus-hash: FAIL: devbox %s over %s results, committed %s over %s\n' \
+    "$got_dbhash" "$got_dbcount" "$want_dbhash" "$want_dbcount" >&2
+  exit 1
+fi
+printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s; lattice %s over %s; devbox %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount" "$got_lthash" "$got_ltcount" "$got_dbhash" "$got_dbcount"

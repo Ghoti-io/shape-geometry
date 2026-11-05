@@ -853,6 +853,7 @@ GR = "src/core/grow.h"
 DH = "include/ghoti.io/shape-geometry/device.h"
 FH = "include/ghoti.io/shape-geometry/flatten.h"
 DT = ["testDevice"]
+BT = ["testDevice_box", "testDevice"]
 FT = ["testFlatten", "testTolerance"]
 DFT = ["testDevice", "testFlatten"]
 RT = ["testDevice", "testConic"]
@@ -969,25 +970,36 @@ PLANTS += [
     ("h-dump-ignores-ferror", "src", DV, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", DT),
     ("h-dump-ignores-header-error", "src", DV, "(unsigned long long)gshgeom_device_path_hash(path)) < 0) {\n    return GSHGEOM_ERR_IO;", "(unsigned long long)gshgeom_device_path_hash(path)) < 0) {\n    return GSHGEOM_OK;", DT),
         # --- a model path under a map ---------------------------------------------
-    ("fm-3d-path-ok", "src", DV, "if (!path || !map || !out || gshgeom_path_dimension(path) != 2 ||", "if (!path || !map || !out ||", DT),
-    ("fm-null-out", "src", DV, "if (!path || !map || !out || gshgeom_path_dimension(path) != 2 ||", "if (!path || !map || gshgeom_path_dimension(path) != 2 ||", DT),
-        ("fm-3d-map-ok", "src", DV, "  if (map->dim != 2) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Device_Path * dp;", "  GSHGEOM_Device_Path * dp;", DT),
-    ("fm-skips-first-element", "src", DV, "for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Verb verb;", "for (size_t i = 1; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Verb verb;", DT),
-    ("fm-skips-last-element", "src", DV, "for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Verb verb;", "for (size_t i = 0; i + 1 < n && r == GSHGEOM_OK; i++) {\n    GSHGEOM_Verb verb;", DT),
+    ("fm-3d-path-ok", "src", DV, "if (!path || !map || gshgeom_path_dimension(path) != 2 ||", "if (!path || !map ||", DT),
+    ("fm-null-out", "src", DV, "  if (!out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = check_inputs(path, map, tolerance);", "  GSHGEOM_Result r = check_inputs(path, map, tolerance);", DT),
+        ("fm-3d-map-ok", "src", DV, "  return map->dim != 2 ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;", "  return GSHGEOM_OK;", DT),
+    ("fm-skips-first-element", "src", DV, "for (size_t i = 0; i < n; i++) {\n    GSHGEOM_Verb verb;", "for (size_t i = 1; i < n; i++) {\n    GSHGEOM_Verb verb;", DT),
+    ("fm-skips-last-element", "src", DV, "for (size_t i = 0; i < n; i++) {\n    GSHGEOM_Verb verb;", "for (size_t i = 0; i + 1 < n; i++) {\n    GSHGEOM_Verb verb;", DT),
     ("fm-leaks-on-failure", "src", DV, "  if (r != GSHGEOM_OK) {\n    gshgeom_device_path_destroy(dp);\n    return r;\n  }\n  *out = dp;", "  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  *out = dp;", DT),
-    ("fm-line-from-start", "src", DV, "    r = map_rounded(map, c->p[1], &q[0]);\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_line_to(dp, q[0]);",
-     "    r = map_rounded(map, c->p[0], &q[0]);\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_line_to(dp, q[0]);", DT),
-    ("fm-quadratic-swapped", "src", DV, "gshgeom_device_path_quadratic_to(dp, q[0], q[1]);", "gshgeom_device_path_quadratic_to(dp, q[1], q[0]);", DT),
-    ("fm-quadratic-end-twice", "src", DV, "      r = map_rounded(map, c->p[2], &q[1]);\n    }\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_quadratic_to",
-     "      r = map_rounded(map, c->p[1], &q[1]);\n    }\n    return r != GSHGEOM_OK ? r : gshgeom_device_path_quadratic_to", DT),
-    ("fm-cubic-swapped", "src", DV, "gshgeom_device_path_cubic_to(dp, q[0], q[1], q[2]);", "gshgeom_device_path_cubic_to(dp, q[0], q[2], q[1]);", DT),
+    ("fm-line-from-start", "src", DV, "    r = map_rounded(map, c->p[1], &q[0]);\n    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_LINE, q, 1);",
+     "    r = map_rounded(map, c->p[0], &q[0]);\n    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_LINE, q, 1);", DT),
+    ("fm-quadratic-swapped", "src", DV, "dp->visit(dp->user, GSHGEOM_DEVICE_QUADRATIC, q, 2);", "dp->visit(dp->user, GSHGEOM_DEVICE_QUADRATIC, q + 1, 1);", DT),
+    ("fm-quadratic-end-twice", "src", DV, "      r = map_rounded(map, c->p[2], &q[1]);\n    }\n    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_QUADRATIC",
+     "      r = map_rounded(map, c->p[1], &q[1]);\n    }\n    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_QUADRATIC", DT),
+    ("fm-cubic-swapped", "src", DV, "dp->visit(dp->user, GSHGEOM_DEVICE_CUBIC, q, 3);", "dp->visit(dp->user, GSHGEOM_DEVICE_CUBIC, q + 1, 2);", DT),
     ("fm-cubic-end", "src", DV, "      r = map_rounded(map, c->p[3], &q[2]);", "      r = map_rounded(map, c->p[2], &q[2]);", DT),
-    ("fm-close-as-line", "src", DV, "  case GSHGEOM_VERB_CLOSE:\n    return gshgeom_device_path_close(dp);", "  case GSHGEOM_VERB_CLOSE:\n    return GSHGEOM_OK;", DT),
+    ("fm-close-as-line", "src", DV, "  case GSHGEOM_VERB_CLOSE:\n    return dp->visit(dp->user, GSHGEOM_DEVICE_CLOSE, NULL, 0);", "  case GSHGEOM_VERB_CLOSE:\n    return GSHGEOM_OK;", DT),
     ("fm-scale", "src", DV, "double sx = m.x * SCALE;", "double sx = m.x * 32.0;", DT),
     ("fm-scale-y", "src", DV, "double sy = m.y * SCALE;", "double sy = m.y * 32.0;", DT),
     ("fm-y-range-unchecked", "src", DV, "  r = round_scaled(sx, &probe);\n  if (r == GSHGEOM_OK) {\n    r = round_scaled(sy, &probe);\n  }", "  r = round_scaled(sx, &probe);", DT),
     ("fm-x-range-unchecked", "src", DV, "  r = round_scaled(sx, &probe);\n  if (r == GSHGEOM_OK) {\n    r = round_scaled(sy, &probe);\n  }", "  r = round_scaled(sy, &probe);", DT),
-        # --- the rational subdivision ---------------------------------------------
+
+    # --- A3: the device box (CU15) and the element generator both entry points share ---------------------------------
+    ("box-only-end-points", "src", DV, "  for (unsigned k = 0; k < n; k++) {\n    if (b->empty) {", "  for (unsigned k = n - 1; k < n; k++) {\n    if (b->empty) {", BT),
+    ("box-ignores-lines", "src", DV, "  acc->drew |= verb != GSHGEOM_DEVICE_MOVE;\n", "  acc->drew |= verb != GSHGEOM_DEVICE_MOVE;\n  if (verb == GSHGEOM_DEVICE_LINE) {\n    return GSHGEOM_OK;\n  }\n", BT),
+    ("box-conic-vertices-dropped", "src", DV, "  const Gen * g = (const Gen *)user;\n  return g->visit(g->user, GSHGEOM_DEVICE_LINE, &to, 1);", "  const Gen * g = (const Gen *)user;\n  return level > 0 ? GSHGEOM_OK : g->visit(g->user, GSHGEOM_DEVICE_LINE, &to, 1);", BT),
+    ("box-arc-by-chord", "src", DV, "    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);", "    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, INT32_MAX);", BT),
+    ("box-min-is-max", "src", DV, "    b->x0 = p[k].x < b->x0 ? p[k].x : b->x0;", "    b->x0 = p[k].x > b->x0 ? p[k].x : b->x0;", BT),
+    ("box-y1-is-min", "src", DV, "    b->y1 = p[k].y > b->y1 ? p[k].y : b->y1;", "    b->y1 = p[k].y < b->y1 ? p[k].y : b->y1;", BT),
+    ("box-moves-only-drew", "src", DV, "  acc->drew |= verb != GSHGEOM_DEVICE_MOVE;\n", "  acc->drew = 1;\n", BT),
+    ("box-empty-keeps-corners", "src", DV, "    acc.box.x0 = acc.box.y0 = acc.box.x1 = acc.box.y1 = 0;\n", "", BT),
+    ("box-writes-on-failure", "src", DV, "  r = generate(path, map, GSHGEOM_FLATTEN_TOLERANCE, &g);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  if (!acc.drew)", "  r = generate(path, map, GSHGEOM_FLATTEN_TOLERANCE, &g);\n  *out = acc.box;\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  if (!acc.drew)", BT),
+    ("box-null-out", "src", DV, "GSHGEOM_Result gshgeom_device_box(\n    const GSHGEOM_Path * path, const GSHGEOM_Map * map, GSHGEOM_Device_Box * out) {\n  if (!out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n", "GSHGEOM_Result gshgeom_device_box(\n    const GSHGEOM_Path * path, const GSHGEOM_Map * map, GSHGEOM_Device_Box * out) {\n", BT),
     # The conic route (CV1 to CV3), in the order of its code.
     ("rat-tolerance-loose", "src", DV, "const double delta = (double)(tolerance - 1);", "const double delta = (double)(tolerance + 99);", RT),
     ("rat-tolerance-tight", "src", DV, "const double delta = (double)(tolerance - 1);", "const double delta = (double)(tolerance - 1) * 0.0001;", RT),

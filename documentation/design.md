@@ -241,6 +241,31 @@ and `tools/gen-hash-vectors.py --check-flatten tests/flatten_vectors.h` runs the
 independent model over all of them. The cross-target hash of the corpus probe
 (`tests/corpus/geometry.hash`) is pinned.
 
+### The device box (`gshgeom_device_box`)
+
+`gshgeom_device_box(path, map, &box)` is the lattice box (1/64 pixel) of the device path `gshgeom_device_path_from_model` makes,
+computed without making it: the control points of every line, quadratic and cubic after `gshgeom_device_point`, and the end point and
+the vertices of the conic route's lines for every rational curve and arc piece. The function and `from_model` run one **element
+generator** (`generate` in `src/device/device.c`, a visitor), one building the device path and the other taking the extent of each
+element's points, so the box cannot drift from the path; a path with no segment (only moves) is `empty` and its corners are 0; a 3D
+path or map is `ERR_INVALID` and a coordinate that does not round into `int32_t` is `ERR_LIMIT`, as for `from_model`.
+
+**Lemma (the box holds the region).** Every point of the region a sink draws for the path, the fill under either rule of the polyline
+the integer flattener makes of the device path, lies in the closed box, with no outset. *Proof.* The region of a contour is inside
+the convex hull of its polyline's vertices, so it is enough that every vertex is in the box. A line, a close and every line of the conic
+route is a vertex of the box by construction. The flattener widens each control point of a quadratic or cubic by 256 (an integer multiple,
+so the interval of the control points' widened coordinates on an axis has integer ends `[256 lo, 256 hi]`), and every point it makes is the
+half-up midpoint `floor((u + v + 1) / 2)` of two points of that interval; for integers in `[L, H]` the sum is at least `2L` and at most `2H + 1`,
+whose half floors to `H`, so the interval is kept (this is the flattener's own range statement (a)). A vertex is the narrowing
+`floor((v + 128) / 256)`, monotone and equal to `lo` at `256 lo` and to `hi` at `256 hi`, so it is in `[lo, hi]`, and the control points
+of every piece are in the box. *Q.E.D.* The story's first estimate allowed a vertex to leave the hull of the control points by 40/256 of a
+unit and would have needed an outset; the code never leaves it, so touching boxes are provably disjoint (shape-scene's clip unions).
+
+`tests/unit/test_device_box.cpp` states it three ways over every size class of curve (collinear and near-collinear controls, rational
+curves of weights from 2^-30 to 2^30, arcs, rotated and skewed and mirrored maps): the box equals the extent of the device path's own
+elements, every vertex of the flattened path is in it, and no sample on a ring one half lattice unit outside it is inside the region
+under the nonzero or the even-odd rule. The cross-target probe's `devbox-hash` and `devbox-count` pin the boxes of 480 random paths.
+
 ## Along-path parametrization
 
 `along.h`. A *measured path* is built once from a model path and queried by

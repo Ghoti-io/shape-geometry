@@ -1767,5 +1767,80 @@ int main(void) {
     printf("shape-geometry.lattice-hash %016" PRIx64 "\n", gshgeom_hash_value(&lat_total));
     printf("shape-geometry.lattice-count %lu\n", lat_count);
   }
+  /* The device box (device.h, CU15): the box of random paths of every verb (lines, quadratics, cubics, rational curves, endpoint-form
+   * arcs) under maps that rotate, skew, mirror, stretch unevenly, collapse and scale from 2^-4 to 2^20, plus the box of the
+   * device path's own extent, so that the box and the path are checked against each other on every target.  What is hashed is the
+   * result code, then the empty flag and the four edges.  Its own pair after the others, so they never move. */
+  {
+    GSHGEOM_Hash box_total;
+    unsigned long box_count = 0;
+    gshgeom_hash_init(&box_total);
+    for (unsigned round = 0; round < 480; round++) {
+      GSHGEOM_Path * path = NULL;
+      if (gshgeom_path_create(NULL, NULL, 2, &path) != GSHGEOM_OK) {
+        return fail("cannot make a path for the box section");
+      }
+      GSHGEOM_Result r = gshgeom_path_move_to(path, vertex_point(1u));
+      for (unsigned step = 0; step < 5 && r == GSHGEOM_OK; step++) {
+        double w4[4];
+        for (unsigned k = 0; k < 4; k++) {
+          w4[k] = (round % 3u == 0u) ? pow2((int)(next() % 41u) - 20) : weight();
+        }
+        GSHGEOM_Point q1 = random_point(2), q2 = random_point(2), q3 = random_point(2);
+        switch ((round + step) % 6u) {
+        case 0: r = gshgeom_path_line_to(path, q1); break;
+        case 1: r = gshgeom_path_quadratic_to(path, q1, q2); break;
+        case 2: r = gshgeom_path_cubic_to(path, q1, q2, q3); break;
+        case 3: r = gshgeom_path_rational_quadratic_to(path, q1, q2, w4); break;
+        case 4: r = gshgeom_path_rational_cubic_to(path, q1, q2, q3, w4); break;
+        default: {
+          const double rx = 1.0 + (double)(next() % 9u);
+          const double ry = 1.0 + (double)(next() % 9u);
+          r = gshgeom_path_arc_endpoint_to(path, q1, rx, ry, (double)(next() % 8u) * 45.0, GSHGEOM_ANGLE_DEGREES,
+              (int)(next() & 1u), (int)(next() & 1u), NULL);
+          break;
+        }
+        }
+      }
+      if (r != GSHGEOM_OK && r != GSHGEOM_ERR_LIMIT && r != GSHGEOM_ERR_INVALID) {
+        return fail("cannot build a path for the box section");
+      }
+      if (round % 3u == 0u) {
+        (void)gshgeom_path_close(path);
+      }
+      GSHGEOM_Map map;
+      const unsigned mclass = round % 8u;
+      const double scale = pow2((int)(round / 8u % 7u) * 4 - 4);
+      double m[4] = {scale, 0.0, 0.0, scale};
+      double t[2] = {coord() * scale, coord() * scale};
+      if (mclass == 1u) {
+        m[1] = scale * 0.5;
+      } else if (mclass == 2u) {
+        m[0] = -scale;
+      } else if (mclass == 3u) {
+        m[0] = scale * 3.0; m[3] = scale * 0.25;
+      } else if (mclass == 4u) {
+        m[0] = scale; m[1] = 2.0 * scale; m[2] = 2.0 * scale; m[3] = 4.0 * scale;
+      } else if (mclass == 5u) {
+        m[0] = scale * 0.8660254037844386; m[1] = -scale * 0.5; m[2] = scale * 0.5; m[3] = scale * 0.8660254037844386;
+      }
+      if (gshgeom_map_from_matrix(2, m, t, &map) != GSHGEOM_OK) {
+        return fail("a map of the box section was refused");
+      }
+      GSHGEOM_Device_Box box;
+      r = gshgeom_device_box(path, &map, &box);
+      feed_arc_int((int)r, &box_total, &box_count);
+      if (r == GSHGEOM_OK) {
+        feed_arc_int(box.empty, &box_total, &box_count);
+        feed_arc_int(box.x0, &box_total, &box_count);
+        feed_arc_int(box.y0, &box_total, &box_count);
+        feed_arc_int(box.x1, &box_total, &box_count);
+        feed_arc_int(box.y1, &box_total, &box_count);
+      }
+      gshgeom_path_destroy(path);
+    }
+    printf("shape-geometry.devbox-hash %016" PRIx64 "\n", gshgeom_hash_value(&box_total));
+    printf("shape-geometry.devbox-count %lu\n", box_count);
+  }
   return 0;
 }

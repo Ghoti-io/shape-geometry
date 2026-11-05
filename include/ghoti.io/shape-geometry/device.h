@@ -254,6 +254,48 @@ GSHGEOM_API GSHGEOM_Result gshgeom_device_path_from_model(
     GSHGEOM_Device_Path ** out);
 
 /**
+ * @brief The lattice box of a device path (A3, CU15), in 1/64 pixel.  `empty` is 1 for a path with no
+ *        segment (only moves, or nothing), and then the corners are 0.
+ */
+typedef struct GSHGEOM_Device_Box {
+  int empty;  ///< 1 when the path has no segment.
+  int32_t x0; ///< Left edge (least x of any point of the device path's elements).
+  int32_t y0; ///< Top edge.
+  int32_t x1; ///< Right edge (greatest x).
+  int32_t y1; ///< Bottom edge.
+} GSHGEOM_Device_Box;
+
+/**
+ * @brief The box of the device path ::gshgeom_device_path_from_model would make, computed without
+ *        making it: every control point of every line, quadratic and cubic after
+ *        ::gshgeom_device_point, and every end point and vertex of the conic route's lines for a
+ *        rational curve or an arc (the same single element generator produces both, so the box
+ *        cannot drift from the path).
+ *
+ * **Lemma CU15.**  Every point of the region a sink draws for the path (the fill, under either
+ * rule, of the polyline the integer flattener makes of the device path, flatten.h) lies in the
+ * closed box, with no outset.  *Proof.*  The region of a (closed or implicitly closed) contour is
+ * inside the convex hull of its polyline's vertices, so it is enough that every vertex is in the
+ * box.  Lines and the conic route's lines: the vertices are elements of the box by
+ * construction.  Quadratics and cubics: the flattener widens each control point by 256 (an
+ * integer multiple, so on each axis the widened interval `[256 lo, 256 hi]` of the control points
+ * has integer ends), and every point it makes is the half-up midpoint `floor((u + v + 1) / 2)` of
+ * two points whose coordinate lies in that interval; an integer `floor((u + v + 1) / 2)` of two
+ * integers in `[L, H]` is in `[L, H]` (the sum is at least `2L` and at most `2H + 1`, whose half
+ * floors to `H`).  So every widened point stays in the interval, and the vertex, `floor((v + 128) /
+ * 256)`, a monotone function equal to `lo` at `256 lo` and to `hi` at `256 hi`, stays in `[lo,
+ * hi]`.  The control points of every piece are in the box, so the vertices are.  *Q.E.D.*  (This
+ * is the flattener's own range statement (a); the story's first estimate, that a vertex could
+ * leave the hull by 40/256 of a unit, was weaker than the code and needs no outset.)
+ *
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for NULL, a 3D path or map, or an invalid map;
+ *         ::GSHGEOM_ERR_LIMIT for a coordinate that does not round into `int32_t`.  @p out is
+ *         written only on success.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_device_box(
+    const GSHGEOM_Path * path, const GSHGEOM_Map * map, GSHGEOM_Device_Box * out);
+
+/**
  * @brief The FNV-1a 64 hash of a device path, in the spelling of hash.h (AD-21).
  *
  * `u32` format version (1), `u32` kind (`0x50564544`, "DEVP" little-endian),

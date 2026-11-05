@@ -604,11 +604,25 @@ GSHGEOM_Result gshgeom_conic_route(int n, const double * sx, const double * sy,
   return r == GSHGEOM_OK && forced ? GSHGEOM_ERR_INTERNAL : r;
 }
 
+/* The one element generator (Lemma CU15's premise): the device elements of a model path under
+ * a map are produced here and nowhere else.  A visitor receives each element as a verb and its
+ * points, in order, and either builds the device path from them (from_model) or takes their
+ * box (gshgeom_device_box), so the box cannot drift from the path.  A conic piece arrives as
+ * the lines the conic route emits. */
+typedef GSHGEOM_Result (*Visit)(
+    void * user, int verb, const GSHGEOM_Device_Point * p, unsigned n);
+
+typedef struct Gen {
+  Visit visit;
+  void * user;
+} Gen;
+
 static GSHGEOM_Result emit_line(
     void * user, GSHGEOM_Device_Point to, uint32_t leaf, int level) {
   (void)leaf;
   (void)level;
-  return gshgeom_device_path_line_to((GSHGEOM_Device_Path *)user, to);
+  const Gen * g = (const Gen *)user;
+  return g->visit(g->user, GSHGEOM_DEVICE_LINE, &to, 1);
 }
 
 
@@ -649,7 +663,7 @@ static GSHGEOM_Result map_rounded(const GSHGEOM_Map * map, GSHGEOM_Point p,
 }
 
 /* The conic route (above) for one rational curve of @p n control points. */
-static GSHGEOM_Result convert_conic(GSHGEOM_Device_Path * dp, const GSHGEOM_Map * map,
+static GSHGEOM_Result convert_conic(const Gen * dp, const GSHGEOM_Map * map,
     int n, const GSHGEOM_Point * p, const double * w, int32_t tolerance) {
   double sx[4], sy[4];
   for (int i = 0; i < n; i++) {
@@ -658,13 +672,13 @@ static GSHGEOM_Result convert_conic(GSHGEOM_Device_Path * dp, const GSHGEOM_Map 
       return r;
     }
   }
-  return gshgeom_conic_route(n, sx, sy, w, tolerance, emit_line, dp);
+  return gshgeom_conic_route(n, sx, sy, w, tolerance, emit_line, (void *)dp);
 }
 
 /* An arc is its pieces, each a rational quadratic: the same route, so that the pieces
  * meet at the same device point (a shared control point is mapped to the same bits), the
  * ends are the arc's own ends rounded once and a closed arc closes. */
-static GSHGEOM_Result convert_arc(GSHGEOM_Device_Path * dp, const GSHGEOM_Map * map,
+static GSHGEOM_Result convert_arc(const Gen * dp, const GSHGEOM_Map * map,
     const GSHGEOM_Arc * arc, int32_t tolerance) {
   GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
   int count = 0;
@@ -675,7 +689,7 @@ static GSHGEOM_Result convert_arc(GSHGEOM_Device_Path * dp, const GSHGEOM_Map * 
   return r;
 }
 
-static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
+static GSHGEOM_Result convert_element(const Gen * dp,
     const GSHGEOM_Map * map, const GSHGEOM_Element * el, int32_t tolerance) {
   const GSHGEOM_Curve * c = &el->curve;
   GSHGEOM_Device_Point q[3];
@@ -683,16 +697,16 @@ static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
   switch (el->verb) {
   case GSHGEOM_VERB_MOVE:
     r = map_rounded(map, c->p[1], &q[0]);
-    return r != GSHGEOM_OK ? r : gshgeom_device_path_move_to(dp, q[0]);
+    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_MOVE, q, 1);
   case GSHGEOM_VERB_LINE:
     r = map_rounded(map, c->p[1], &q[0]);
-    return r != GSHGEOM_OK ? r : gshgeom_device_path_line_to(dp, q[0]);
+    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_LINE, q, 1);
   case GSHGEOM_VERB_QUADRATIC:
     r = map_rounded(map, c->p[1], &q[0]);
     if (r == GSHGEOM_OK) {
       r = map_rounded(map, c->p[2], &q[1]);
     }
-    return r != GSHGEOM_OK ? r : gshgeom_device_path_quadratic_to(dp, q[0], q[1]);
+    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_QUADRATIC, q, 2);
   case GSHGEOM_VERB_CUBIC:
     r = map_rounded(map, c->p[1], &q[0]);
     if (r == GSHGEOM_OK) {
@@ -701,15 +715,13 @@ static GSHGEOM_Result convert_element(GSHGEOM_Device_Path * dp,
     if (r == GSHGEOM_OK) {
       r = map_rounded(map, c->p[3], &q[2]);
     }
-    return r != GSHGEOM_OK
-        ? r
-        : gshgeom_device_path_cubic_to(dp, q[0], q[1], q[2]);
+    return r != GSHGEOM_OK ? r : dp->visit(dp->user, GSHGEOM_DEVICE_CUBIC, q, 3);
   case GSHGEOM_VERB_RATIONAL_QUADRATIC:
     return convert_conic(dp, map, 3, c->p, c->w, tolerance);
   case GSHGEOM_VERB_RATIONAL_CUBIC:
     return convert_conic(dp, map, 4, c->p, c->w, tolerance);
   case GSHGEOM_VERB_CLOSE:
-    return gshgeom_device_path_close(dp);
+    return dp->visit(dp->user, GSHGEOM_DEVICE_CLOSE, NULL, 0);
   case GSHGEOM_VERB_ARC: /* never reached: an arc is not an element (gshgeom_path_element), see the loop below */
   case GSHGEOM_VERB_COUNT:
     break;
@@ -724,10 +736,36 @@ GSHGEOM_Result gshgeom_device_path_from_model(const GSHGEOM_Path * path,
       path, map, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);
 }
 
-GSHGEOM_Result gshgeom_device_path_from_model_with_tolerance(const GSHGEOM_Path * path,
-    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc,
-    const GSHGEOM_Limits * limits, GSHGEOM_Device_Path ** out) {
-  if (!path || !map || !out || gshgeom_path_dimension(path) != 2 ||
+/* Run the generator over a model path: every element the device path would hold, in order, to
+ * the visitor.  Validation is the caller's (the two entry points share it below). */
+static GSHGEOM_Result generate(
+    const GSHGEOM_Path * path, const GSHGEOM_Map * map, int32_t tolerance, const Gen * g) {
+  size_t n = gshgeom_path_element_count(path);
+  for (size_t i = 0; i < n; i++) {
+    GSHGEOM_Verb verb;
+    GSHGEOM_Result r = gshgeom_path_verb(path, i, &verb);
+    if (r != GSHGEOM_OK) {
+      return GSHGEOM_ERR_INTERNAL;
+    }
+    if (verb == GSHGEOM_VERB_ARC) {
+      GSHGEOM_Arc arc;
+      r = gshgeom_path_arc(path, i, &arc);
+      r = r != GSHGEOM_OK ? GSHGEOM_ERR_INTERNAL : convert_arc(g, map, &arc, tolerance);
+    } else {
+      GSHGEOM_Element el;
+      r = gshgeom_path_element(path, i, &el);
+      r = r != GSHGEOM_OK ? GSHGEOM_ERR_INTERNAL : convert_element(g, map, &el, tolerance);
+    }
+    if (r != GSHGEOM_OK) {
+      return r;
+    }
+  }
+  return GSHGEOM_OK;
+}
+
+static GSHGEOM_Result check_inputs(
+    const GSHGEOM_Path * path, const GSHGEOM_Map * map, int32_t tolerance) {
+  if (!path || !map || gshgeom_path_dimension(path) != 2 ||
       tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
     return GSHGEOM_ERR_INVALID;
   }
@@ -735,41 +773,95 @@ GSHGEOM_Result gshgeom_device_path_from_model_with_tolerance(const GSHGEOM_Path 
   if (r != GSHGEOM_OK) {
     return r;
   }
-  if (map->dim != 2) {
+  return map->dim != 2 ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;
+}
+
+static GSHGEOM_Result build_visit(
+    void * user, int verb, const GSHGEOM_Device_Point * p, unsigned n) {
+  GSHGEOM_Device_Path * dp = (GSHGEOM_Device_Path *)user;
+  (void)n;
+  switch (verb) {
+  case GSHGEOM_DEVICE_MOVE: return gshgeom_device_path_move_to(dp, p[0]);
+  case GSHGEOM_DEVICE_LINE: return gshgeom_device_path_line_to(dp, p[0]);
+  case GSHGEOM_DEVICE_QUADRATIC: return gshgeom_device_path_quadratic_to(dp, p[0], p[1]);
+  case GSHGEOM_DEVICE_CUBIC: return gshgeom_device_path_cubic_to(dp, p[0], p[1], p[2]);
+  case GSHGEOM_DEVICE_CLOSE: return gshgeom_device_path_close(dp);
+  default: return GSHGEOM_ERR_INTERNAL;
+  }
+}
+
+GSHGEOM_Result gshgeom_device_path_from_model_with_tolerance(const GSHGEOM_Path * path,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Device_Path ** out) {
+  if (!out) {
     return GSHGEOM_ERR_INVALID;
+  }
+  GSHGEOM_Result r = check_inputs(path, map, tolerance);
+  if (r != GSHGEOM_OK) {
+    return r;
   }
   GSHGEOM_Device_Path * dp;
   r = gshgeom_device_path_create(alloc, limits, &dp);
   if (r != GSHGEOM_OK) {
     return r;
   }
-  size_t n = gshgeom_path_element_count(path);
-  for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {
-    GSHGEOM_Verb verb;
-    r = gshgeom_path_verb(path, i, &verb);
-    if (r != GSHGEOM_OK) {
-      r = GSHGEOM_ERR_INTERNAL;
-      break;
-    }
-    if (verb == GSHGEOM_VERB_ARC) {
-      GSHGEOM_Arc arc;
-      r = gshgeom_path_arc(path, i, &arc);
-      r = r != GSHGEOM_OK ? GSHGEOM_ERR_INTERNAL : convert_arc(dp, map, &arc, tolerance);
-      continue;
-    }
-    GSHGEOM_Element el;
-    r = gshgeom_path_element(path, i, &el);
-    if (r != GSHGEOM_OK) {
-      r = GSHGEOM_ERR_INTERNAL;
-      break;
-    }
-    r = convert_element(dp, map, &el, tolerance);
-  }
+  Gen g = {build_visit, dp};
+  r = generate(path, map, tolerance, &g);
   if (r != GSHGEOM_OK) {
     gshgeom_device_path_destroy(dp);
     return r;
   }
   *out = dp;
+  return GSHGEOM_OK;
+}
+
+/* The box: every point of every element after the first (a control point is included, because
+ * the region lies in the hull of the control points of a quadratic or cubic; Lemma CU15). */
+typedef struct BoxAcc {
+  GSHGEOM_Device_Box box;
+  int drew; /* a path of moves alone has no segment: its box is empty */
+} BoxAcc;
+
+static GSHGEOM_Result box_visit(
+    void * user, int verb, const GSHGEOM_Device_Point * p, unsigned n) {
+  BoxAcc * acc = (BoxAcc *)user;
+  GSHGEOM_Device_Box * b = &acc->box;
+  acc->drew |= verb != GSHGEOM_DEVICE_MOVE;
+  for (unsigned k = 0; k < n; k++) {
+    if (b->empty) {
+      b->empty = 0;
+      b->x0 = b->x1 = p[k].x;
+      b->y0 = b->y1 = p[k].y;
+      continue;
+    }
+    b->x0 = p[k].x < b->x0 ? p[k].x : b->x0;
+    b->x1 = p[k].x > b->x1 ? p[k].x : b->x1;
+    b->y0 = p[k].y < b->y0 ? p[k].y : b->y0;
+    b->y1 = p[k].y > b->y1 ? p[k].y : b->y1;
+  }
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_device_box(
+    const GSHGEOM_Path * path, const GSHGEOM_Map * map, GSHGEOM_Device_Box * out) {
+  if (!out) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  GSHGEOM_Result r = check_inputs(path, map, GSHGEOM_FLATTEN_TOLERANCE);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  BoxAcc acc = {{1, 0, 0, 0, 0}, 0};
+  Gen g = {box_visit, &acc};
+  r = generate(path, map, GSHGEOM_FLATTEN_TOLERANCE, &g);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if (!acc.drew) {
+    acc.box.empty = 1;
+    acc.box.x0 = acc.box.y0 = acc.box.x1 = acc.box.y1 = 0;
+  }
+  *out = acc.box;
   return GSHGEOM_OK;
 }
 
