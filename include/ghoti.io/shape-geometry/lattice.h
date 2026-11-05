@@ -77,6 +77,15 @@
  *   holds exactly one point of each of the `|D|` classes.  Integer arithmetic only.
  * - **LT4, determinism.**  Nothing is decided in `double` but the formulas LT2 states; there is no libm, no `long double`, no
  *   fused multiply-add and no x87 instruction, so the results are the same bits on every target.
+ * - **LT5, the canonical position of a copy.**  A sink that draws the copies translates a copy by whole pixels and draws it at
+ *   the fraction, so that a copy is a function of the linear part, the fraction and the shift (the split of
+ *   ::gshgeom_stroke_canonical_map).  ::gshgeom_lattice_canonical returns that split for the copy `(i, j)`.  When the device step
+ *   vectors `a` and `b` are **integer vectors** (every component an exact integer of magnitude below `2^31`; see
+ *   ::gshgeom_lattice_integer_steps) the whole pixels are `floor(tau) + i a + j b` in integers and the fraction is the fraction of
+ *   `tau`, for every copy: no sum is rounded, so all the copies are one set of bits shifted, which is what a periodic lattice
+ *   needs (LT2's `(tau + i a) + j b` in `double` rounds `tau`'s fraction once the sum grows a bit, so two copies would differ in
+ *   their last bits).  Otherwise the position is LT2's, split by ::gshgeom_stroke_canonical_map.  A whole-pixel coordinate of
+ *   magnitude `2^40` or more is ::GSHGEOM_ERR_LIMIT.
  */
 
 #ifndef GHOTI_IO_GSHGEOM_LATTICE_H
@@ -100,6 +109,9 @@ extern "C" {
 
 /** The largest determinant magnitude ::gshgeom_lattice_period accepts: `2^31`. */
 #define GSHGEOM_LATTICE_PERIOD_MAX (((int64_t)1) << 31)
+
+/** The revision of the lattice's positions (LT2, LT5): it changes when the position or the split of a copy changes for the same input. */
+#define GSHGEOM_LATTICE_REVISION 1
 
 /** A lattice: the cell of copy `(0, 0)` and the steps. */
 typedef struct GSHGEOM_Lattice {
@@ -167,6 +179,37 @@ GSHGEOM_API GSHGEOM_Result gshgeom_lattice_quad(const GSHGEOM_Map * map, const G
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Lattice * lattice,
     const int64_t rect[4], uint64_t max_count, GSHGEOM_Lattice_Row_Fn row_fn, void * ctx, uint64_t * count);
+
+/**
+ * @brief The device step vectors of LT2 (@p a for the first step, @p b for the second), as the doubles they are.
+ *
+ * @return As ::gshgeom_lattice_translation.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_lattice_steps(const GSHGEOM_Map * map, const GSHGEOM_Lattice * lattice, double a[2], double b[2]);
+
+/**
+ * @brief Whether the lattice has an integer period (LT3, LT5): both axes repeat, every component of the device step vectors is an
+ *   exact integer of magnitude below `2^31`, and their determinant is not zero and has magnitude at most
+ *   ::GSHGEOM_LATTICE_PERIOD_MAX.
+ *
+ * @param a,b Receive the vectors when @p integer is 1 (and are not written otherwise).
+ * @param integer Receives 1 or 0.
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for NULL, an invalid map or lattice.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_lattice_integer_steps(const GSHGEOM_Map * map, const GSHGEOM_Lattice * lattice, int64_t a[2],
+    int64_t b[2], int * integer);
+
+/**
+ * @brief LT5: the canonical map and the whole-pixel shift of the copy `(i, j)`.
+ *
+ * @p canonical is @p map with its translation replaced by the copy's fraction in `[0, 1)` and `(shift_x, shift_y)` are the whole
+ * pixels, so that the copy is the cell under @p canonical moved by the shift.
+ *
+ * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID for NULL, an invalid map or lattice, an index past the range or a position that is
+ *   not finite; ::GSHGEOM_ERR_LIMIT for a whole-pixel coordinate of magnitude `2^40` or more.  Nothing is written on failure.
+ */
+GSHGEOM_API GSHGEOM_Result gshgeom_lattice_canonical(const GSHGEOM_Map * map, const GSHGEOM_Lattice * lattice, int64_t i, int64_t j,
+    GSHGEOM_Map * canonical, int64_t * shift_x, int64_t * shift_y);
 
 /**
  * @brief The Hermite normal form of the lattice `Z a + Z b` (LT3).

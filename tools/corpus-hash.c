@@ -1557,7 +1557,7 @@ int main(void) {
     printf("shape-geometry.clip-count %lu\n", clip_count);
   }
 
-  /* The lattice section (lattice.h, LT1 to LT4): the copies of random lattices under random maps, the translation of a copy at
+  /* The lattice section (lattice.h, LT1 to LT5): the copies of random lattices under random maps, the translation of a copy at
    * large indices, and the period of random integer lattices.  Its own generator and its own pair after the others.  The
    * copies are decided by exact sums of products and a gallop on integers, the translation is two products and two sums in
    * double, the period is integer arithmetic: a target that fuses a multiply-add, widens a double, wraps a 64-bit product or
@@ -1663,6 +1663,76 @@ int main(void) {
       if (gshgeom_lattice_cell(&lat, ci, cj, cell) == GSHGEOM_OK) {
         for (int k = 0; k < 4; k++) {
           feed_arc_u64(gshgeom_f64_bits(cell[k]), &lat_total, &lat_count);
+        }
+      }
+      /* the canonical position (LT5) of the copy named above: LT2's split here, since these steps are rarely integers */
+      GSHGEOM_Map canon;
+      int64_t csx = 0;
+      int64_t csy = 0;
+      const GSHGEOM_Result cr = gshgeom_lattice_canonical(&map, &lat, wi, wj, &canon, &csx, &csy);
+      feed_arc_int((int)cr, &lat_total, &lat_count);
+      if (cr == GSHGEOM_OK) {
+        feed_arc_u64((uint64_t)csx, &lat_total, &lat_count);
+        feed_arc_u64((uint64_t)csy, &lat_total, &lat_count);
+        feed_arc_u64(gshgeom_f64_bits(canon.t[0]), &lat_total, &lat_count);
+        feed_arc_u64(gshgeom_f64_bits(canon.t[1]), &lat_total, &lat_count);
+      }
+    }
+    /* LT5: lattices whose step vectors are integers (a scale of the unit steps by integers, an integer rotation, a shear), with a
+     * translation that has a fraction, at indices up to 10^6: the integer split of the position, and the detection. */
+    for (unsigned round = 0; round < 200; round++) {
+      const int64_t sc = LAT_INT(1, 12);
+      const unsigned form = round % 4u;
+      double ma[4] = {(double)sc, 0.0, 0.0, (double)sc};
+      if (form == 1u) {
+        ma[1] = (double)LAT_INT(-3, 3);
+      } else if (form == 2u) {
+        ma[0] = (double)LAT_INT(-4, 4);
+        ma[1] = (double)LAT_INT(-4, 4);
+        ma[2] = -ma[1];
+        ma[3] = ma[0];
+      } else if (form == 3u) {
+        ma[2] = (double)LAT_INT(-3, 3);
+      }
+      const double mt[2] = {(double)LAT_INT(-4000, 4000) / 17.0, (double)LAT_INT(-4000, 4000) / 13.0};
+      GSHGEOM_Map imap;
+      if (gshgeom_map_from_matrix(2, ma, mt, &imap) != GSHGEOM_OK) {
+        return fail("cannot build a map for the lattice section");
+      }
+      GSHGEOM_Lattice il;
+      il.x = 0.0;
+      il.y = 0.0;
+      il.w = (double)LAT_INT(1, 6);
+      il.h = (double)LAT_INT(1, 6);
+      il.x_step = (double)LAT_INT(1, 9);
+      il.y_step = (double)LAT_INT(1, 9);
+      il.repeat_x = 1u;
+      il.repeat_y = LAT_NEXT() % 7u == 0u ? 0u : 1u;
+      int64_t ia[2] = {0, 0};
+      int64_t ib[2] = {0, 0};
+      int integer = -1;
+      const GSHGEOM_Result ir = gshgeom_lattice_integer_steps(&imap, &il, ia, ib, &integer);
+      feed_arc_int((int)ir, &lat_total, &lat_count);
+      feed_arc_int(integer, &lat_total, &lat_count);
+      if (integer == 1) {
+        for (int k = 0; k < 2; k++) {
+          feed_arc_u64((uint64_t)ia[k], &lat_total, &lat_count);
+          feed_arc_u64((uint64_t)ib[k], &lat_total, &lat_count);
+        }
+      }
+      for (int pick = 0; pick < 4; pick++) {
+        const int64_t ci = LAT_INT(-1000000, 1000000);
+        const int64_t cj = LAT_INT(-1000000, 1000000);
+        GSHGEOM_Map canon;
+        int64_t csx = 0;
+        int64_t csy = 0;
+        const GSHGEOM_Result cr = gshgeom_lattice_canonical(&imap, &il, ci, cj, &canon, &csx, &csy);
+        feed_arc_int((int)cr, &lat_total, &lat_count);
+        if (cr == GSHGEOM_OK) {
+          feed_arc_u64((uint64_t)csx, &lat_total, &lat_count);
+          feed_arc_u64((uint64_t)csy, &lat_total, &lat_count);
+          feed_arc_u64(gshgeom_f64_bits(canon.t[0]), &lat_total, &lat_count);
+          feed_arc_u64(gshgeom_f64_bits(canon.t[1]), &lat_total, &lat_count);
         }
       }
     }

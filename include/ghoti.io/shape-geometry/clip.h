@@ -97,6 +97,12 @@ extern "C" {
 #endif
 
 /**
+ * The revision of the clip's construction: it changes when the points a clip produces for the same input change, so that a
+ * sink that keeps what a clip made (a cached picture of a tile) can tell the bits are no longer the ones it holds.
+ */
+#define GSHGEOM_CLIP_REVISION 1
+
+/**
  * @brief Clip a flattened path to a convex quadrilateral, preserving the winding (CK1 to CK6 above).
  *
  * The signature is that of ::gshgeom_flat_path_cancel_seams: the path, the quadrilateral, an allocator, the limits and

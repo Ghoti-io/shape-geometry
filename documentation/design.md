@@ -1086,10 +1086,10 @@ every point as on the line and cuts nothing).
 
 ## The copies of a lattice
 
-`lattice.h` answers three questions a renderer of repeated pictures (a pattern, a hatch) asks, so that every renderer draws
+`lattice.h` answers four questions a renderer of repeated pictures (a pattern, a hatch) asks, so that every renderer draws
 the same set of copies and forms each copy's position with the same bits: which copies of a lattice meet a rectangle
-(LT1), where one copy is (LT2), and, for a lattice of whole-pixel steps, what its period is (LT3).  LT4 is the determinism
-rule, below.  The rules are stated in the header; this section gives the arguments.
+(LT1), where one copy is (LT2), for a lattice of whole-pixel steps what its period is (LT3), and how a copy is split into
+whole pixels and a fraction (LT5).  LT4 is the determinism rule, below.  The rules are stated in the header; this section gives the arguments.
 
 ### The set of copies (LT1)
 
@@ -1158,6 +1158,20 @@ position of copy 1,000,000 carries one rounding of a product and two of sums and
 `(i, j)` in the source space has `left = x + i x_step` and, when `x_step` equals `w`, `right = x + (i + 1) x_step`, the very
 double the next cell's `left` is, so abutting cells share their edge to the bit; otherwise `right = left + w`.
 
+### The canonical position of a copy (LT5)
+
+A sink that draws a copy at a fraction of a pixel and moves it by whole pixels (the split of `gshgeom_stroke_canonical_map`)
+draws every copy that has the same fraction as the same bits shifted, which is what lets it keep one picture of a period and
+read the rest of the lattice from it.  LT2's sum `(tau + i a) + j b` does not give copies the same fraction: adding a large
+integer to a double whose fraction is `0.3` rounds the fraction (at a copy 2^20 pixels over, `0.3 + 2^20` is a double
+with a different fraction), so two copies of an integer lattice would differ in their last bits and in rare vertices by a unit
+of 1/64.  For **integer step vectors** (every component of `a` and `b` an exact integer of magnitude below `2^31`) the
+canonical position is therefore formed exactly: the whole pixels are `floor(tau) + i a + j b` in 64-bit integers, each product
+checked against `2^40`, and the fraction is the fraction of `tau` for every copy.  Otherwise the position is LT2's, split by
+the stroke function.  `gshgeom_lattice_integer_steps` is the predicate that the lattice has an integer period (both axes
+repeat, integer vectors, `D != 0` and `|D|` within LT3's bound); `gshgeom_lattice_steps` returns LT2's vectors.  A copy of an
+integer lattice is a function of the linear part, the fraction of `tau` and the shift alone, whatever its index.
+
 ### The period (LT3)
 
 For integer step vectors `a`, `b` with determinant `D != 0` the lattice `L = Z a + Z b` of whole-pixel translations has index
@@ -1178,8 +1192,9 @@ The only floating-point operations that decide anything are the formulas above (
 product for a step, two sums and two products for a position) and the rounded estimate of the search, whose value cannot
 change the answer.  There is no libm, no `long double`, no fused multiply-add, and 64-bit integers are converted to double only
 through two 32-bit halves, so a 32-bit x87 host makes no x87 instruction for them.  `lattice-hash` in the cross-target probe
-hashes 480 random lattices (rows, counts, limits, translations, quads, cells) and 400 random integer lattices (the period and
-reductions).
+hashes 480 random lattices (rows, counts, limits, translations, quads, cells, canonical positions), 400 random integer
+lattices (the period and reductions) and 200 integer lattices under integer maps (the detection and the canonical position of
+four copies each at indices up to 10^6).
 
 ### What checks it
 

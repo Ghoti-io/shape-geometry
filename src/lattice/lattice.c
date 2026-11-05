@@ -21,7 +21,7 @@
 /**
  * @file
  *
- * The copies of a repeated cell (lattice.h, LT1 to LT4).
+ * The copies of a repeated cell (lattice.h, LT1 to LT5).
  *
  * **The set.**  A copy `(i, j)` is a copy of the use when the convex hull `H_ij = conv(Q_k + w_ij)` of its four exact corners
  * meets the closed rectangle `R`, with `w_ij = tau + i A + j B` formed exactly.  `H_ij` meets `R` exactly when `w_ij` lies in the
@@ -45,6 +45,7 @@
 #include <ghoti.io/shape-geometry/hash.h>
 #include <ghoti.io/shape-geometry/lattice.h>
 #include <ghoti.io/shape-geometry/map.h>
+#include <ghoti.io/shape-geometry/stroke.h>
 
 #include "../exact/exact.h"
 
@@ -638,6 +639,123 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
   }
   *count = em.count;
   return result;
+}
+
+/* --- the integer lattice and the canonical position of a copy (LT5) --------------------------------------------------- */
+
+/** Whether @p v is an integer of magnitude below 2^31; then @p out is it. */
+static int exact_int31(double v, int64_t * out) {
+  if (!(v > -2147483648.0 && v < 2147483648.0)) {
+    return 0;
+  }
+  const int64_t t = d2i_trunc(v);
+  if (i2d(t) != v) {
+    return 0;
+  }
+  *out = t;
+  return 1;
+}
+
+/** Both device step vectors of @p m and @p l as integers, when every component is an exact integer of magnitude below 2^31. */
+static int integral_steps(const GSHGEOM_Map * m, const GSHGEOM_Lattice * l, int64_t a[2], int64_t b[2]) {
+  double da[2];
+  double db[2];
+  steps_of(m, l, da, db);
+  return exact_int31(da[0], &a[0]) && exact_int31(da[1], &a[1]) && exact_int31(db[0], &b[0]) && exact_int31(db[1], &b[1]);
+}
+
+GSHGEOM_Result gshgeom_lattice_steps(const GSHGEOM_Map * m, const GSHGEOM_Lattice * l, double a[2], double b[2]) {
+  if (!a || !b || !map_ok(m) || !lattice_valid(l)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  steps_of(m, l, a, b);
+  if (!is_fin(a[0]) || !is_fin(a[1]) || !is_fin(b[0]) || !is_fin(b[1])) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  return GSHGEOM_OK;
+}
+
+GSHGEOM_Result gshgeom_lattice_integer_steps(const GSHGEOM_Map * m, const GSHGEOM_Lattice * l, int64_t a[2], int64_t b[2], int * integer) {
+  if (!a || !b || !integer || !map_ok(m) || !lattice_valid(l)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  *integer = 0;
+  int64_t ia[2];
+  int64_t ib[2];
+  if (l->repeat_x != 1u || l->repeat_y != 1u || !integral_steps(m, l, ia, ib)) {
+    return GSHGEOM_OK;
+  }
+  const int64_t det = ia[0] * ib[1] - ia[1] * ib[0]; /* each product is below 2^62 */
+  const int64_t adet = det < 0 ? -det : det;
+  if (adet == 0 || adet > GSHGEOM_LATTICE_PERIOD_MAX) {
+    return GSHGEOM_OK;
+  }
+  a[0] = ia[0];
+  a[1] = ia[1];
+  b[0] = ib[0];
+  b[1] = ib[1];
+  *integer = 1;
+  return GSHGEOM_OK;
+}
+
+/** @p i times @p a, or 0 when its magnitude passes 2^40 (a copy whose whole pixels are past what any sink draws). */
+static int mul_bounded(int64_t i, int64_t a, int64_t * out) {
+  const int64_t limit = (int64_t)1 << 40;
+  if (a == 0 || i == 0) {
+    *out = 0;
+    return 1;
+  }
+  const int64_t ai = a < 0 ? -a : a;
+  const int64_t ii = i < 0 ? -i : i;
+  if (ii > limit / ai) {
+    return 0;
+  }
+  *out = i * a;
+  return 1;
+}
+
+GSHGEOM_Result gshgeom_lattice_canonical(const GSHGEOM_Map * m, const GSHGEOM_Lattice * l, int64_t i, int64_t j, GSHGEOM_Map * canonical,
+    int64_t * shift_x, int64_t * shift_y) {
+  if (!canonical || !shift_x || !shift_y || i < -INDEX_MAX || i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !map_ok(m) ||
+      !lattice_valid(l)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  int64_t ia[2];
+  int64_t ib[2];
+  if (!integral_steps(m, l, ia, ib)) {
+    double w[2];
+    GSHGEOM_Map full = *m;
+    const GSHGEOM_Result r = gshgeom_lattice_translation(m, l, i, j, w);
+    if (r != GSHGEOM_OK) {
+      return r;
+    }
+    full.t[0] = w[0];
+    full.t[1] = w[1];
+    return gshgeom_stroke_canonical_map(&full, canonical, shift_x, shift_y);
+  }
+  /* Integer steps: the copy's whole pixels are floor(tau) + i a + j b in integers and its fraction is the fraction of tau, so that
+   * no sum is rounded and every copy of the lattice is the same bits shifted whatever the fraction is. */
+  int64_t sx = 0;
+  int64_t sy = 0;
+  GSHGEOM_Map base = *m;
+  const GSHGEOM_Result r = gshgeom_stroke_canonical_map(m, &base, &sx, &sy);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  int64_t t[4];
+  if (!mul_bounded(i, ia[0], &t[0]) || !mul_bounded(j, ib[0], &t[1]) || !mul_bounded(i, ia[1], &t[2]) || !mul_bounded(j, ib[1], &t[3])) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  const int64_t limit = (int64_t)1 << 40;
+  const int64_t x = sx + t[0] + t[1];
+  const int64_t y = sy + t[2] + t[3];
+  if (x <= -limit || x >= limit || y <= -limit || y >= limit) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  *canonical = base;
+  *shift_x = x;
+  *shift_y = y;
+  return GSHGEOM_OK;
 }
 
 /* --- the period (LT3) -------------------------------------------------------------------------------------------------- */

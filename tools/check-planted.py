@@ -3011,7 +3011,7 @@ if os.environ.get("PLANT_UNSEEN"):
     PLANTS += CLIP_UNSEEN_PLANTS
 
 
-# --- The copies of a lattice (lattice.h, src/lattice/lattice.c, LT1 to LT4) -------------------------------------------------------
+# --- The copies of a lattice (lattice.h, src/lattice/lattice.c, LT1 to LT5) -------------------------------------------------------
 # The ids start with lat-.  Every rule and branch has a plant: the cell (the shared edge, the index range, the axes), the
 # translation (the product, the order of the sums, which step goes with which index), the quad (the corners, the rows of the
 # linear part), the validity checks, the constraints (each of the sixteen directions, the choice of the extreme corner and
@@ -3243,6 +3243,54 @@ lp("lat-floor-div-not-floored", "  return (a % p != 0 && a < 0) ? q - 1 : q;", "
 lp("lat-floor-div-adjusts-positive", "  return (a % p != 0 && a < 0) ? q - 1 : q;", "  return (a % p != 0) ? q - 1 : q;")
 lp("lat-floor-mod-not-floored", "  return m < 0 ? m + p : m;", "  return m;")
 lp("lat-period-args-null-allowed", "  if (!a || !b || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  for", "  for")
+# LT5: the step vectors, the integer lattice and the canonical position of a copy
+lp("lat-steps-api-null-allowed", "  if (!a || !b || !map_ok(m) || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  steps_of(m, l, a, b);\n  if (!is_fin(a[0])", "  if (!map_ok(m) || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  steps_of(m, l, a, b);\n  if (!is_fin(a[0])")
+lp("lat-steps-nonfinite-accepted", "  if (!is_fin(a[0]) || !is_fin(a[1]) || !is_fin(b[0]) || !is_fin(b[1])) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  return GSHGEOM_OK;\n}\n\nGSHGEOM_Result gshgeom_lattice_integer_steps", "  return GSHGEOM_OK;\n}\n\nGSHGEOM_Result gshgeom_lattice_integer_steps")
+lp("lat-int-bound-exclusive", "  if (!(v > -2147483648.0 && v < 2147483648.0)) {", "  if (!(v > -2147483648.0 && v <= 2147483648.0)) {")
+lp("lat-int-bound-low-open", "  if (!(v > -2147483648.0 && v < 2147483648.0)) {", "  if (!(v >= -2147483648.0 && v < 2147483648.0)) {")
+lp("lat-int-bound-dropped", "  if (!(v > -2147483648.0 && v < 2147483648.0)) {\n    return 0;\n  }\n  const int64_t t", "  const int64_t t")
+lp("lat-int-fraction-accepted", "  if (i2d(t) != v) {\n    return 0;\n  }\n  *out = t;", "  *out = t;")
+lp("lat-int-a0-unchecked", "exact_int31(da[0], &a[0]) && exact_int31(da[1], &a[1])", "(a[0] = 0, 1) && exact_int31(da[1], &a[1])")
+lp("lat-int-b1-unchecked", "exact_int31(db[0], &b[0]) && exact_int31(db[1], &b[1])", "exact_int31(db[0], &b[0]) && (b[1] = 0, 1)")
+lp("lat-int-b-from-a", "exact_int31(db[0], &b[0]) && exact_int31(db[1], &b[1])", "exact_int31(da[0], &b[0]) && exact_int31(da[1], &b[1])")
+lp("lat-int-repeat-x-ignored", "  if (l->repeat_x != 1u || l->repeat_y != 1u || !integral_steps(m, l, ia, ib)) {", "  if (l->repeat_y != 1u || !integral_steps(m, l, ia, ib)) {")
+lp("lat-int-repeat-y-ignored", "  if (l->repeat_x != 1u || l->repeat_y != 1u || !integral_steps(m, l, ia, ib)) {", "  if (l->repeat_x != 1u || !integral_steps(m, l, ia, ib)) {")
+lp("lat-int-repeat-either", "  if (l->repeat_x != 1u || l->repeat_y != 1u || !integral_steps(m, l, ia, ib)) {", "  if ((l->repeat_x != 1u && l->repeat_y != 1u) || !integral_steps(m, l, ia, ib)) {")
+lp("lat-int-det-cross-terms-swapped", "  const int64_t det = ia[0] * ib[1] - ia[1] * ib[0]; /* each product is below 2^62 */\n  const int64_t adet = det < 0 ? -det : det;\n  if (adet == 0", "  const int64_t det = ia[0] * ib[1] + ia[1] * ib[0]; /* each product is below 2^62 */\n  const int64_t adet = det < 0 ? -det : det;\n  if (adet == 0")
+lp("lat-int-det-sign-dropped", "  const int64_t det = ia[0] * ib[1] - ia[1] * ib[0]; /* each product is below 2^62 */\n  const int64_t adet = det < 0 ? -det : det;\n  if (adet == 0", "  const int64_t det = ia[0] * ib[1] - ia[1] * ib[0]; /* each product is below 2^62 */\n  const int64_t adet = det;\n  if (adet == 0")
+lp("lat-int-det-zero-accepted", "  if (adet == 0 || adet > GSHGEOM_LATTICE_PERIOD_MAX) {\n    return GSHGEOM_OK;", "  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {\n    return GSHGEOM_OK;")
+lp("lat-int-det-bound-unchecked", "  if (adet == 0 || adet > GSHGEOM_LATTICE_PERIOD_MAX) {\n    return GSHGEOM_OK;", "  if (adet == 0) {\n    return GSHGEOM_OK;")
+lp("lat-int-det-bound-exclusive", "  if (adet == 0 || adet > GSHGEOM_LATTICE_PERIOD_MAX) {", "  if (adet == 0 || adet >= GSHGEOM_LATTICE_PERIOD_MAX) {")
+lp("lat-int-vectors-not-returned", "  a[0] = ia[0];\n  a[1] = ia[1];\n  b[0] = ib[0];\n  b[1] = ib[1];\n  *integer = 1;", "  *integer = 1;")
+lp("lat-int-b-swapped-in-output", "  b[0] = ib[0];\n  b[1] = ib[1];\n  *integer = 1;", "  b[0] = ib[1];\n  b[1] = ib[0];\n  *integer = 1;")
+lp("lat-int-flag-not-cleared", "  *integer = 0;\n  int64_t ia[2];", "  int64_t ia[2];")
+lp("lat-int-args-null-allowed", "  if (!a || !b || !integer || !map_ok(m) || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *integer = 0;", "  if (!integer || !map_ok(m) || !lattice_valid(l)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  *integer = 0;")
+lp("lat-can-mul-zero-index-limit", "  if (a == 0 || i == 0) {\n    *out = 0;\n    return 1;\n  }", "")
+lp("lat-can-mul-bound-exclusive", "  if (ii > limit / ai) {", "  if (ii >= limit / ai) {")
+lp("lat-can-mul-bound-dropped", "  if (ii > limit / ai) {\n    return 0;\n  }", "")
+lp("lat-can-mul-sign-lost", "  const int64_t ii = i < 0 ? -i : i;", "  const int64_t ii = i;")
+lp("lat-can-args-null-allowed", "  if (!canonical || !shift_x || !shift_y || i < -INDEX_MAX", "  if (!shift_x || !shift_y || i < -INDEX_MAX")
+lp("lat-can-index-high-unchecked", "  if (!canonical || !shift_x || !shift_y || i < -INDEX_MAX || i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !map_ok(m) ||\n      !lattice_valid(l)) {", "  if (!canonical || !shift_x || !shift_y || i < -INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !map_ok(m) ||\n      !lattice_valid(l)) {")
+lp("lat-can-index-j-unchecked", "  if (!canonical || !shift_x || !shift_y || i < -INDEX_MAX || i > INDEX_MAX || j < -INDEX_MAX || j > INDEX_MAX || !map_ok(m) ||\n      !lattice_valid(l)) {", "  if (!canonical || !shift_x || !shift_y || i < -INDEX_MAX || i > INDEX_MAX || j > INDEX_MAX || !map_ok(m) ||\n      !lattice_valid(l)) {")
+lp("lat-can-integer-path-never", "  if (!integral_steps(m, l, ia, ib)) {\n    double w[2];", "  if (1) {\n    double w[2];")
+lp("lat-can-integer-path-always", "  if (!integral_steps(m, l, ia, ib)) {\n    double w[2];", "  if (integral_steps(m, l, ia, ib) && 0) {\n    double w[2];")
+lp("lat-can-doubles-path-error-lost", "    const GSHGEOM_Result r = gshgeom_lattice_translation(m, l, i, j, w);\n    if (r != GSHGEOM_OK) {\n      return r;\n    }\n    full.t[0]", "    (void)gshgeom_lattice_translation(m, l, i, j, w);\n    full.t[0]")
+lp("lat-can-doubles-path-x-from-y", "    full.t[0] = w[0];\n    full.t[1] = w[1];\n    return gshgeom_stroke_canonical_map(&full", "    full.t[0] = w[1];\n    full.t[1] = w[1];\n    return gshgeom_stroke_canonical_map(&full")
+lp("lat-can-base-error-lost", "  const GSHGEOM_Result r = gshgeom_stroke_canonical_map(m, &base, &sx, &sy);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }", "  (void)gshgeom_stroke_canonical_map(m, &base, &sx, &sy);")
+lp("lat-can-x-j-term-from-a", "!mul_bounded(j, ib[0], &t[1])", "!mul_bounded(j, ia[0], &t[1])")
+lp("lat-can-y-i-term-from-b", "!mul_bounded(i, ia[1], &t[2])", "!mul_bounded(i, ib[1], &t[2])")
+lp("lat-can-x-i-term-dropped", "  const int64_t x = sx + t[0] + t[1];", "  const int64_t x = sx + t[1];")
+lp("lat-can-x-j-term-dropped", "  const int64_t x = sx + t[0] + t[1];", "  const int64_t x = sx + t[0];")
+lp("lat-can-y-i-term-dropped", "  const int64_t y = sy + t[2] + t[3];", "  const int64_t y = sy + t[3];")
+lp("lat-can-y-j-term-dropped", "  const int64_t y = sy + t[2] + t[3];", "  const int64_t y = sy + t[2];")
+lp("lat-can-tau-whole-dropped-x", "  const int64_t x = sx + t[0] + t[1];", "  const int64_t x = t[0] + t[1];")
+lp("lat-can-tau-whole-dropped-y", "  const int64_t y = sy + t[2] + t[3];", "  const int64_t y = t[2] + t[3];")
+lp("lat-can-sum-bound-x-unchecked", "  if (x <= -limit || x >= limit || y <= -limit || y >= limit) {", "  if (y <= -limit || y >= limit) {")
+lp("lat-can-sum-bound-y-unchecked", "  if (x <= -limit || x >= limit || y <= -limit || y >= limit) {", "  if (x <= -limit || x >= limit) {")
+lp("lat-can-sum-bound-low-unchecked", "  if (x <= -limit || x >= limit || y <= -limit || y >= limit) {", "  if (x >= limit || y >= limit) {")
+lp("lat-can-sum-bound-exclusive", "  if (x <= -limit || x >= limit || y <= -limit || y >= limit) {", "  if (x < -limit || x > limit || y < -limit || y > limit) {")
+lp("lat-can-fraction-lost", "  *canonical = base;\n  *shift_x = x;", "  *canonical = *m;\n  *shift_x = x;")
+lp("lat-can-shift-swapped", "  *shift_x = x;\n  *shift_y = y;\n  return GSHGEOM_OK;\n}\n\n/* --- the period", "  *shift_x = y;\n  *shift_y = x;\n  return GSHGEOM_OK;\n}\n\n/* --- the period")
 
 LAT_PLANTS = [p for p in LAT_PLANTS if p is not None]
 # The mutants no test sees, and why.  Equivalent: no input can tell the mutant from the code.  Estimate-only: the mutant changes only
@@ -3273,6 +3321,10 @@ LAT_PLANTS = [p for p in LAT_PLANTS if p is not None]
 #   lat-valid-nonfinite-step-accepted      a step that is not finite is refused as well by the cell (NaN) and by the step vector (inf)
 #   lat-filter-range-lower, lat-filter-trusts-underflowed-c, lat-sign-filter-bound-zero, lat-sign-filter-ignores-g,
 #   lat-sign-filter-ignores-j-term, lat-sign-filter-always-on      not found (see above)
+#   lat-can-mul-bound-dropped, lat-can-mul-sign-lost   equivalent but through signed overflow, which has no defined result: the check on
+#                                          the sum of the three terms refuses every product between 2^40 and the 64-bit range, so the two
+#                                          mutants differ from the code only where `i * a` itself overflows (an index past 2^33 with a
+#                                          component past 2^30), and no test can name the value an overflow takes
 LAT_UNSEEN = {"lat-search-estimate-sign", "lat-search-estimate-ignores-other", "lat-search-estimate-zero", "lat-search-estimate-wrong-direction",
               "lat-search-var-i-uses-e", "lat-search-var-j-uses-c", "lat-index-clamp-high", "lat-index-clamp-low", "lat-index-floor-of-negative",
               "lat-index-trunc-fraction-bit", "lat-index-trunc-sign", "lat-index-trunc-below-one", "lat-index-nan-estimate",
@@ -3281,7 +3333,8 @@ LAT_UNSEEN = {"lat-search-estimate-sign", "lat-search-estimate-ignores-other", "
               "lat-search-empty-not-detected-early", "lat-search-empty-interval-reported", "lat-con-extreme-corner-ties-to-later",
               "lat-dir-equal-points-not-skipped", "lat-dir-pair-last-vertex-skipped", "lat-each-row-uses-subset-of-constraints",
               "lat-valid-nonfinite-step-accepted", "lat-filter-range-lower", "lat-filter-trusts-underflowed-c", "lat-sign-filter-bound-zero",
-              "lat-sign-filter-ignores-g", "lat-sign-filter-ignores-j-term", "lat-sign-filter-always-on"}
+              "lat-sign-filter-ignores-g", "lat-sign-filter-ignores-j-term", "lat-sign-filter-always-on",
+              "lat-can-mul-bound-dropped", "lat-can-mul-sign-lost"}
 LAT_UNSEEN_PLANTS = [p for p in LAT_PLANTS if p[0] in LAT_UNSEEN]
 PLANTS += [p for p in LAT_PLANTS if p[0] not in LAT_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):

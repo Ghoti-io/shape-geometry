@@ -21,7 +21,7 @@
 /**
  * @file
  *
- * The copies of a lattice (lattice.h, LT1 to LT4): the cell and the translation of a copy, the set of copies that meet a
+ * The copies of a lattice (lattice.h, LT1 to LT5): the cell and the translation of a copy, the set of copies that meet a
  * rectangle against the independent oracle (every index of a window in 64-bit integers for dyadic inputs, the edges of every
  * row in exact rationals for any doubles), the rows as intervals, the order, the count and its limit with its cost, huge
  * indices, axes that do not repeat, and the period of an integer lattice, exhaustively.
@@ -1125,6 +1125,317 @@ TEST(LatticePeriod, TheReductionOfAFarPointDoesNotWrapTheProduct) {
       EXPECT_EQ(out[1], 0);
     }
   }
+}
+
+
+/* --- LT5: the integer lattice and the canonical position of a copy ------------------------------------------------------- */
+
+namespace {
+
+uint64_t bits_of(double v) {
+  uint64_t b;
+  std::memcpy(&b, &v, sizeof b);
+  return b;
+}
+
+/** The expected whole pixels and fraction of a position tau + shift, for integer shifts: floor and the difference. */
+void split_of(double tau, int64_t whole_add, int64_t * whole, double * frac) {
+  const double f = std::floor(tau);
+  *whole = (int64_t)f + whole_add;
+  *frac = tau - f;
+}
+
+}  // namespace
+
+TEST(LatticeInteger, StepsAreTheDoublesOfLT2) {
+  const GSHGEOM_Map m = make_map(0.5, -0.25, 2.0, 0.75, 1.0, 2.0);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 3, 5, 4, 8);
+  double a[2], b[2];
+  ASSERT_EQ(gshgeom_lattice_steps(&m, &l, a, b), GSHGEOM_OK);
+  EXPECT_EQ(a[0], 0.5 * 4);
+  EXPECT_EQ(a[1], 2.0 * 4);
+  EXPECT_EQ(b[0], -0.25 * 8);
+  EXPECT_EQ(b[1], 0.75 * 8);
+  EXPECT_EQ(gshgeom_lattice_steps(nullptr, &l, a, b), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_steps(&m, nullptr, a, b), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_steps(&m, &l, nullptr, b), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_steps(&m, &l, a, nullptr), GSHGEOM_ERR_INVALID);
+}
+
+TEST(LatticeInteger, DetectsIntegerStepVectorsWithAnIntegerPeriod) {
+  struct Case {
+    GSHGEOM_Map m;
+    GSHGEOM_Lattice l;
+    int integer;
+    int64_t a[2], b[2];
+  };
+  const Case cases[] = {
+      {make_map(1, 0, 0, 1, 0.3, 0.45), make_lattice(0, 0, 8, 8, 8, 8), 1, {8, 0}, {0, 8}},
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8, 3), 1, {8, 0}, {0, 3}},
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8, 8, 1, 1), 1, {8, 0}, {0, 8}},
+      {make_map(2, 0, 0, 2, 0, 0), make_lattice(0, 0, 2, 2, 4, 3), 1, {8, 0}, {0, 6}},                  // a scale
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8, 8), 1, {8, 0}, {0, 8}},
+      {make_map(3, -4, 4, 3, 0.5, 0.5), make_lattice(0, 0, 1, 1, 1, 1), 1, {3, 4}, {-4, 3}},             // a rotated integer lattice
+      {make_map(1, 1, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8, 5), 1, {8, 0}, {5, 5}},                   // skewed
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8.5, 8), 0, {0, 0}, {0, 0}},                // a step of 8.5 px
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8, 8, 0, 1), 0, {0, 0}, {0, 0}},            // an axis that does not repeat
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 8, 8, 1, 0), 0, {0, 0}, {0, 0}},
+      {make_map(1, 2, 2, 4, 0, 0), make_lattice(0, 0, 8, 8, 8, 8), 0, {0, 0}, {0, 0}},                  // D = 0
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 4294967296.0, 8), 0, {0, 0}, {0, 0}},        // a component of 2^32
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 2147483647.0, 2147483647.0), 0, {0, 0}, {0, 0}},   // |D| past the bound
+      {make_map(1, 0, 0, 1, 0, 0), make_lattice(0, 0, 8, 8, 46341.0, 46340.0), 1, {46341, 0}, {0, 46340}},     // |D| just under 2^31
+  };
+  for (size_t k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+    int64_t a[2] = {-7, -7}, b[2] = {-7, -7};
+    int integer = -1;
+    ASSERT_EQ(gshgeom_lattice_integer_steps(&cases[k].m, &cases[k].l, a, b, &integer), GSHGEOM_OK) << k;
+    EXPECT_EQ(integer, cases[k].integer) << k;
+    if (cases[k].integer) {
+      EXPECT_EQ(a[0], cases[k].a[0]) << k;
+      EXPECT_EQ(a[1], cases[k].a[1]) << k;
+      EXPECT_EQ(b[0], cases[k].b[0]) << k;
+      EXPECT_EQ(b[1], cases[k].b[1]) << k;
+    } else {
+      EXPECT_EQ(a[0], -7) << k << ": not written";
+      EXPECT_EQ(b[1], -7) << k << ": not written";
+    }
+  }
+  // A step that is an integer only by the last bit is not one: 8 + 1 ulp.
+  const GSHGEOM_Map id = make_map(1, 0, 0, 1, 0, 0);
+  const GSHGEOM_Lattice off = make_lattice(0, 0, 8, 8, std::nextafter(8.0, 9.0), 8);
+  int64_t a[2], b[2];
+  int integer = -1;
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&id, &off, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 0);
+  // Arguments.
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 8, 8, 8, 8);
+  EXPECT_EQ(gshgeom_lattice_integer_steps(nullptr, &l, a, b, &integer), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_integer_steps(&id, nullptr, a, b, &integer), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_integer_steps(&id, &l, nullptr, b, &integer), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_integer_steps(&id, &l, a, nullptr, &integer), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_integer_steps(&id, &l, a, b, nullptr), GSHGEOM_ERR_INVALID);
+  GSHGEOM_Lattice bad = l;
+  bad.w = 0;
+  EXPECT_EQ(gshgeom_lattice_integer_steps(&id, &bad, a, b, &integer), GSHGEOM_ERR_INVALID);
+}
+
+TEST(LatticeCanonical, IntegerStepsKeepTheFractionOfTauForEveryCopyAndTheWholePixelsExact) {
+  const double taus[][2] = {{0.3, 0.45}, {10.3, -7.7}, {0.0, 0.0}, {-0.1, 0.9999999999999999}, {1e-17, 3.5}};
+  struct Steps {
+    double m00, m01, m10, m11, xs, ys;
+    int64_t a[2], b[2];
+  };
+  const Steps steps[] = {{1, 0, 0, 1, 6, 6, {6, 0}, {0, 6}},
+      {1, 0, 0, 1, 8, 3, {8, 0}, {0, 3}},
+      {3, -4, 4, 3, 1, 1, {3, 4}, {-4, 3}},
+      {1, 1, 0, 1, 8, 5, {8, 0}, {5, 5}}};
+  const int64_t idx[] = {0, 1, -1, 17, 1000000, -1000000, 123456789};
+  for (const auto & t : taus) {
+    for (const auto & s : steps) {
+      const GSHGEOM_Map m = make_map(s.m00, s.m01, s.m10, s.m11, t[0], t[1]);
+      const GSHGEOM_Lattice l = make_lattice(0, 0, s.xs, s.ys, s.xs, s.ys);
+      for (int64_t i : idx) {
+        for (int64_t j : {int64_t(0), int64_t(2), int64_t(-5), int64_t(999999)}) {
+          GSHGEOM_Map canon;
+          int64_t sx = 0, sy = 0;
+          const GSHGEOM_Result r = gshgeom_lattice_canonical(&m, &l, i, j, &canon, &sx, &sy);
+          const int64_t ex = i * s.a[0] + j * s.b[0], ey = i * s.a[1] + j * s.b[1];
+          const bool in_range = std::llabs(ex) < (int64_t(1) << 38) && std::llabs(ey) < (int64_t(1) << 38);
+          if (!in_range) {
+            continue;  // covered by the limit test
+          }
+          ASSERT_EQ(r, GSHGEOM_OK) << i << " " << j;
+          int64_t wx, wy;
+          double fx, fy;
+          split_of(t[0], ex, &wx, &fx);
+          split_of(t[1], ey, &wy, &fy);
+          EXPECT_EQ(sx, wx) << i << " " << j;
+          EXPECT_EQ(sy, wy) << i << " " << j;
+          // The fraction is tau's, whatever the copy: no sum was rounded.
+          EXPECT_EQ(bits_of(canon.t[0]), bits_of(fx + 0.0)) << i << " " << j;
+          EXPECT_EQ(bits_of(canon.t[1]), bits_of(fy + 0.0)) << i << " " << j;
+          // ... and the linear part is the map's.
+          for (int r2 = 0; r2 < 2; r2++) {
+            for (int c = 0; c < 2; c++) {
+              EXPECT_EQ(bits_of(canon.m[r2][c]), bits_of(m.m[r2][c]));
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(LatticeCanonical, TheDoubleSumWouldHaveRoundedTheFractionAndTheIntegerSplitDoesNot) {
+  // tau = 0.3 and a copy 2^20 pixels over: LT2's sum is a different double with another fraction, so the two copies are not
+  // one set of bits; the canonical position keeps the fraction.
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0.3, 0);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 4, 4, 4, 4);
+  double w[2];
+  ASSERT_EQ(gshgeom_lattice_translation(&m, &l, 262144, 0, w), GSHGEOM_OK);
+  EXPECT_NE(w[0] - std::floor(w[0]), 0.3);
+  GSHGEOM_Map canon;
+  int64_t sx, sy;
+  ASSERT_EQ(gshgeom_lattice_canonical(&m, &l, 262144, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(canon.t[0], 0.3);
+  EXPECT_EQ(sx, 1048576);
+}
+
+TEST(LatticeCanonical, StepsThatAreNotIntegerAreLT2SplitByTheStrokeFunction) {
+  const GSHGEOM_Map m = make_map(0.3, 0.1, -0.2, 0.7, 5.5, -9.25);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 0.1, 0.1, 0.1, 0.3);
+  for (int64_t i : {int64_t(0), int64_t(1), int64_t(-3), int64_t(1000000)}) {
+    for (int64_t j : {int64_t(0), int64_t(7), int64_t(-999)}) {
+      double w[2];
+      ASSERT_EQ(gshgeom_lattice_translation(&m, &l, i, j, w), GSHGEOM_OK);
+      GSHGEOM_Map full = m;
+      full.t[0] = w[0];
+      full.t[1] = w[1];
+      GSHGEOM_Map want;
+      int64_t wx, wy;
+      ASSERT_EQ(gshgeom_stroke_canonical_map(&full, &want, &wx, &wy), GSHGEOM_OK);
+      GSHGEOM_Map got;
+      int64_t sx, sy;
+      ASSERT_EQ(gshgeom_lattice_canonical(&m, &l, i, j, &got, &sx, &sy), GSHGEOM_OK);
+      EXPECT_EQ(sx, wx);
+      EXPECT_EQ(sy, wy);
+      EXPECT_EQ(bits_of(got.t[0]), bits_of(want.t[0]));
+      EXPECT_EQ(bits_of(got.t[1]), bits_of(want.t[1]));
+    }
+  }
+}
+
+TEST(LatticeCanonical, AShiftPast2To40IsALimitAndNothingIsWritten) {
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0.5, 0.5);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 1000000, 1, 1000000, 1);
+  GSHGEOM_Map canon = m;
+  int64_t sx = 11, sy = 12;
+  // 2^40 / 10^6 is 1099511; one index past it is past the bound; the integer path says so
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, 1099512, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, -1099512, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, GSHGEOM_LATTICE_INDEX_MAX, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(sx, 11);
+  EXPECT_EQ(sy, 12);
+  EXPECT_EQ(canon.t[0], 0.5);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, 1099510, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(sx, 1099510 * 1000000LL);
+  // The non-integer path: a translation past 2^40 is the stroke function's limit.
+  const GSHGEOM_Map far = make_map(1, 0, 0, 1, 0x1p41, 0);
+  const GSHGEOM_Lattice frac = make_lattice(0, 0, 0.5, 1, 0.5, 1);
+  EXPECT_EQ(gshgeom_lattice_canonical(&far, &frac, 0, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+}
+
+TEST(LatticeCanonical, ArgumentsAreChecked) {
+  const GSHGEOM_Map m = make_map(1, 0, 0, 1, 0.5, 0.5);
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 4, 4, 4, 4);
+  GSHGEOM_Map canon;
+  int64_t sx, sy;
+  EXPECT_EQ(gshgeom_lattice_canonical(nullptr, &l, 0, 0, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, nullptr, 0, 0, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, 0, 0, nullptr, &sx, &sy), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, 0, 0, &canon, nullptr, &sy), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, 0, 0, &canon, &sx, nullptr), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, GSHGEOM_LATTICE_INDEX_MAX + 1, 0, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &l, 0, -GSHGEOM_LATTICE_INDEX_MAX - 1, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+  GSHGEOM_Map m3 = m;
+  m3.dim = 3;
+  EXPECT_EQ(gshgeom_lattice_canonical(&m3, &l, 0, 0, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+  GSHGEOM_Lattice bad = l;
+  bad.x_step = -1;
+  EXPECT_EQ(gshgeom_lattice_canonical(&m, &bad, 0, 0, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+  // A position that is not finite.
+  const GSHGEOM_Map big = make_map(0x1p90, 0, 0, 1, 0, 0);
+  const GSHGEOM_Lattice huge = make_lattice(0, 0, 1, 1, 0x1p900, 1);
+  EXPECT_EQ(gshgeom_lattice_canonical(&big, &huge, GSHGEOM_LATTICE_INDEX_MAX, 0, &canon, &sx, &sy), GSHGEOM_ERR_INVALID);
+}
+
+TEST(LatticeInteger, TheComponentBoundIsStrictOnBothSidesAndTheDeterminantBoundIsInclusive) {
+  int64_t a[2], b[2];
+  int integer;
+  // A component of 2^31 is not below 2^31, however small the determinant: a = (2^31, 1), b = (1, 0) has |D| = 1.
+  const GSHGEOM_Lattice unit = make_lattice(0, 0, 1, 1, 1, 1);
+  for (double big : {2147483648.0, -2147483648.0, 4294967296.0, -4294967296.0}) {
+    const GSHGEOM_Map m = make_map(big, 1, 1, 0, 0, 0);
+    integer = -1;
+    ASSERT_EQ(gshgeom_lattice_integer_steps(&m, &unit, a, b, &integer), GSHGEOM_OK);
+    EXPECT_EQ(integer, 0) << big;
+  }
+  const GSHGEOM_Map just = make_map(2147483647.0, 1, 1, 0, 0, 0);
+  integer = -1;
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&just, &unit, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 1);
+  EXPECT_EQ(a[0], 2147483647);
+  const GSHGEOM_Map justneg = make_map(-2147483647.0, 1, 1, 0, 0, 0);
+  integer = -1;
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&justneg, &unit, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 1);
+  EXPECT_EQ(a[0], -2147483647);
+  // |D| = 2^31 exactly is within LT3's bound; 2^31 + 1 is not; a negative determinant of that magnitude is judged by its magnitude.
+  const GSHGEOM_Map id = make_map(1, 0, 0, 1, 0, 0);
+  integer = -1;
+  const GSHGEOM_Lattice edge = make_lattice(0, 0, 1, 1, 65536.0, 32768.0);
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&id, &edge, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 1) << "|D| = 2^31";
+  const GSHGEOM_Lattice over = make_lattice(0, 0, 1, 1, 46341.0, 46341.0);
+  integer = -1;
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&id, &over, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 0) << "|D| = 46341^2 > 2^31";
+  const GSHGEOM_Map flip = make_map(1, 0, 0, -1, 0, 0);
+  integer = -1;
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&flip, &over, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 0) << "D = -46341^2: the magnitude is what is bounded";
+  const GSHGEOM_Lattice fits = make_lattice(0, 0, 1, 1, 46341.0, 46340.0);
+  integer = -1;
+  ASSERT_EQ(gshgeom_lattice_integer_steps(&flip, &fits, a, b, &integer), GSHGEOM_OK);
+  EXPECT_EQ(integer, 1);
+  EXPECT_EQ(b[1], -46340);
+}
+
+TEST(LatticeInteger, AStepVectorThatOverflowsIsRefused) {
+  const GSHGEOM_Map big = make_map(0x1p90, 0, 0, 1, 0, 0);
+  const GSHGEOM_Lattice huge = make_lattice(0, 0, 1, 1, 0x1p990, 1);
+  double a[2], b[2];
+  EXPECT_EQ(gshgeom_lattice_steps(&big, &huge, a, b), GSHGEOM_ERR_INVALID) << "2^90 * 2^990 is not a double";
+}
+
+TEST(LatticeCanonical, TheWholePixelSumIsBoundedAtTwoToTheFortyWhateverTheTermsAre) {
+  // tau = 2^39 and a copy 549756 steps of 10^6 over: each term is below 2^40, the sum is not.
+  const GSHGEOM_Lattice l = make_lattice(0, 0, 1000000, 1, 1000000, 1);
+  GSHGEOM_Map canon;
+  int64_t sx = 11, sy = 12;
+  const GSHGEOM_Map plus = make_map(1, 0, 0, 1, 0x1p39, 0.25);
+  EXPECT_EQ(gshgeom_lattice_canonical(&plus, &l, 549755, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(sx, 549755813888LL + 549755000000LL);
+  EXPECT_EQ(gshgeom_lattice_canonical(&plus, &l, 549756, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  const GSHGEOM_Map minus = make_map(1, 0, 0, 1, -0x1p39, 0.25);
+  EXPECT_EQ(gshgeom_lattice_canonical(&minus, &l, -549755, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_lattice_canonical(&minus, &l, -549756, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  // The y axis: a map that swaps the axes sends the first step to y.
+  const GSHGEOM_Map swap_plus = make_map(0, 1, 1, 0, 0.25, 0x1p39);
+  EXPECT_EQ(gshgeom_lattice_canonical(&swap_plus, &l, 549755, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(sy, 549755813888LL + 549755000000LL);
+  EXPECT_EQ(gshgeom_lattice_canonical(&swap_plus, &l, 549756, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  const GSHGEOM_Map swap_minus = make_map(0, 1, 1, 0, 0.25, -0x1p39);
+  EXPECT_EQ(gshgeom_lattice_canonical(&swap_minus, &l, -549756, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  // The sum is exactly 2^40: refused (the bound is exclusive), and one step less is not.
+  const GSHGEOM_Lattice pow2 = make_lattice(0, 0, 1048576, 1, 1048576, 1);
+  EXPECT_EQ(gshgeom_lattice_canonical(&plus, &pow2, 524288, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_lattice_canonical(&plus, &pow2, 524287, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(sx, 549755813888LL + 524287LL * 1048576LL);
+  // A term of exactly 2^40 is refused as the sum is, and 2^40 - a is not: the product 1049088 * 1048064 ... checked by the sum.
+  const GSHGEOM_Map zero = make_map(1, 0, 0, 1, 0.0, 0.0);
+  EXPECT_EQ(gshgeom_lattice_canonical(&zero, &pow2, 1048576, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT) << "2^20 * 2^20 = 2^40";
+  EXPECT_EQ(gshgeom_lattice_canonical(&zero, &pow2, 1048575, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_lattice_canonical(&zero, &pow2, -1048576, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_lattice_canonical(&zero, &pow2, -1048575, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(sx, -1048575LL * 1048576LL);
+  // 2^40 / 10^6 is 1099511.6: the last index whose product is below 2^40 is 1099511.
+  EXPECT_EQ(gshgeom_lattice_canonical(&zero, &l, 1099511, 0, &canon, &sx, &sy), GSHGEOM_OK);
+  EXPECT_EQ(sx, 1099511000000LL);
+  EXPECT_EQ(gshgeom_lattice_canonical(&zero, &l, 1099512, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
+  // A translation past 2^40 is the stroke function's limit on the integer path too.
+  const GSHGEOM_Map far = make_map(1, 0, 0, 1, 0x1p41, 0);
+  EXPECT_EQ(gshgeom_lattice_canonical(&far, &pow2, 0, 0, &canon, &sx, &sy), GSHGEOM_ERR_LIMIT);
 }
 
 int main(int argc, char ** argv) {
