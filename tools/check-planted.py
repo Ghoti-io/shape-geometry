@@ -3364,6 +3364,163 @@ if os.environ.get("PLANT_UNSEEN"):
 
 
 
+# --- Hatches (hatch.h, src/hatch/hatch.c, HX2 and HX4 to HX12) ----------------------------------------------------------------------
+# The ids start with hx-.  A plant for each rule and branch: the check's order and bounds (HX2), the angle and the origin and the
+# line index (HX5), the exact sides, the shifted readings, the crossings, the grouping, the region of each nesting (HX4), the dash
+# window, the continuity, the cuts, the dots and their slack (HX6), the order of the pieces, the stroke of the pieces and the dots'
+# directions (HX7, HX8), the statuses, the limits and the count (HX12).  `make check-planted PLANT_ONLY='^hx-'` runs them; the ones in
+# HX_UNSEEN are equivalent mutants (the cause is stated beside the list) and run with PLANT_UNSEEN=1.
+HX = "src/hatch/hatch.c"
+HXE = "src/stroke/expand.c"
+HXT = ["testHatch"]
+HX_PLANTS = []
+
+
+def hx(pid, old, new, tests=HXT, fname=HX):
+    HX_PLANTS.append((pid, "src", fname, old, new, tests))
+
+
+# HX2: the checks
+hx("hx-check-family-count-zero-ok", "h->family_count < 1 || !h->families", "!h->families")
+hx("hx-check-map-3d-invalid", "    return GSHGEOM_ERR_UNSUPPORTED;\n  }\n  /* a family whose elements", "    return GSHGEOM_ERR_INVALID;\n  }\n  /* a family whose elements")
+hx("hx-check-limit-before-invalid", "  GSHGEOM_Result r = gshgeom_map_check(&h->map);\n  if (r != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (h->map.dim != 2) {\n    return GSHGEOM_ERR_UNSUPPORTED;\n  }", "  if (h->family_count > GSHGEOM_HATCH_FAMILIES_MAX) {\n    return GSHGEOM_ERR_LIMIT;\n  }\n  GSHGEOM_Result r = gshgeom_map_check(&h->map);\n  if (r != GSHGEOM_OK) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (h->map.dim != 2) {\n    return GSHGEOM_ERR_UNSUPPORTED;\n  }")
+hx("hx-check-families-bound-high", "  if (h->family_count > GSHGEOM_HATCH_FAMILIES_MAX) {", "  if (h->family_count > GSHGEOM_HATCH_FAMILIES_MAX + 1) {")
+hx("hx-check-families-bound-low", "  if (h->family_count > GSHGEOM_HATCH_FAMILIES_MAX) {\n    return GSHGEOM_ERR_LIMIT;\n  }\n  for", "  if (h->family_count >= GSHGEOM_HATCH_FAMILIES_MAX) {\n    return GSHGEOM_ERR_LIMIT;\n  }\n  for")
+hx("hx-check-dashes-bound-high", "f->dash_count > GSHGEOM_HATCH_DASHES_MAX ||", "f->dash_count > GSHGEOM_HATCH_DASHES_MAX + 1 ||")
+hx("hx-check-dashes-bound-low", "f->dash_count > GSHGEOM_HATCH_DASHES_MAX ||", "f->dash_count >= GSHGEOM_HATCH_DASHES_MAX ||")
+hx("hx-check-angle-bound-high", "dabs(f->angle) > GSHGEOM_HATCH_ANGLE_MAX)", "dabs(f->angle) > 2.0 * GSHGEOM_HATCH_ANGLE_MAX)")
+hx("hx-check-angle-bound-low", "dabs(f->angle) > GSHGEOM_HATCH_ANGLE_MAX)", "dabs(f->angle) >= GSHGEOM_HATCH_ANGLE_MAX)")
+hx("hx-check-band-min-lost", "return m == 0.0 || (m >= GSHGEOM_HATCH_VALUE_MIN && m <= GSHGEOM_HATCH_VALUE_MAX);", "return m <= GSHGEOM_HATCH_VALUE_MAX;")
+hx("hx-check-band-max-lost", "return m == 0.0 || (m >= GSHGEOM_HATCH_VALUE_MIN && m <= GSHGEOM_HATCH_VALUE_MAX);", "return m == 0.0 || m >= GSHGEOM_HATCH_VALUE_MIN;")
+hx("hx-check-band-zero-refused", "return m == 0.0 || (m >= GSHGEOM_HATCH_VALUE_MIN", "return (m >= GSHGEOM_HATCH_VALUE_MIN")
+hx("hx-check-origin-y-unchecked", "!in_band(f->origin_x) || !in_band(f->origin_y) ||", "!in_band(f->origin_x) ||")
+hx("hx-check-along-unchecked", "!in_band(f->offset_along) || !in_band(f->offset_across) ||", "!in_band(f->offset_across) ||")
+hx("hx-check-across-unchecked", "!in_band(f->offset_along) || !in_band(f->offset_across) ||", "!in_band(f->offset_along) ||")
+hx("hx-check-dash-band-unchecked", "      if (!in_band(f->dashes[k])) {\n        return GSHGEOM_ERR_LIMIT;\n      }\n", "")
+hx("hx-check-map-band-unchecked", "      if (!in_band(h->map.m[a][b])) {\n        return GSHGEOM_ERR_LIMIT;\n      }\n", "")
+hx("hx-check-no-pen-down-accepted", "      if (!down || !(total > 0.0)) {", "      if (!(total > 0.0)) {")
+hx("hx-check-no-length-accepted", "      if (!down || !(total > 0.0)) {", "      if (!down) {")
+hx("hx-check-dashes-null-accepted", "(f->dash_count && !f->dashes)) {", "0) {")
+hx("hx-check-dash-nonfinite-accepted", "      if (!finite(f->dashes[k])) {\n        return GSHGEOM_ERR_INVALID;\n      }\n", "")
+hx("hx-check-unit-unchecked", "h->angle_unit >= (uint32_t)GSHGEOM_ANGLE_UNIT_COUNT || h->nesting", "h->nesting")
+hx("hx-check-nesting-unchecked", "h->nesting >= (uint32_t)GSHGEOM_HATCH_NESTING_COUNT ||", "")
+hx("hx-check-sincos-limit-lost", "    if (gshgeom_sincos((GSHGEOM_Angle_Unit)h->angle_unit, f->angle, &c, &s) != GSHGEOM_OK) {\n      return GSHGEOM_ERR_LIMIT;\n    }\n", "    (void)gshgeom_sincos((GSHGEOM_Angle_Unit)h->angle_unit, f->angle, &c, &s);\n")
+# HX5: the lines
+hx("hx-line-normal-sign", "const double nx = -uy, ny = ux;", "const double nx = uy, ny = -ux;")
+hx("hx-line-dx-dy-swapped", "const double kdx = kd * f->offset_along;\n      const double kdy = kd * f->offset_across;", "const double kdx = kd * f->offset_across;\n      const double kdy = kd * f->offset_along;")
+hx("hx-line-k-reversed", "const double kd = i2d(k);", "const double kd = i2d(-k);")
+hx("hx-line-origin-after-rotation", "const double ox = (f->origin_x + kdx * ux) + kdy * nx;\n      const double oy = (f->origin_y + kdx * uy) + kdy * ny;", "const double ox = (kdx * ux) + kdy * nx + f->origin_x * ux - f->origin_y * uy;\n      const double oy = (kdx * uy) + kdy * ny + f->origin_x * uy + f->origin_y * ux;")
+hx("hx-line-origin-x-lost", "const double ox = (f->origin_x + kdx * ux) + kdy * nx;", "const double ox = (0.0 + kdx * ux) + kdy * nx;")
+hx("hx-line-stagger-lost", "const double kdx = kd * f->offset_along;", "const double kdx = 0.0;")
+hx("hx-line-stagger-sign", "const double kdx = kd * f->offset_along;", "const double kdx = -kd * f->offset_along;")
+hx("hx-line-dy-zero-drawn", "    if (f->offset_across == 0.0) {\n      continue; /* HX9: infinitely many coincident lines draw nothing */\n    }\n", "")
+hx("hx-line-quarter-turn-inexact", "      ux = cs;\n      uy = sn;", "      ux = cs * (1.0 + 0x1p-52);\n      uy = sn;")
+hx("hx-line-bbox-corner-unused", "pos += sg > 0;\n        neg += sg < 0;", "pos += sg > 0;\n        neg += sg < 0 && q != 3;")
+hx("hx-line-bbox-touch-excluded2", "      if (pos == 4 || neg == 4) {", "      if (pos + neg < 4 || pos == 4 || neg == 4) {")
+hx("hx-line-range-margin-lost", "const int64_t k_lo = d2i_floor(klo) - 2;\n    const int64_t k_hi = d2i_floor(khi) + 2;", "const int64_t k_lo = d2i_floor(klo);\n    const int64_t k_hi = d2i_floor(khi);")
+hx("hx-line-range-low-offset", "const int64_t k_lo = d2i_floor(klo) - 2;", "const int64_t k_lo = d2i_floor(klo) + 1;")
+hx("hx-line-range-high-offset", "const int64_t k_hi = d2i_floor(khi) + 2;", "const int64_t k_hi = d2i_floor(khi) - 1;")
+hx("hx-line-kappa-sign", "const double kappa = f->offset_across * (wx * wn.y - wy * wn.x);", "const double kappa = -f->offset_across * (wx * wn.y - wy * wn.x);")
+hx("hx-line-count-off-by-one", "      P->lines++;\n", "      P->lines += 1 + (P->lines == 7);\n")
+hx("hx-line-limit-exclusive", "      if (P->lines >= max_lines) {", "      if (P->lines > max_lines) {")
+hx("hx-line-limit-early-estimate", "if ((uint64_t)(k_hi - k_lo + 1) > (max_lines - (P->lines < max_lines ? P->lines : max_lines)) + 6u) {", "if ((uint64_t)(k_hi - k_lo + 1) > (max_lines - (P->lines < max_lines ? P->lines : max_lines)) + 0u) {")
+hx("hx-line-limit-default-zero", "  if (max_lines == 0) {\n    max_lines = GSHGEOM_HATCH_LINES_DEFAULT;\n  }", "")
+# the exact sides and the readings
+hx("hx-side-filter-bound-zero", "const double bound = (dabs(t1) + dabs(t2)) * 0x1p-49;", "const double bound = 0.0;")
+hx("hx-side-sign-flipped", "  if (c > bound) {\n    sg = 1;\n  } else if (c < -bound) {\n    sg = -1;", "  if (c > bound) {\n    sg = -1;\n  } else if (c < -bound) {\n    sg = 1;")
+hx("hx-side-exact-term-lost", "    gshgeom_exact_put(t, &n, 0, 2, wy, ax, 0.0);\n    sg = gshgeom_exact_sign(t, n);", "    sg = gshgeom_exact_sign(t, n - 1);")
+hx("hx-read-up-vertex-on-line-left", "const int ka = up ? (sa > 0 ? 1 : -1) : (sa < 0 ? -1 : 1);", "const int ka = up ? (sa >= 0 ? 1 : -1) : (sa < 0 ? -1 : 1);")
+hx("hx-read-down-vertex-on-line-right", "const int kb = up ? (sb > 0 ? 1 : -1) : (sb < 0 ? -1 : 1);", "const int kb = up ? (sb > 0 ? 1 : -1) : (sb <= 0 ? -1 : 1);")
+hx("hx-read-only-up", "      read_line(&R, &w, hatch->nesting, rule, 0, band_s, &n);\n", "")
+hx("hx-read-only-down", "      read_line(&R, &w, hatch->nesting, rule, 1, band_s, &n);\n", "")
+hx("hx-read-crossing-at-wrong-vertex", "      if (sa == 0) {\n        s = w->sp[a];\n      } else if (sb == 0) {\n        s = w->sp[b];", "      if (sa == 0) {\n        s = w->sp[b];\n      } else if (sb == 0) {\n        s = w->sp[a];")
+hx("hx-read-crossing-interpolation", "s = w->sp[a] + (ca / (ca - cb)) * (w->sp[b] - w->sp[a]);", "s = w->sp[a] + 0.5 * (w->sp[b] - w->sp[a]);")
+hx("hx-read-winding-sign-lost", "w->ev[ne].dw = (int8_t)(ka < kb ? -1 : 1);", "w->ev[ne].dw = (int8_t)1;")
+hx("hx-read-parity-lost", "      w->par[c] ^= 1u;\n      odd += w->par[c] ? 1 : -1;", "      odd += 1;")
+hx("hx-read-group-band-zero", "if (j + 1 < ne && w->ev[j + 1].s - w->ev[j].s <= band_s) {", "if (j + 1 < ne && w->ev[j + 1].s - w->ev[j].s <= 0.0) {")
+hx("hx-read-interval-start-first", "      in = 1;\n      start = last;", "      in = 1;\n      start = first;")
+hx("hx-read-interval-dropped-at-touch", "      if (first - start > band_s) {", "      if (first - start >= 4.0 * band_s + 1.0) {")
+# HX4: the region of a nesting style
+hx("hx-member-nonzero-is-odd", "return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;", "return (wind % 2) != 0;")
+hx("hx-member-evenodd-ignored", "return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;", "return wind != 0;")
+hx("hx-member-rule-swapped", "return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;", "return rule != GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;")
+hx("hx-member-outer-ignore-swapped", "    case GSHGEOM_HATCH_NESTING_OUTER:\n      return odd_count == 1;\n    case GSHGEOM_HATCH_NESTING_IGNORE:\n      return odd_count >= 1;", "    case GSHGEOM_HATCH_NESTING_OUTER:\n      return odd_count >= 1;\n    case GSHGEOM_HATCH_NESTING_IGNORE:\n      return odd_count == 1;")
+hx("hx-member-outer-is-rule", "    case GSHGEOM_HATCH_NESTING_OUTER:\n      return odd_count == 1;", "    case GSHGEOM_HATCH_NESTING_OUTER:\n      return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;")
+hx("hx-member-ignore-is-rule", "    case GSHGEOM_HATCH_NESTING_IGNORE:\n      return odd_count >= 1;", "    case GSHGEOM_HATCH_NESTING_IGNORE:\n      return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;")
+hx("hx-merge-touching-not-joined", "if (w->iv[i].t0 <= cur.t1 + band_s) {", "if (w->iv[i].t0 < cur.t1) {")
+hx("hx-merge-band-lost", "if (w->iv[i].t0 <= cur.t1 + band_s) {", "if (w->iv[i].t0 <= cur.t1) {")
+hx("hx-merge-end-shrinks", "      if (w->iv[i].t1 > cur.t1) {\n        cur.t1 = w->iv[i].t1;\n      }", "      cur.t1 = w->iv[i].t1;")
+hx("hx-merge-unsorted", "  qsort(w->iv, n, sizeof w->iv[0], iv_cmp);\n", "")
+hx("hx-region-closure-half-open", "      if (first - start > band_s) {", "      if (first - start > band_s && member(nesting, rule, wind, odd) == 0) {")
+hx("hx-band-mapping", "const double band_s = GSHGEOM_HATCH_BAND / gmath_sqrt(ww);", "const double band_s = GSHGEOM_HATCH_BAND;")
+# HX6: the dashes
+hx("hx-dash-window-not-extended-before", "e.base = t_first - period;", "e.base = t_first;")
+hx("hx-dash-window-not-extended-after", "(t_last - t_first) + 2.0 * period, dash_steps", "(t_last - t_first) + period, dash_steps")
+hx("hx-dash-offset-lost", "off + e.base, (t_last", "e.base, (t_last")
+hx("hx-dash-restart-per-interval", "        r = gshgeom_stroke_dash_each(dashes, nd, off + e.base, (t_last - t_first) + 2.0 * period, dash_steps, dash_cb, &e);", "        for (size_t qq = 0; qq < w.out_n && r == GSHGEOM_OK; qq++) {\n          e.base = w.out[qq].t0;\n          r = gshgeom_stroke_dash_each(dashes, nd, off, (w.out[qq].t1 - w.out[qq].t0) + 2.0 * period, dash_steps, dash_cb, &e);\n        }")
+hx("hx-dash-scale-wrong", "dashes_from_dxf(f->dashes, f->dash_count, 1.0,", "dashes_from_dxf(f->dashes, f->dash_count, 2.0,")
+hx("hx-dash-period-wrong", "      for (size_t k = 0; k < nd; k++) {\n        period += dashes[k];\n      }", "      for (size_t k = 0; k + 1 < nd; k++) {\n        period += dashes[k];\n      }")
+hx("hx-dash-touch-kept", "    if (hi - lo > e->band) {", "    if (hi >= lo) {")
+hx("hx-dash-touch-band-lost", "    if (hi - lo > e->band) {", "    if (hi > lo) {")
+hx("hx-dash-multiple-intervals-first-only", "  for (size_t j = e->j; j < e->ivn && e->iv[j].t0 < s1; j++) {", "  for (size_t j = e->j; j < e->ivn && j < e->j + 1 && e->iv[j].t0 < s1; j++) {")
+hx("hx-dash-interval-skip-too-eager", "while (e->j < e->ivn && e->iv[e->j].t1 + e->slack < s0) {", "while (e->j < e->ivn && e->iv[e->j].t1 <= s1) {")
+hx("hx-dash-interval-skip-lost", "  while (e->j < e->ivn && e->iv[e->j].t1 + e->slack < s0) {\n    e->j++;\n  }\n", "")
+hx("hx-dash-dot-end-excluded", "      if (s0 <= e->iv[j].t1 + e->slack) {", "      if (s0 < e->iv[j].t1) {")
+hx("hx-dash-dot-start-excluded", "for (size_t j = e->j; j < e->ivn && e->iv[j].t0 - e->slack <= s0; j++) {", "for (size_t j = e->j; j < e->ivn && e->iv[j].t0 < s0; j++) {")
+hx("hx-dash-dot-slack-lost", "e.slack = 0x1p-46 * (period > sc ? period : (sc > 1.0 ? sc : 1.0));", "e.slack = 0.0;")
+hx("hx-dash-dot-not-clamped", "        double d = s0 < e->iv[j].t0 ? e->iv[j].t0 : (s0 > e->iv[j].t1 ? e->iv[j].t1 : s0);", "        double d = s0;")
+hx("hx-dash-dot-dropped", "        return push(e, d, d, 1);", "        (void)d;\n        return GSHGEOM_OK;")
+hx("hx-dash-dot-as-segment", "        return push(e, d, d, 1);", "        return push(e, d, d + 1.0, 0);")
+hx("hx-solid-pieces-dropped-short", "          r = push(&e, w.out[q].t0, w.out[q].t1, 0);", "          r = w.out[q].t1 - w.out[q].t0 > 1.0 ? push(&e, w.out[q].t0, w.out[q].t1, 0) : GSHGEOM_OK;")
+hx("hx-solid-last-interval-lost", "for (size_t q = 0; q < w.out_n && r == GSHGEOM_OK; q++) {", "for (size_t q = 0; q + 1 < w.out_n && r == GSHGEOM_OK; q++) {")
+hx("hx-solid-lowering-solid-as-dashed", "      if (nd == 0) {\n        e.slack = 0.0;", "      if (nd == 0 && f->dash_count == 0) {\n        e.slack = 0.0;")
+# the pieces
+hx("hx-piece-order-families-reversed", "for (size_t fi = 0; fi < hatch->family_count && r == GSHGEOM_OK; fi++) {\n    const GSHGEOM_Hatch_Family * f = &hatch->families[fi];", "for (size_t fi = 0; fi < hatch->family_count && r == GSHGEOM_OK; fi++) {\n    const GSHGEOM_Hatch_Family * f = &hatch->families[hatch->family_count - 1 - fi];")
+hx("hx-piece-order-k-reversed", "for (int64_t k = k_lo; k <= k_hi && r == GSHGEOM_OK; k++) {", "for (int64_t kk = k_lo; kk <= k_hi && r == GSHGEOM_OK; kk++) {\n      const int64_t k = k_lo + k_hi - kk;")
+hx("hx-piece-map-lost", "GSHGEOM_Point a = {e->ox + s0 * e->ux, e->oy + s0 * e->uy, 0.0};\n  GSHGEOM_Point b = {e->ox + s1 * e->ux, e->oy + s1 * e->uy, 0.0};\n  GSHGEOM_Point la, lb;\n  if (gshgeom_map_apply_point(e->H, a, &la) != GSHGEOM_OK || gshgeom_map_apply_point(e->H, b, &lb) != GSHGEOM_OK ||", "GSHGEOM_Point a = {e->ox + s0 * e->ux, e->oy + s0 * e->uy, 0.0};\n  GSHGEOM_Point b = {e->ox + s1 * e->ux, e->oy + s1 * e->uy, 0.0};\n  GSHGEOM_Point la = a, lb = b;\n  if (")
+hx("hx-piece-direction-lost", "  p->dx = e->dirx;\n  p->dy = e->diry;", "  p->dx = 1.0;\n  p->dy = 0.0;")
+hx("hx-piece-direction-unmapped", "    e.dirx = dv.x;\n    e.diry = dv.y;", "    e.dirx = ux;\n    e.diry = uy;")
+hx("hx-piece-limit-lost", "  if (P->n >= e->max_pieces) {\n    return GSHGEOM_ERR_LIMIT;\n  }", "")
+hx("hx-piece-limit-exclusive", "  if (P->n >= e->max_pieces) {", "  if (P->n > e->max_pieces) {")
+hx("hx-dash-steps-unbounded", "limits.max_dash_steps && limits.max_dash_steps < (uint64_t)SIZE_MAX ? (size_t)limits.max_dash_steps", "0 ? (size_t)limits.max_dash_steps")
+# the statuses and the stroke
+hx("hx-status-h-singular-lost", "  P->h_singular = !inv_h;", "  P->h_singular = 0;")
+hx("hx-status-chain-singular-drawn", "if (r != GSHGEOM_OK || !inv_chain || !inv_h || np == 0 || nc == 0) {", "if (r != GSHGEOM_OK || !inv_h || np == 0 || nc == 0) {")
+hx("hx-status-width-zero-after-lines", "  if (stroke->width == 0.0) {\n    /* SG14: width 0 is the status EMPTY, decided before any line is made (and after the arguments are checked) */", "  if (0) {\n    /* SG14 */")
+hx("hx-expand-dashes-accepted", "stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;", "stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;")
+hx("hx-expand-alignment-accepted", "stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;", "stroke->dash_count != 0 ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;")
+hx("hx-expand-pieces-dashes-accepted", "  if (stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "  if (stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {")
+hx("hx-expand-coincident-ends-not-a-dot", "const int dot = p->dot || (p->x0 == p->x1 && p->y0 == p->y1);\n    GSHGEOM_Point from", "const int dot = p->dot;\n    GSHGEOM_Point from")
+hx("hx-expand-dots-counted-wrong", "    dots += pieces->v[i].dot || (pieces->v[i].x0 == pieces->v[i].x1 && pieces->v[i].y0 == pieces->v[i].y1);", "    dots += pieces->v[i].dot;")
+hx("hx-expand-dot-direction-index", "      dirs[2 * di] = p->dx;\n      dirs[2 * di + 1] = p->dy;\n      di++;", "      dirs[2 * di] = p->dx;\n      dirs[2 * di + 1] = p->dy;\n      di += 0;")
+hx("hx-expand-dot-as-segment", "    GSHGEOM_Point to = {dot ? p->x0 : p->x1, dot ? p->y0 : p->y1, 0.0};", "    GSHGEOM_Point to = {p->x1, p->y1 + (dot ? 1.0 : 0.0), 0.0};")
+hx("hx-expand-map-singular-lost", "  if (pieces->h_singular) {", "  if (0) {")
+hx("hx-expand-tolerance-ignored", "r = gshgeom_stroke_expand_dots(path, &st, &map, tolerance, alloc,", "r = gshgeom_stroke_expand_dots(path, &st, &map, GSHGEOM_FLATTEN_TOLERANCE, alloc,")
+# the dots in the expansion (expand.c)
+hx("hx-dots-omit-honored", "      if (!s->draws) {\n        return GSHGEOM_OK;\n      }\n      if (c->dot_i >= c->dot_n) {", "      if (!s->draws || c->st.degenerate == GSHGEOM_STROKE_DEGENERATE_OMIT) {\n        return GSHGEOM_OK;\n      }\n      if (c->dot_i >= c->dot_n) {", fname=HXE)
+hx("hx-dots-effective-tangent", "      GSHGEOM_SK_Vec d = c->local ? gshgeom_sk_v(dx, dy)", "      GSHGEOM_SK_Vec d = c->local ? gshgeom_sk_effective_tangent(c, rd, i)", fname=HXE)
+hx("hx-dots-device-direction-unmapped", "                                  : gshgeom_sk_v(c->map.m[0][0] * dx + c->map.m[0][1] * dy, c->map.m[1][0] * dx + c->map.m[1][1] * dy);", "                                  : gshgeom_sk_v(dx, dy);", fname=HXE)
+hx("hx-dots-index-not-advanced", "      c->dot_i++;\n      GSHGEOM_SK_Vec d", "      GSHGEOM_SK_Vec d", fname=HXE)
+hx("hx-dots-overrun-allowed", "      if (c->dot_i >= c->dot_n) {\n        return GSHGEOM_ERR_INTERNAL;\n      }\n      const double dx", "      const double dx", fname=HXE)
+
+# The mutants no test sees, and why (none yet: every plant is expected to be caught; a survivor is listed here with its argument).
+# Equivalent mutants.  hx-dash-interval-skip-lost removes the loop that steps past intervals wholly before a dash: every later test of
+# an interval (a dash piece needs hi - lo > band, a dot needs s0 <= t1 + slack) fails for such an interval, so the output is the same
+# and only the time (quadratic in the intervals of a line) differs.  hx-merge-band-lost makes the merge join intervals that touch or
+# overlap only.  Within one reading two intervals are more than a band apart (a group is closed under "within a band of the last
+# crossing", so the next group starts more than a band after it, and the gap runs from the first position of one group to the last of
+# the next).  Across the two readings the crossings are the same except the ones at a vertex exactly on the line, which sit at the
+# same position in both.  No input separates the two: a randomized comparison of 200000 configurations (vertices on the line, edges
+# that cross a hair from a grid point, long thin edges, scaled, rotated and sheared chains, both fill rules, every nesting) gave
+# identical pieces with the merge band removed, while the same comparison with the band removed from the group rule differed in
+# 1064 of the first 20000.
+HX_UNSEEN = {"hx-dash-interval-skip-lost", "hx-merge-band-lost"}
+HX_UNSEEN_PLANTS = [p for p in HX_PLANTS if p[0] in HX_UNSEEN]
+PLANTS += [p for p in HX_PLANTS if p[0] not in HX_UNSEEN]
+if os.environ.get("PLANT_UNSEEN"):
+    PLANTS += HX_UNSEEN_PLANTS
+
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:

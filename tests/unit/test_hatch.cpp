@@ -28,9 +28,13 @@
 
 #include "test_helpers.h"
 
+extern "C" {
+#include "../../src/stroke/stroke_internal.h"
+}
 #include "../hatch_oracle.h"
 #include "../hatch_vectors.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -1047,4 +1051,496 @@ TEST(HatchMatrix, TheOutlineCoversTheStrokeOfThePiecesAtEveryDecidedPoint) {
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+// --- the rules the planted defects pinned down (check-planted.py, hx- plants) ------------------------------------------------------
+
+namespace {
+
+using DP = GSHGEOM_Device_Point;
+
+DP dp(double x, double y) {
+  DP d;
+  d.x = (int32_t)std::lround(x * 64.0);
+  d.y = (int32_t)std::lround(y * 64.0);
+  return d;
+}
+
+GSHGEOM_Map scale_map(double s) {
+  GSHGEOM_Map m;
+  EXPECT_EQ(gshgeom_map_scale(2, s, s, 1.0, &m), GSHGEOM_OK);
+  return m;
+}
+
+std::vector<std::array<double, 4>> pieces_of(const GSHGEOM_Hatch_Pieces * p, std::vector<int> * dots = nullptr) {
+  std::vector<std::array<double, 4>> out;
+  for (size_t i = 0; i < gshgeom_hatch_pieces_count(p); i++) {
+    double xy[4];
+    int dot = 0;
+    EXPECT_EQ(gshgeom_hatch_pieces_get(p, i, xy, &dot), GSHGEOM_OK);
+    out.push_back({xy[0], xy[1], xy[2], xy[3]});
+    if (dots) dots->push_back(dot);
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST(HatchCheck, AnInvalidValueIsDecidedBeforeTheCountsAndTheAngleBoundIsInclusive) {
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 45, 0, 0, 0, 1, {1.0, -1.0}, identity());
+  std::vector<GSHGEOM_Hatch_Family> many(GSHGEOM_HATCH_FAMILIES_MAX + 1, f);
+  GSHGEOM_Hatch hf = h;
+  hf.families = many.data();
+  hf.family_count = many.size();
+  EXPECT_EQ(gshgeom_hatch_check(&hf), GSHGEOM_ERR_LIMIT);
+  hf.map.m[0][0] = std::nan("");
+  EXPECT_EQ(gshgeom_hatch_check(&hf), GSHGEOM_ERR_INVALID) << "an invalid map beats too many families";
+  ASSERT_EQ(gshgeom_map_identity(3, &hf.map), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_hatch_check(&hf), GSHGEOM_ERR_UNSUPPORTED) << "so does a 3D map";
+  // the angle bound is inclusive in every unit that can reach it
+  GSHGEOM_Hatch_Family g = f;
+  GSHGEOM_Hatch hr = h;
+  hr.families = &g;
+  hr.angle_unit = GSHGEOM_ANGLE_RADIANS;
+  g.angle = GSHGEOM_HATCH_ANGLE_MAX;
+  EXPECT_EQ(gshgeom_hatch_check(&hr), GSHGEOM_OK);
+  g.angle = std::nextafter(GSHGEOM_HATCH_ANGLE_MAX, 1e300);
+  EXPECT_EQ(gshgeom_hatch_check(&hr), GSHGEOM_ERR_LIMIT);
+  g.angle = -GSHGEOM_HATCH_ANGLE_MAX;
+  EXPECT_EQ(gshgeom_hatch_check(&hr), GSHGEOM_OK);
+  // an angle whose quarter turns pass what ::gshgeom_sincos takes is a limit although the angle is in its own band
+  hr.angle_unit = GSHGEOM_ANGLE_TURNS;
+  g.angle = std::ldexp(1.0, 39);
+  EXPECT_EQ(gshgeom_hatch_check(&hr), GSHGEOM_ERR_LIMIT);
+  g.angle = std::ldexp(1.0, 38);
+  EXPECT_EQ(gshgeom_hatch_check(&hr), GSHGEOM_OK);
+  hr.angle_unit = GSHGEOM_ANGLE_DEGREES;
+  g.angle = GSHGEOM_HATCH_ANGLE_MAX;
+  EXPECT_EQ(gshgeom_hatch_check(&hr), GSHGEOM_OK);
+}
+
+TEST(HatchLines, ALineOnTheBoxEdgeIsCountedWhereTheDivisionRoundsItAway) {
+  // spacing 0.1 from 0.1: line 319 is at y = 32 exactly (it touches the top of the box) and (32 - 0.1) / 0.1 is 318.99999999999994
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, 0, 0.1, 0, 0.1, {}, identity());
+  GSHGEOM_Path * region = rect_path(0, 0, 32, 32);
+  GSHGEOM_Map chain = identity();
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+  uint64_t expected = 0;
+  for (int k = -5; k <= 330; k++) {
+    const double y = (0.1 + 0.0) + ((double)k * 0.1) * 1.0;
+    expected += y >= 0.0 && y <= 32.0;
+  }
+  EXPECT_GE(expected, 320u);
+  EXPECT_EQ(gshgeom_hatch_pieces_lines(p), expected);
+  gshgeom_hatch_pieces_destroy(p);
+  gshgeom_path_destroy(region);
+}
+
+namespace {
+
+/** The library's pieces against the exact oracle for one region, one family, and the maps. */
+void expect_matches_oracle(const ho::Contours & cs, int rule, const OFam & fam, const Aff & H, const Aff & chain, const char * what) {
+  const OOut o = oracle(cs, 0, rule, {fam}, H, chain);
+  ASSERT_FALSE(o.near_degenerate) << what;
+  std::vector<std::vector<DP>> lc;
+  for (const auto & c : cs) {
+    std::vector<DP> one;
+    for (const ho::Pt & p : c) one.push_back({(int32_t)p.x, (int32_t)p.y});
+    lc.push_back(one);
+  }
+  Flat region(lc);
+  GSHGEOM_Hatch_Family g;
+  g.angle = fam.angle;
+  g.origin_x = fam.ox;
+  g.origin_y = fam.oy;
+  g.offset_along = fam.dx;
+  g.offset_across = fam.dy;
+  g.dash_count = fam.el.size();
+  g.dashes = fam.el.empty() ? nullptr : fam.el.data();
+  GSHGEOM_Hatch h;
+  std::memset(&h, 0, sizeof h);
+  h.angle_unit = GSHGEOM_ANGLE_DEGREES;
+  h.map = map_of(H);
+  h.family_count = 1;
+  h.families = &g;
+  GSHGEOM_Map cm = map_of(chain);
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces_from_flat(region.p, rule ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &h, &cm, 1000, nullptr, nullptr, &p),
+            GSHGEOM_OK) << what;
+  EXPECT_EQ(gshgeom_hatch_pieces_lines(p), o.lines) << what;
+  const auto got = pieces_of(p);
+  ASSERT_EQ(got.size(), o.xy.size()) << what;
+  for (size_t i = 0; i < got.size(); i++) {
+    for (int q = 0; q < 4; q++) EXPECT_TRUE(near(got[i][q], o.xy[i][q])) << what << " piece " << i << " coord " << q << ": " << got[i][q] << " vs " << o.xy[i][q];
+  }
+  gshgeom_hatch_pieces_destroy(p);
+}
+
+}  // namespace
+
+TEST(HatchLines, AVertexAHairFromTheLineIsOnTheSideTheExactSumSays) {
+  // a 45 degree line whose direction (cos, sin) differs in the last place runs along the diagonal of a triangle within 1e-15: the
+  // double side value of the far corner has the wrong sign for these origins, the exact sum has the right one, and a wrong side
+  // changes the piece by a crossing in the middle of the diagonal
+  const Aff id = {{1, 0, 0, 1}, {0, 0}};
+  // both corners of the diagonal are on the same side of the line exactly, so the edge is not crossed; the double value of the
+  // far corner is the other sign for each of these
+  const double origins[][2] = {{-9.95821614022951e-16, -2.658756415791537e-15}, {2.60150892154355e-15, 8.914977737327084e-16},
+                               {8.298038105269666e-16, -7.869417060953046e-16}};
+  int n = 0;
+  for (const auto & o : origins) {
+    for (int mirror = 0; mirror < 2; mirror++) {
+      ho::Contours cs;
+      if (mirror)
+        cs.push_back({{0, 0}, {640, 640}, {640, 0}});
+      else
+        cs.push_back({{0, 0}, {640, 640}, {0, 640}});
+      OFam f;
+      f.angle = 45;
+      f.ox = o[0];
+      f.oy = o[1];
+      f.dx = 0;
+      f.dy = 1000;
+      expect_matches_oracle(cs, 0, f, id, id, ("near-diagonal origin " + std::to_string(n++)).c_str());
+    }
+  }
+}
+
+namespace {
+
+/** The pieces of one hatch line of a region, with the hatch at @p scale (the chain) and everything in device pixels as given. */
+std::vector<std::array<double, 4>> pieces_at_scale(const std::vector<std::vector<DP>> & contours, double scale, double oy_device, double dy_device,
+                                                   double angle, const std::vector<double> & dashes, uint64_t * lines) {
+  Flat region(contours);
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, angle, 0, oy_device / scale, 0, dy_device / scale, dashes, identity());
+  GSHGEOM_Map chain = scale_map(scale);
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  EXPECT_EQ(gshgeom_hatch_pieces_from_flat(region.p, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+  if (lines) *lines = gshgeom_hatch_pieces_lines(p);
+  auto out = pieces_of(p);
+  gshgeom_hatch_pieces_destroy(p);
+  return out;
+}
+
+}  // namespace
+
+TEST(HatchBand, AnIntervalShorterThanTheBandIsDroppedAndOneLongerIsKept) {
+  // a triangle with its apex at (50, 10): the line at depth delta below the apex crosses it in a chord 10 delta wide
+  const std::vector<std::vector<DP>> tri = {{dp(0, 0), dp(100, 0), dp(50, 10)}};
+  for (const double delta : {1e-9, 2e-9}) {
+    uint64_t lines = 0;
+    const auto pcs = pieces_at_scale(tri, 1.0, 10.0 - delta, 1.0, 0, {}, &lines);
+    EXPECT_EQ(lines, 10u) << delta;
+    const bool kept = delta > 1.5e-9;
+    ASSERT_EQ(pcs.size(), kept ? 10u : 9u) << delta;
+    if (kept) {
+      const auto top = std::max_element(pcs.begin(), pcs.end(), [](const auto & a, const auto & b) { return a[1] < b[1]; });
+      EXPECT_NEAR((*top)[2] - (*top)[0], 10.0 * delta, 1e-12);
+    }
+  }
+}
+
+TEST(HatchBand, CrossingsEachWithinTheBandOfTheLastNeverCutAnIntervalTheyLieIn) {
+  // an outer square with three nested triangles, alternating in orientation, whose apexes meet on the point (0, 0): a line at depth
+  // d below it crosses six edges at +-1.2 d, 0.8 d and 0.4 d, the winding goes 1 0 1 0 1 0 1 and the line is inside the region at
+  // both ends.  At scale 1 and 1/4 the six are one position, so the line is one piece; at scale 4 and d = 5e-8 the steps are
+  // beyond the band (in pixels), each is a position of its own, and the pieces are the four members of the pattern.
+  struct Case {
+    double scale, d;
+    size_t pieces;
+  };
+  for (const Case c : {Case{1.0, 1e-8, 1}, Case{0.25, 1e-8, 1}, Case{4.0, 5e-8, 4}}) {
+    std::vector<std::vector<DP>> cs;
+    cs.push_back({dp(-50, -50), dp(50, -50), dp(50, 50), dp(-50, 50)});
+    const double hw[3] = {6, 4, 2};
+    for (int i = 0; i < 3; i++) {
+      if (i % 2 == 0)
+        cs.push_back({dp(0, 0), dp(hw[i], -5), dp(-hw[i], -5)});
+      else
+        cs.push_back({dp(0, 0), dp(-hw[i], -5), dp(hw[i], -5)});
+    }
+    uint64_t lines = 0;
+    const auto pcs = pieces_at_scale(cs, c.scale, -c.d, 200.0, 0, {}, &lines);
+    EXPECT_EQ(lines, 1u) << c.scale;
+    ASSERT_EQ(pcs.size(), c.pieces) << "scale " << c.scale;
+    EXPECT_NEAR(pcs.front()[0], -50.0 / c.scale, 1e-9);
+    EXPECT_NEAR(pcs.back()[2], 50.0 / c.scale, 1e-9);
+  }
+}
+
+TEST(HatchBand, AnIntervalBeginsAtTheLastCrossingOfTheGroupThatEntersTheRegion) {
+  // three triangles of one orientation with a shared apex on (0, 0) and their lower edges at cot 0.4, 0.8 and 1.2: the line at depth
+  // d meets them at 0.4 d, 0.8 d, 1.2 d (the winding goes 1, 2, 3) and the three right edges at x = 24.  When the three are one
+  // position (a step within the band) the interval begins at the last, 1.2 d; when each is a position of its own it begins at the first.
+  struct Case {
+    double scale, d, x0;
+  };
+  for (const Case c : {Case{1.0, 1e-8, 1.2e-8}, Case{0.25, 1e-8, 1.2e-8 / 0.25}, Case{4.0, 5e-8, 0.4 * 5e-8 / 4.0}}) {
+    std::vector<std::vector<DP>> cs;
+    const double Y[3] = {20, 30, 60};
+    for (int i = 0; i < 3; i++) cs.push_back({dp(0, 0), dp(24, -Y[i]), dp(24, 10)});
+    uint64_t lines = 0;
+    const auto pcs = pieces_at_scale(cs, c.scale, -c.d, 200.0, 0, {}, &lines);
+    EXPECT_EQ(lines, 1u) << c.scale;
+    ASSERT_EQ(pcs.size(), 1u) << "scale " << c.scale;
+    EXPECT_NEAR(pcs[0][0], c.x0, 1e-12) << "scale " << c.scale;
+    EXPECT_NEAR(pcs[0][2], 24.0 / c.scale, 1e-9);
+  }
+}
+
+TEST(HatchDashes, ASliverOfADashAtTheEndOfAnIntervalIsDropped) {
+  // a line 5e-9 short of the pattern: the last dash [6, 7] meets the interval [5e-9, 6 + 5e-9] in 5e-9, less than the band
+  const std::vector<std::vector<DP>> rect = {{dp(0, 0), dp(6, 0), dp(6, 10), dp(0, 10)}};
+  Flat region(rect);
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, -5e-9, 5, 0, 100, {1.0, -1.0}, identity());
+  GSHGEOM_Map chain = identity();
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces_from_flat(region.p, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_hatch_pieces_lines(p), 1u);
+  const auto pcs = pieces_of(p);
+  ASSERT_EQ(pcs.size(), 3u);
+  EXPECT_NEAR(pcs[0][0], 0.0, 1e-12);
+  EXPECT_NEAR(pcs[0][2], 1.0 - 5e-9, 1e-12);
+  EXPECT_NEAR(pcs[2][2], 5.0 - 5e-9, 1e-12);
+  gshgeom_hatch_pieces_destroy(p);
+}
+
+TEST(HatchDashes, ADotJustOutsideTheIntervalIsKeptAndPutOnItsEnd) {
+  // dots at s = 0, 5, 10 ...; the interval is [-1e-14, 5 - 1e-14], so the dot at 5 is 1e-14 past its end, inside the slack
+  const std::vector<std::vector<DP>> rect = {{dp(0, 0), dp(5, 0), dp(5, 10), dp(0, 10)}};
+  Flat region(rect);
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, 1e-14, 5, 0, 100, {0.0, -5.0}, identity());
+  GSHGEOM_Map chain = identity();
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces_from_flat(region.p, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+  std::vector<int> dots;
+  const auto pcs = pieces_of(p, &dots);
+  ASSERT_EQ(pcs.size(), 2u);
+  EXPECT_EQ(dots[0], 1);
+  EXPECT_EQ(dots[1], 1);
+  EXPECT_NEAR(pcs[0][0], 1e-14, 2e-15);
+  EXPECT_LE(pcs[1][0], 5.0 + 2e-15) << "clamped onto the interval's end, not left 1e-14 past it";
+  gshgeom_hatch_pieces_destroy(p);
+}
+
+TEST(HatchDashes, ALeadingSpaceShiftsThePatternByItsOffset) {
+  const std::vector<std::vector<DP>> rect = {{dp(0, 0), dp(10, 0), dp(10, 10), dp(0, 10)}};
+  for (const std::vector<double> & pat : std::vector<std::vector<double>>{{-1.0, 2.0}, {-1.0, 2.0, -1.0, 0.0}, {0.0, -3.0, 1.0}}) {
+    Flat region(rect);
+    GSHGEOM_Hatch_Family f;
+    GSHGEOM_Hatch h = one_family(f, 0, 0, 5, 0, 100, pat, identity());
+    GSHGEOM_Map chain = identity();
+    GSHGEOM_Hatch_Pieces * p = nullptr;
+    ASSERT_EQ(gshgeom_hatch_pieces_from_flat(region.p, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+    const auto got = pieces_of(p);
+    // the pattern repeats from s = 0: the elements' running sum gives the dashes, the dots and the spaces
+    double period = 0;
+    for (double e : pat) period += std::fabs(e);
+    std::vector<std::pair<double, double>> want;
+    for (int rep = -1; rep <= 11; rep++) {
+      double at = rep * period;
+      for (double e : pat) {
+        if (e >= 0) {
+          const double a = std::fmax(at, 0.0), b = std::fmin(at + e, 10.0);
+          if (e == 0 ? (at >= 0 && at <= 10) : b > a) want.push_back({e == 0 ? at : a, e == 0 ? at : b});
+        }
+        at += std::fabs(e);
+      }
+    }
+    ASSERT_EQ(got.size(), want.size()) << pat.size();
+    for (size_t i = 0; i < got.size(); i++) {
+      EXPECT_NEAR(got[i][0], want[i].first, 1e-12) << i;
+      EXPECT_NEAR(got[i][2], want[i].second, 1e-12) << i;
+    }
+    gshgeom_hatch_pieces_destroy(p);
+  }
+}
+
+TEST(HatchDashes, APatternThatLowersToSolidIsTheSolidFamilyBitForBit) {
+  Rng r{UINT64_C(0x1234567)};
+  for (int i = 0; i < 48; i++) {
+    const double ox = (double)r.range(1, 999) / 997.0, oy = (double)r.range(1, 999) / 1009.0;
+    const std::vector<std::vector<DP>> cs = {{dp(3.015625, 2.5), dp(21.2, 3.0), dp(17.75, 15.5), dp(2.5, 11.0)}, {dp(9, 6), dp(12, 6), dp(12, 9), dp(9, 9)}};
+    uint64_t hashes[3];
+    int k = 0;
+    for (const std::vector<double> & pat : std::vector<std::vector<double>>{{}, {1.5}, {1.0, 0.5}}) {
+      Flat region(cs);
+      GSHGEOM_Hatch_Family f;
+      GSHGEOM_Hatch h = one_family(f, 30, ox, oy, 0.37, 1.13, pat, identity());
+      GSHGEOM_Map chain = identity();
+      GSHGEOM_Hatch_Pieces * p = nullptr;
+      ASSERT_EQ(gshgeom_hatch_pieces_from_flat(region.p, GSHGEOM_FILL_EVEN_ODD, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+      hashes[k++] = gshgeom_hatch_pieces_hash(p);
+      gshgeom_hatch_pieces_destroy(p);
+    }
+    EXPECT_EQ(hashes[0], hashes[1]) << i;
+    EXPECT_EQ(hashes[0], hashes[2]) << i;
+  }
+}
+
+TEST(HatchLimits, ThePiecesAndTheDashStepsAreBoundedByTheLimits) {
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, 0, 0, 0, 1.0, {}, identity());
+  GSHGEOM_Path * region = rect_path(0, 0, 10, 10);  // eleven lines, eleven pieces
+  GSHGEOM_Map chain = identity();
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  limits.max_elements = 22;  // half of it is the most pieces
+  ASSERT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, &limits, &p), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_hatch_pieces_count(p), 11u);
+  gshgeom_hatch_pieces_destroy(p);
+  for (size_t cap : {size_t(21), size_t(20)}) {
+    limits.max_elements = cap;
+    p = nullptr;
+    EXPECT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, &limits, &p), GSHGEOM_ERR_LIMIT) << cap;
+    EXPECT_EQ(p, nullptr);
+  }
+  // a dashed line of a hundred pixels takes hundreds of steps: a cap of four steps is a limit and the default is not
+  GSHGEOM_Hatch_Family g;
+  GSHGEOM_Hatch hd = one_family(g, 0, 0, 5, 0, 100.0, {0.5, -0.5}, identity());
+  GSHGEOM_Path * wide = rect_path(0, 0, 100, 10);
+  gshgeom_limits_default(&limits);
+  ASSERT_EQ(gshgeom_hatch_pieces(wide, GSHGEOM_FILL_NONZERO, &hd, &chain, 0, nullptr, &limits, &p), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_hatch_pieces_count(p), 100u);
+  gshgeom_hatch_pieces_destroy(p);
+  limits.max_dash_steps = 4;
+  p = nullptr;
+  EXPECT_EQ(gshgeom_hatch_pieces(wide, GSHGEOM_FILL_NONZERO, &hd, &chain, 0, nullptr, &limits, &p), GSHGEOM_ERR_LIMIT);
+  gshgeom_path_destroy(wide);
+  gshgeom_path_destroy(region);
+}
+
+TEST(HatchExpand, EveryEntryChecksTheStyleFirstAndDecidesWidthZeroBeforeTheLines) {
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, 0, 0, 0, 2.0, {}, identity());
+  GSHGEOM_Path * region = rect_path(0, 0, 10, 10);
+  Flat flat({{dp(0, 0), dp(10, 0), dp(10, 10), dp(0, 10)}});
+  GSHGEOM_Map chain = identity();
+  std::vector<double> d = {1.0, 1.0};
+  GSHGEOM_Stroke dashed = style(1.0, GSHGEOM_STROKE_CAP_BUTT);
+  dashed.dash_count = 2;
+  dashed.dashes = d.data();
+  GSHGEOM_Stroke aligned = style(1.0, GSHGEOM_STROKE_CAP_BUTT);
+  aligned.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
+  GSHGEOM_Stroke zero = style(0.0, GSHGEOM_STROKE_CAP_BUTT);
+  for (int entry = 0; entry < 3; entry++) {
+    auto run = [&](const GSHGEOM_Stroke & st, uint64_t max_lines, GSHGEOM_Stroke_Outline ** o) {
+      switch (entry) {
+        case 0: return gshgeom_hatch_expand(region, GSHGEOM_FILL_NONZERO, &h, &st, &chain, max_lines, nullptr, nullptr, o);
+        case 1: return gshgeom_hatch_expand_with_tolerance(region, GSHGEOM_FILL_NONZERO, &h, &st, &chain, GSHGEOM_FLATTEN_TOLERANCE, max_lines, nullptr, nullptr, o);
+        default: return gshgeom_hatch_expand_from_flat(flat.p, GSHGEOM_FILL_NONZERO, &h, &st, &chain, max_lines, nullptr, nullptr, o);
+      }
+    };
+    GSHGEOM_Stroke_Outline * o = nullptr;
+    // six lines against a limit of one: the style is refused before the lines are made, so it is INVALID and not LIMIT
+    EXPECT_EQ(run(dashed, 1, &o), GSHGEOM_ERR_INVALID) << entry;
+    EXPECT_EQ(run(aligned, 1, &o), GSHGEOM_ERR_INVALID) << entry;
+    EXPECT_EQ(run(style(1.0, GSHGEOM_STROKE_CAP_BUTT), 1, &o), GSHGEOM_ERR_LIMIT) << entry;
+    ASSERT_EQ(run(zero, 1, &o), GSHGEOM_OK) << entry << ": width 0 is decided before the lines";
+    EXPECT_EQ(gshgeom_stroke_outline_status(o), GSHGEOM_STROKE_EMPTY);
+    gshgeom_stroke_outline_destroy(o);
+  }
+  // the pieces entry takes no dashes or alignment either
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  EXPECT_EQ(gshgeom_hatch_expand_pieces(p, &dashed, &chain, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, &o), GSHGEOM_ERR_INVALID);
+  EXPECT_EQ(gshgeom_hatch_expand_pieces(p, &aligned, &chain, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, &o), GSHGEOM_ERR_INVALID);
+  // the tolerance reaches the stroke: a wide round cap at the finest tolerance has more vertices than at the default
+  GSHGEOM_Stroke wide = style(6.0, GSHGEOM_STROKE_CAP_ROUND);
+  GSHGEOM_Stroke_Outline *a = nullptr, *b = nullptr, *c = nullptr;
+  ASSERT_EQ(gshgeom_hatch_expand_pieces(p, &wide, &chain, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, &a), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_hatch_expand_pieces(p, &wide, &chain, GSHGEOM_FLATTEN_MIN_TOLERANCE, nullptr, nullptr, &b), GSHGEOM_OK);
+  EXPECT_NE(gshgeom_stroke_outline_hash(a), gshgeom_stroke_outline_hash(b));
+  ASSERT_EQ(gshgeom_hatch_expand_with_tolerance(region, GSHGEOM_FILL_NONZERO, &h, &wide, &chain, GSHGEOM_FLATTEN_MIN_TOLERANCE, 0, nullptr, nullptr, &c),
+            GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_stroke_outline_hash(b), gshgeom_stroke_outline_hash(c));
+  gshgeom_stroke_outline_destroy(a);
+  gshgeom_stroke_outline_destroy(b);
+  gshgeom_stroke_outline_destroy(c);
+  gshgeom_hatch_pieces_destroy(p);
+  gshgeom_path_destroy(region);
+}
+
+TEST(HatchExpand, APieceWhoseEndsCoincideInDoublesIsADotDrawnAlongTheMappedLineUnderOmit) {
+  // the hatch map shears (x, y) to (x, x + y) and the line's origin is 2^28 in hatch space, so a chord 2.5e-8 wide, wider than the
+  // band, has both ends on the same pair of doubles: the piece is a segment whose ends coincide, drawn as a dot along the line's
+  // direction in local space, (1, 1), which a square cap turns by 45 degrees there and the chain's inverse shear takes back
+  const std::vector<std::vector<DP>> tri = {{dp(0, 0), dp(100, 0), dp(50, 10)}};
+  Flat region(tri);
+  const double hlin[4] = {1, 0, 1, 1}, hzero[2] = {0, 0};
+  GSHGEOM_Map hmap;
+  ASSERT_EQ(gshgeom_map_from_matrix(2, hlin, hzero, &hmap), GSHGEOM_OK);
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, 268435456.0, 10.0 - 2.5e-9, 0, 1000.0, {}, hmap);
+  GSHGEOM_Map chain;
+  const double clin[4] = {1, 0, -1, 1}, ct[2] = {-268435456.0, 0};
+  ASSERT_EQ(gshgeom_map_from_matrix(2, clin, ct, &chain), GSHGEOM_OK);
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces_from_flat(region.p, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_OK);
+  std::vector<int> dots;
+  const auto pcs = pieces_of(p, &dots);
+  ASSERT_EQ(pcs.size(), 1u);
+  EXPECT_EQ(dots[0], 0) << "found as a segment";
+  EXPECT_EQ(pcs[0][0], pcs[0][2]) << "whose ends are the same double";
+  EXPECT_EQ(pcs[0][1], pcs[0][3]);
+  GSHGEOM_Stroke st = style(2.0, GSHGEOM_STROKE_CAP_SQUARE);
+  st.degenerate = GSHGEOM_STROKE_DEGENERATE_OMIT;
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  ASSERT_EQ(gshgeom_hatch_expand_pieces(p, &st, &chain, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, &o), GSHGEOM_OK);
+  const GSHGEOM_Flat_Path * body = gshgeom_stroke_outline_body(o);
+  ASSERT_NE(body, nullptr) << "drawn although degenerate is omit";
+  EXPECT_NE(winding(body, 50.6, 10.0), 0) << "inside the turned square, which reaches 0.707 along the device x axis";
+  EXPECT_EQ(winding(body, 50.8, 10.0), 0) << "past it (the square along the line's own axes would reach 1)";
+  gshgeom_stroke_outline_destroy(o);
+  gshgeom_hatch_pieces_destroy(p);
+}
+
+TEST(HatchExpand, EachDotIsDrawnAlongItsOwnDirectionMappedByTheMapUnderDeviceWidth) {
+  GSHGEOM_Path * path = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &path), GSHGEOM_OK);
+  for (double x : {10.0, 30.0}) {
+    GSHGEOM_Point pt = {x, 0.0, 0.0};
+    ASSERT_EQ(gshgeom_path_move_to(path, pt), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_path_line_to(path, pt), GSHGEOM_OK);
+  }
+  GSHGEOM_Stroke st = style(2.0, GSHGEOM_STROKE_CAP_SQUARE);
+  st.degenerate = GSHGEOM_STROKE_DEGENERATE_OMIT;
+  GSHGEOM_Map id = identity();
+  const double dirs[4] = {1.0, 0.0, 1.0, 1.0};
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  ASSERT_EQ(gshgeom_stroke_expand_dots(path, &st, &id, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, dirs, 2, &o), GSHGEOM_OK);
+  const GSHGEOM_Flat_Path * body = gshgeom_stroke_outline_body(o);
+  ASSERT_NE(body, nullptr);
+  EXPECT_EQ(winding(body, 11.3, 0.01), 0) << "the first dot is the axis-aligned square";
+  EXPECT_NE(winding(body, 31.3, 0.01), 0) << "the second is turned by its own direction, not the first's";
+  gshgeom_stroke_outline_destroy(o);
+  // a degenerate subpath beyond the directions is an internal error, not a read past them
+  EXPECT_EQ(gshgeom_stroke_expand_dots(path, &st, &id, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, dirs, 1, &o), GSHGEOM_ERR_INTERNAL);
+  // under a device width the direction goes through the map's linear part: (0, 1) under a shear is (1, 1)
+  GSHGEOM_Stroke dev = style(2.0, GSHGEOM_STROKE_CAP_SQUARE, GSHGEOM_STROKE_WIDTH_DEVICE);
+  dev.degenerate = GSHGEOM_STROKE_DEGENERATE_OMIT;
+  const double shear[4] = {1, 1, 0, 1}, zero2[2] = {0, 0};
+  GSHGEOM_Map sh;
+  ASSERT_EQ(gshgeom_map_from_matrix(2, shear, zero2, &sh), GSHGEOM_OK);
+  const double down[2] = {0.0, 1.0};
+  GSHGEOM_Path * one = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &one), GSHGEOM_OK);
+  GSHGEOM_Point pt = {10.0, 0.0, 0.0};
+  ASSERT_EQ(gshgeom_path_move_to(one, pt), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(one, pt), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_stroke_expand_dots(one, &dev, &sh, GSHGEOM_FLATTEN_TOLERANCE, nullptr, nullptr, down, 1, &o), GSHGEOM_OK);
+  body = gshgeom_stroke_outline_body(o);
+  ASSERT_NE(body, nullptr);
+  EXPECT_NE(winding(body, 11.3, 0.01), 0) << "turned a quarter of the way: reaches past the axis-aligned side";
+  gshgeom_stroke_outline_destroy(o);
+  gshgeom_path_destroy(one);
+  gshgeom_path_destroy(path);
 }

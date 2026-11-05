@@ -383,7 +383,8 @@ static void read_line(const Region * R, Work * w, uint32_t nesting, GSHGEOM_Fill
     return;
   }
   qsort(w->ev, ne, sizeof w->ev[0], ev_cmp);
-  memset(w->par, 0, R->nc);
+  /* w->par is all zero here: a closed contour crosses the shifted line an even number of times (the signs around a cycle change
+   * an even number of times), so every parity flag is back at zero when a reading ends. */
   int64_t wind = 0, odd = 0;
   size_t i = 0;
   int in = 0;
@@ -404,16 +405,18 @@ static void read_line(const Region * R, Work * w, uint32_t nesting, GSHGEOM_Fill
     }
     const double first = w->ev[i].s;
     const double last = w->ev[j].s;
-    if (in) {
-      /* the interval that began at the last group ends at this one's first position */
-      if (first - start > band_s) {
-        w->iv[(*n)].t0 = start;
-        w->iv[(*n)].t1 = first;
-        (*n)++;
-      }
+    const int m = member(nesting, rule, wind, odd);
+    if (in && !m) {
+      /* The interval ends at the first position of the group that leaves the region.  It is longer than the band without a test:
+       * a group is closed under "within the band of the last crossing", so this group's first position is more than a band past
+       * the last position of the group that entered, where the interval began. */
+      w->iv[(*n)].t0 = start;
+      w->iv[(*n)].t1 = first;
+      (*n)++;
       in = 0;
-    }
-    if (member(nesting, rule, wind, odd)) {
+    } else if (!in && m) {
+      /* it begins at the last position of the group that enters the region; a group that leaves the state as it was changes nothing,
+       * so a run of crossings each within the band of the last never cuts the interval it lies in */
       in = 1;
       start = last;
     }
@@ -483,13 +486,8 @@ static GSHGEOM_Result push(Emit * e, double s0, double s1, int dot) {
   Piece * p = &P->v[P->n++];
   p->x0 = la.x;
   p->y0 = la.y;
-  if (dot) {
-    p->x1 = la.x;
-    p->y1 = la.y;
-  } else {
-    p->x1 = lb.x;
-    p->y1 = lb.y;
-  }
+  p->x1 = lb.x; /* a dot is pushed with s0 == s1, so lb == la */
+  p->y1 = lb.y;
   p->dx = e->dirx;
   p->dy = e->diry;
   p->dot = dot;
@@ -740,7 +738,6 @@ static GSHGEOM_Result pieces_core(const GSHGEOM_Flat_Path * flat, GSHGEOM_Fill_R
     const int64_t k_lo = d2i_floor(klo) - 2;
     const int64_t k_hi = d2i_floor(khi) + 2;
     if ((uint64_t)(k_hi - k_lo + 1) > (max_lines - (P->lines < max_lines ? P->lines : max_lines)) + 6u) {
-      P->lines = max_lines + 1;
       r = GSHGEOM_ERR_LIMIT;
       break;
     }
@@ -767,7 +764,6 @@ static GSHGEOM_Result pieces_core(const GSHGEOM_Flat_Path * flat, GSHGEOM_Fill_R
         continue;
       }
       if (P->lines >= max_lines) {
-        P->lines = max_lines + 1;
         r = GSHGEOM_ERR_LIMIT;
         break;
       }
