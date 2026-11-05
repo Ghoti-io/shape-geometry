@@ -216,9 +216,18 @@ double gshgeom_exact_sum_to_double(const GSHGEOM_ExactSum * s) {
       m64 |= 1u;
     }
   }
-  for (long b = top - 64; b >= 0 && !sticky; b--) {
-    if ((mag[b / 32] >> (b % 32)) & 1u) {
-      sticky = 1;
+  {
+    /* Whether any bit at or below position top - 64 is set, a word at a time: the bits of the word that holds that position, then the whole
+     * words under it.  (A bit at a time read up to 25,000 bits for a sum far above the bottom of the accumulator.) */
+    const long below = top - 64;
+    if (below >= 0) {
+      const long w = below / 32;
+      const unsigned keep = (unsigned)(below % 32);
+      const uint32_t mask = keep == 31u ? 0xffffffffu : ((UINT32_C(1) << (keep + 1u)) - 1u);
+      sticky = (mag[w] & mask) != 0;
+      for (long i = w - 1; i >= 0 && !sticky; i--) {
+        sticky = mag[i] != 0;
+      }
     }
   }
   uint64_t m = m64 >> 11;

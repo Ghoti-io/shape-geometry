@@ -148,6 +148,44 @@ TEST(ExactSumToDouble, TiesGoToEvenAndNothingBelowIsLost) {
   EXPECT_EQ(sum2(1.0, -0x1p-60, 0.0), 1.0);
 }
 
+TEST(ExactSumToDouble, AStickyBitAtAnyDistanceBelowATieAndAtAnyAlignmentBreaksIt) {
+  // The bits under the 64 below the leading bit are read a word at a time: the part of the word that holds position top - 64, then the whole
+  // words under it.  Scaling the tie 2^j (1 + 2^-53) moves the leading bit across the 32-bit words (so the mask in the word of top - 64 takes
+  // every width), and the extra bit 2^-k is put at every distance from just under the 64 bits to the bottom of the accumulator.
+  const double ulp = 0x1p-52;
+  for (int j = -70; j <= 70; j += 1) {
+    const double scale = std::ldexp(1.0, j);
+    auto sum = [&](double extra, int two_factor_tail) {
+      GSHGEOM_ExactSum s;
+      gshgeom_exact_sum_init(&s);
+      const double one[1] = {scale};
+      const double tie[1] = {scale * 0x1p-53};
+      gshgeom_exact_sum_add(&s, 0, 1, one);
+      gshgeom_exact_sum_add(&s, 0, 1, tie);
+      if (two_factor_tail) {
+        double lowest[GSHGEOM_EXACT_SUM_FACTORS]; // bit 0 of the accumulator: a product of twelve of the smallest doubles
+        for (double & f : lowest) {
+          f = 0x1p-1074;
+        }
+        gshgeom_exact_sum_add(&s, 0, GSHGEOM_EXACT_SUM_FACTORS, lowest);
+      } else if (extra != 0.0) {
+        const double e[1] = {extra};
+        gshgeom_exact_sum_add(&s, 0, 1, e);
+      }
+      return gshgeom_exact_sum_to_double(&s);
+    };
+    EXPECT_EQ(sum(0.0, 0), scale) << "a tie to an even mantissa, j " << j;
+    for (int k = 64; k <= 1074; k++) {
+      const double extra = std::ldexp(1.0, j - k); // exactly k below the leading bit
+      if (extra == 0.0 || std::ilogb(extra) < -1074) {
+        break;
+      }
+      ASSERT_EQ(bits(sum(extra, 0)), bits(scale * (1.0 + ulp))) << "j " << j << " k " << k;
+    }
+    EXPECT_EQ(bits(sum(0.0, 1)), bits(scale * (1.0 + ulp))) << "bit 0 of the accumulator, j " << j;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The record, validity and readback
 // ---------------------------------------------------------------------------
