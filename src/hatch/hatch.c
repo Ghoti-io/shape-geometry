@@ -290,7 +290,7 @@ typedef struct Region {
   GSHGEOM_Flat_Subpath * sub; /* nc subpaths */
   double * px;                /* pixels, exact */
   double * py;
-  int64_t lo_x, lo_y, hi_x, hi_y; /* the closed bounding box, 26.6 */
+  int32_t lo_x, lo_y, hi_x, hi_y; /* the closed bounding box, 26.6 */
 } Region;
 
 typedef struct Ev {
