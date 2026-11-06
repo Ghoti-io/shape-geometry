@@ -20,6 +20,7 @@ shape-scene|src/resource/image_paint.c|path_quad|confirmed|the rectangle predica
 vector|src/codec/svg/lower/lower_marker.c|gvec_lw_markers|owner|reads vertices through gshgeom_path_vertices, which now reads an arc (AR14): no change in vector, and the marker lowering follows it|shape-geometry:tests/unit/test_walkers.cpp:Walkers.VerticesReadAnArcAsOneVertex
 shape-cpu|tests/unit/test_render.cpp|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-cpu|tests/unit/test_render_stroke_text.cpp|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
+shape-cpu|tests/unit/test_render_hatch.cpp|*|support|builds or reads arc-free paths (it counts the elements of a hatch's straight pieces); arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-cpu|tools/check-planted.py|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-cpu|tools/render-plants.json|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
 shape-geometry|examples/path.c|*|support|builds or reads arc-free paths; arcs are fed to it by test_arc.cpp and test_walkers.cpp|-
