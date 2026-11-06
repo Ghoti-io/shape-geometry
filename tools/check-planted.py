@@ -1086,7 +1086,7 @@ PLANTS += [
     ("rat-map-error-lost", "src", DV, "    GSHGEOM_Result r = map_scaled(map, p[i], &sx[i], &sy[i]);\n    if (r != GSHGEOM_OK) {\n      return r;\n    }", "    GSHGEOM_Result r = map_scaled(map, p[i], &sx[i], &sy[i]);\n    if (r != GSHGEOM_OK) {\n      (void)r;\n    }", RT),
     ("rat-skips-last-point", "src", DV, "  for (int i = 0; i < n; i++) {\n    GSHGEOM_Result r = map_scaled", "  for (int i = 0; i < n - 1; i++) {\n    GSHGEOM_Result r = map_scaled", RT),
     ("rat-skips-first-point", "src", DV, "  for (int i = 0; i < n; i++) {\n    GSHGEOM_Result r = map_scaled", "  for (int i = 1; i < n; i++) {\n    GSHGEOM_Result r = map_scaled", RT),
-    ("rat-conic-tolerance-off", "src", DV, "  return gshgeom_conic_route(n, sx, sy, w, tolerance, emit_line, dp);", "  return gshgeom_conic_route(n, sx, sy, w, tolerance + 1, emit_line, dp);", RT),
+    ("rat-conic-tolerance-off", "src", DV, "  return gshgeom_conic_route(n, sx, sy, w, tolerance, emit_line, (void *)dp);", "  return gshgeom_conic_route(n, sx, sy, w, tolerance + 1, emit_line, (void *)dp);", RT),
 
     # --- the flattener --------------------------------------------------------
     # The floor division and the midpoint (widened, half up).
@@ -2603,9 +2603,10 @@ ap("arw-lower-cubic-element-error-lost", SCL, "    if (r == GSHGEOM_OK) {\n     
 DVT = ["testConic", "testDevice", "testWalkers"]
 ap("cvx-arc-device-verb-error-lost", DV, "    r = gshgeom_path_verb(path, i, &verb);\n    if (r != GSHGEOM_OK) {\n      r = GSHGEOM_ERR_INTERNAL;\n      break;\n    }\n    if (verb == GSHGEOM_VERB_ARC) {", "    gshgeom_path_verb(path, i, &verb);\n    if (verb == GSHGEOM_VERB_ARC) {", DVT)
 ap("cvx-arc-device-arc-skipped", DV, "    if (verb == GSHGEOM_VERB_ARC) {\n      GSHGEOM_Arc arc;\n      r = gshgeom_path_arc(path, i, &arc);", "    if (0) {\n      GSHGEOM_Arc arc;\n      r = gshgeom_path_arc(path, i, &arc);", DVT)
-ap("cvx-arc-device-arc-continue-dropped", DV, "convert_arc(dp, map, &arc, tolerance);\n      continue;", "convert_arc(dp, map, &arc, tolerance);", DVT)
+# Removed, cvx-arc-device-arc-continue-dropped: the loop became an if/else (an arc, or an element), so there is no `continue` to drop; an arc that also
+# reached the element branch is not expressible.  The branch is held by cvx-arc-device-* and the arc tests.
 ap("cvx-arc-device-readback-error-hidden", DV, "      r = r != GSHGEOM_OK ? GSHGEOM_ERR_INTERNAL : convert_arc(dp, map, &arc, tolerance);", "      r = convert_arc(dp, map, &arc, tolerance);", DVT)
-ap("cvx-arc-device-tolerance-default", DV, "convert_arc(dp, map, &arc, tolerance);", "convert_arc(dp, map, &arc, GSHGEOM_FLATTEN_TOLERANCE);", DVT)
+ap("cvx-arc-device-tolerance-default", DV, "convert_arc(g, map, &arc, tolerance);", "convert_arc(g, map, &arc, GSHGEOM_FLATTEN_TOLERANCE);", DVT)
 ap("cvx-arc-device-pieces-error-lost", DV, "  GSHGEOM_Result r = gshgeom_arc_pieces(arc, pieces, &count);\n  for (int k = 0; k < count && r == GSHGEOM_OK; k++) {", "  GSHGEOM_Result r = GSHGEOM_OK;\n  gshgeom_arc_pieces(arc, pieces, &count);\n  for (int k = 0; k < count && r == GSHGEOM_OK; k++) {", DVT)
 ap("cvx-arc-device-first-piece", DV, "  for (int k = 0; k < count && r == GSHGEOM_OK; k++) {\n    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);", "  for (int k = 0; k < 1 && r == GSHGEOM_OK; k++) {\n    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);", DVT)
 ap("cvx-arc-device-last-piece-dropped", DV, "  for (int k = 0; k < count && r == GSHGEOM_OK; k++) {\n    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);", "  for (int k = 0; k + 1 < count && r == GSHGEOM_OK; k++) {\n    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);", DVT)
@@ -2613,10 +2614,10 @@ ap("cvx-arc-device-piece-weights-first", DV, "    r = convert_conic(dp, map, 3, 
 ap("cvx-arc-device-piece-points-first", DV, "    r = convert_conic(dp, map, 3, pieces[k].p, pieces[k].w, tolerance);", "    r = convert_conic(dp, map, 3, pieces[0].p, pieces[k].w, tolerance);", DVT)
 ap("cvx-with-tolerance-below-minimum", DV, "      tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {\n    return GSHGEOM_ERR_INVALID;", "      tolerance < 1) {\n    return GSHGEOM_ERR_INVALID;", DVT)
 ap("cvx-with-tolerance-minimum-ignored", DV, "      tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {\n    return GSHGEOM_ERR_INVALID;", "      0) {\n    return GSHGEOM_ERR_INVALID;", DVT)
-ap("cvx-with-tolerance-ignored", DV, "    r = convert_element(dp, map, &el, tolerance);", "    r = convert_element(dp, map, &el, GSHGEOM_FLATTEN_TOLERANCE);", DVT)
+ap("cvx-with-tolerance-ignored", DV, "convert_element(g, map, &el, tolerance);", "convert_element(g, map, &el, GSHGEOM_FLATTEN_TOLERANCE);", DVT)
 ap("cvx-default-tolerance-wrong", DV, "      path, map, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);", "      path, map, GSHGEOM_FLATTEN_TOLERANCE + 1, alloc, limits, out);", DVT)
 ap("cvx-default-tolerance-minimum", DV, "      path, map, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);", "      path, map, GSHGEOM_FLATTEN_MIN_TOLERANCE, alloc, limits, out);", DVT)
-ap("cvx-emit-line-leaf-level-lost", DV, "  (void)leaf;\n  (void)level;\n  return gshgeom_device_path_line_to((GSHGEOM_Device_Path *)user, to);", "  (void)leaf;\n  (void)level;\n  return gshgeom_device_path_move_to((GSHGEOM_Device_Path *)user, to);", DVT)
+ap("cvx-emit-line-leaf-level-lost", DV, "  return g->visit(g->user, GSHGEOM_DEVICE_LINE, &to, 1);", "  return g->visit(g->user, GSHGEOM_DEVICE_MOVE, &to, 1);", DVT)
 ap("cvx-revision-function", "src/flatten/flatten.c", "  return GSHGEOM_FLATTEN_REVISION;", "  return GSHGEOM_FLATTEN_REVISION - 1;", ["testFlatten", "testConic"])
 
 # The exact sum rounded once (exact/sum.c), which AR5's decisions and radicand stand on.
@@ -3240,7 +3241,7 @@ lp("lat-period-det-zero-accepted", "  if (det == 0) {\n    return GSHGEOM_ERR_IN
 lp("lat-period-det-term-swapped", "  const int64_t det = a[0] * b[1] - a[1] * b[0];", "  const int64_t det = a[0] * b[1] + a[1] * b[0];")
 lp("lat-period-bound-exclusive", "  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {", "  if (adet >= GSHGEOM_LATTICE_PERIOD_MAX) {")
 lp("lat-period-bound-unchecked", "  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {\n    return GSHGEOM_ERR_LIMIT;\n  }", "")
-lp("lat-period-abs-det-dropped", "  const int64_t adet = det < 0 ? -det : det;", "  const int64_t adet = det;")
+lp("lat-period-abs-det-dropped", "  const int64_t adet = det < 0 ? -det : det;\n  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {", "  const int64_t adet = det;\n  if (adet > GSHGEOM_LATTICE_PERIOD_MAX) {")
 lp("lat-period-euclid-start-swapped", "  int64_t r0 = a[1] < 0 ? -a[1] : a[1];\n  int64_t r1 = b[1] < 0 ? -b[1] : b[1];", "  int64_t r0 = b[1] < 0 ? -b[1] : b[1];\n  int64_t r1 = a[1] < 0 ? -a[1] : a[1];")
 lp("lat-period-euclid-coefficients-swapped", "  const int64_t u = a[1] < 0 ? -s0 : s0;\n  const int64_t v = b[1] < 0 ? -t0 : t0;", "  const int64_t u = a[1] < 0 ? -t0 : t0;\n  const int64_t v = b[1] < 0 ? -s0 : s0;")
 lp("lat-period-u-sign-ignored", "  const int64_t u = a[1] < 0 ? -s0 : s0;", "  const int64_t u = s0;")
@@ -3401,7 +3402,7 @@ hx("hx-check-map-band-unchecked", "      if (!in_band(h->map.m[a][b])) {\n      
 hx("hx-check-no-pen-down-accepted", "      if (!down || !(total > 0.0)) {", "      if (!(total > 0.0)) {")
 hx("hx-check-no-length-accepted", "      if (!down || !(total > 0.0)) {", "      if (!down) {")
 hx("hx-check-dashes-null-accepted", "(f->dash_count && !f->dashes)) {", "0) {")
-hx("hx-check-dash-nonfinite-accepted", "      if (!finite(f->dashes[k])) {\n        return GSHGEOM_ERR_INVALID;\n      }\n", "")
+hx("hx-check-dash-nonfinite-accepted", "      if (!is_fin(f->dashes[k])) {\n        return GSHGEOM_ERR_INVALID;\n      }\n", "")
 hx("hx-check-unit-unchecked", "h->angle_unit >= (uint32_t)GSHGEOM_ANGLE_UNIT_COUNT || h->nesting", "h->nesting")
 hx("hx-check-nesting-unchecked", "h->nesting >= (uint32_t)GSHGEOM_HATCH_NESTING_COUNT ||", "")
 hx("hx-check-sincos-limit-lost", "    if (gshgeom_sincos((GSHGEOM_Angle_Unit)h->angle_unit, f->angle, &c, &s) != GSHGEOM_OK) {\n      return GSHGEOM_ERR_LIMIT;\n    }\n", "    (void)gshgeom_sincos((GSHGEOM_Angle_Unit)h->angle_unit, f->angle, &c, &s);\n")
@@ -3439,7 +3440,10 @@ hx("hx-read-winding-sign-lost", "w->ev[ne].dw = (int8_t)(ka < kb ? -1 : 1);", "w
 hx("hx-read-parity-lost", "      w->par[c] ^= 1u;\n      odd += w->par[c] ? 1 : -1;", "      odd += 1;")
 hx("hx-read-group-band-zero", "if (j + 1 < ne && w->ev[j + 1].s - w->ev[j].s <= band_s) {", "if (j + 1 < ne && w->ev[j + 1].s - w->ev[j].s <= 0.0) {")
 hx("hx-read-interval-start-first", "      in = 1;\n      start = last;", "      in = 1;\n      start = first;")
-hx("hx-read-interval-dropped-at-touch", "      if (first - start > band_s) {", "      if (first - start >= 4.0 * band_s + 1.0) {")
+# Removed, hx-read-interval-dropped-at-touch and hx-region-closure-half-open: they dropped or tightened the test `first - start > band_s` of the
+# interval that leaves the region.  The test is gone from the code, because a group of crossings is closed under "within the band of the last
+# crossing", so an interval that ends at a group is always longer than the band (the comment at that place says so); the grouping itself is held
+# by hx-read-group-band-zero and hx-merge-touching-not-joined.
 # HX4: the region of a nesting style
 hx("hx-member-nonzero-is-odd", "return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;", "return (wind % 2) != 0;")
 hx("hx-member-evenodd-ignored", "return rule == GSHGEOM_FILL_NONZERO ? wind != 0 : (wind % 2) != 0;", "return wind != 0;")
@@ -3451,7 +3455,6 @@ hx("hx-merge-touching-not-joined", "if (w->iv[i].t0 <= cur.t1 + band_s) {", "if 
 hx("hx-merge-band-lost", "if (w->iv[i].t0 <= cur.t1 + band_s) {", "if (w->iv[i].t0 <= cur.t1) {")
 hx("hx-merge-end-shrinks", "      if (w->iv[i].t1 > cur.t1) {\n        cur.t1 = w->iv[i].t1;\n      }", "      cur.t1 = w->iv[i].t1;")
 hx("hx-merge-unsorted", "  qsort(w->iv, n, sizeof w->iv[0], iv_cmp);\n", "")
-hx("hx-region-closure-half-open", "      if (first - start > band_s) {", "      if (first - start > band_s && member(nesting, rule, wind, odd) == 0) {")
 hx("hx-band-mapping", "const double band_s = GSHGEOM_HATCH_BAND / gmath_sqrt(ww);", "const double band_s = GSHGEOM_HATCH_BAND;")
 # HX6: the dashes
 hx("hx-dash-window-not-extended-before", "e.base = t_first - period;", "e.base = t_first;")
