@@ -1418,6 +1418,28 @@ TEST(HatchDashes, APatternThatLowersToSolidIsTheSolidFamilyBitForBit) {
   }
 }
 
+TEST(HatchLimits, AHatchTheCheckRefusesIsItsVerdictEvenWhenTheRegionExceedsTheLimits) {
+  // The region of this call has more points than the limit allows, which is a limit of its own; the hatch is refused first.
+  GSHGEOM_Hatch_Family f;
+  GSHGEOM_Hatch h = one_family(f, 0, 0, 0, 0, 1.0, {}, identity());
+  GSHGEOM_Path * region = rect_path(0, 0, 10, 10);
+  GSHGEOM_Map chain = identity();
+  GSHGEOM_Limits tight;
+  gshgeom_limits_default(&tight);
+  tight.max_points = 2;
+  GSHGEOM_Hatch_Pieces * p = nullptr;
+  ASSERT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_LIMIT)
+      << "the region alone exceeds the limit";
+  GSHGEOM_Hatch invalid = h;
+  invalid.nesting = 3;  // a nesting out of range is the check's INVALID
+  EXPECT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &invalid, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_INVALID);
+  GSHGEOM_Hatch solid3 = h;
+  ASSERT_EQ(gshgeom_map_identity(3, &solid3.map), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &solid3, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_UNSUPPORTED);
+  EXPECT_EQ(p, nullptr);
+  gshgeom_path_destroy(region);
+}
+
 TEST(HatchLimits, ThePiecesAndTheDashStepsAreBoundedByTheLimits) {
   GSHGEOM_Hatch_Family f;
   GSHGEOM_Hatch h = one_family(f, 0, 0, 0, 0, 1.0, {}, identity());

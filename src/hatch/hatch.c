@@ -837,6 +837,12 @@ GSHGEOM_Result gshgeom_hatch_pieces_with_tolerance(const GSHGEOM_Path * region, 
   if (r != GSHGEOM_OK || chain->dim != 2) {
     return r == GSHGEOM_OK ? GSHGEOM_ERR_UNSUPPORTED : GSHGEOM_ERR_INVALID;
   }
+  /* A hatch the check refuses is that check's verdict whatever the region costs: the region's flattening, which can be a limit of
+   * its own, must not answer first (HX2's order is invalid, unsupported, limit). */
+  r = gshgeom_hatch_check(hatch);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
   GSHGEOM_Device_Path * dp = NULL;
   GSHGEOM_Flat_Path * flat = NULL;
   r = gshgeom_device_path_from_model_with_tolerance(region, chain, tolerance, alloc, limits, &dp);
