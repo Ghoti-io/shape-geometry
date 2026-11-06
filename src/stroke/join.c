@@ -224,7 +224,14 @@ static GSHGEOM_Result miter_clip(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, GSHG
     GSHGEOM_SK_Vec q[4] = {gshgeom_sk_v(0.0, 0.0), A, T, B};
     return poly(c, anchor, q, 4, e);
   }
-  GSHGEOM_SK_Vec u = gshgeom_sk_unit(gshgeom_sk_add(oa, ob));
+  /* The direction of the tip: along the sum of the outer normals, which is the difference of the unit tangents turned a quarter, so
+   * that the tip points along (a - b) at every turn.  The unit tangents and the normals carry a few units of rounding each, so the
+   * sum of two nearly opposite normals (a turn within a hair of a reversal that the exact test still sees as a turn) is mostly that
+   * rounding and its direction is not one: with |sum| below 2^-13 the direction is good to 4 u / |sum| > 2^-40 only, which is what
+   * the tip's own error bound (miter_tip) is built on, and the clip line it placed was anywhere.  There the difference of the tangents,
+   * which is then about twice a tangent, is the direction. */
+  GSHGEOM_SK_Vec sum = gshgeom_sk_add(oa, ob);
+  GSHGEOM_SK_Vec u = gshgeom_sk_unit(gshgeom_sk_dot(sum, sum) < 0x1p-26 ? gshgeom_sk_sub(ah, bh) : sum);
   double la = (L * h - gshgeom_sk_dot(A, u)) / gshgeom_sk_dot(ah, u);
   double lb = (L * h - gshgeom_sk_dot(B, u)) / -gshgeom_sk_dot(bh, u);
   GSHGEOM_SK_Vec q[5] = {gshgeom_sk_v(0.0, 0.0), A, gshgeom_sk_add(A, gshgeom_sk_scale(la, ah)),

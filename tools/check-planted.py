@@ -1619,6 +1619,8 @@ STROKE_PLANTS = [
     # SG8, SG9: joins
     ("sk-turn-side-inverted", "src", SKJ, "  int outer_left = sigma > 0;", "  int outer_left = sigma < 0;", STM),
     ("sk-smooth-gets-a-join", "src", SKJ, "  if (sigma == 0 && ds > 0) {\n    return GSHGEOM_OK; /* a smooth vertex: no join */\n  }", "  (void)ds;", STM),
+    ("sk-miter-clip-tip-direction-noisy", "src", SKJ, "gshgeom_sk_dot(sum, sum) < 0x1p-26 ? gshgeom_sk_sub(ah, bh) : sum", "sum", STK),
+    ("sk-miter-clip-tip-direction-always-difference", "src", SKJ, "gshgeom_sk_dot(sum, sum) < 0x1p-26 ? gshgeom_sk_sub(ah, bh) : sum", "gshgeom_sk_sub(ah, bh)", STO),
     ("sk-sg9-strict", "src", SKJ, "    return D <= 0; /* q >= 0: |P||a||b| <= L^2 q */", "    return D < 0; /* q >= 0: |P||a||b| <= L^2 q */", STO),
     ("sk-sg9-filter-loose", "src", SKJ, "    double bound = abs * 0x1p-40;", "    double bound = abs * 0x1p-80;", STO),
     ("sk-sg9-dot-sign", "src", SKJ, "  int qs = dot_sign(q, v, s);", "  int qs = -dot_sign(q, v, s);", STO),

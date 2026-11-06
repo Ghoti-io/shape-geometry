@@ -428,6 +428,9 @@ STROKE_PLAIN_FILES = 20
 
 def stroke_files():
     out = {}
+    # Found by pass B's libFuzzer run: a miter-clip join from a line into an arc that leaves it in the opposite direction to within the
+    # rounding of the doubles: the clip line was placed by the rounding of two nearly opposite unit vectors (SVG 2 puts it L h from the join).
+    out["regression-miter-clip-at-a-near-reversal.bin"] = base64.b64decode("AAAEGAAgAAMYAEAAAAAAAAAAQAIAGAAAGAAACRgoKSgoKCgoKCgoKCgoKCgoKCgoAAAAAgAYAAAYAAAJGCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgAoBgA/uf/X+f/X+cAICgoKCgoKCgoKCgoKACgGAD+5/9f5/9f5wAg")
     for i in range(STROKE_BIASED_FILES):
         out["biased-%03d.bin" % i] = stroke_biased(i + 1)
     for i in range(STROKE_PLAIN_FILES):

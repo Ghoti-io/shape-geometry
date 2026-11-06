@@ -382,6 +382,86 @@ TEST(StrokeStatus, ADashedSubpathOfNoLengthIsADotOrNothingAsTheStyleSays) {
   gshgeom_path_destroy(p);
 }
 
+TEST(StrokeJoin, AMiterClipAtATurnWithinAHairOfAReversalIsClippedWhereSvg2ClipsIt) {
+  // SVG 2 (the stroke-linejoin value miter-clip): the miter is clipped by a line perpendicular to the bisector of the angle between the
+  // segments, at a distance of half the miter length, stroke-miterlimit * stroke-width / 2 = L h, from the join point.  At a reversal the
+  // miter points along the incoming direction a and is unbounded, so it is always clipped there: the clipped tip is the rectangle of
+  // half-width h and length L h in front of the join, whose far corners are sqrt((L h)^2 + h^2) from it.  A turn of a hair short of a
+  // reversal (the outgoing segment off the exact opposite of the incoming one by a few ulps, which the exact orientation test does see as a
+  // turn) is the same tip.  Here h = 1 and L = 4, the incoming direction (-1, -1)/sqrt(2); a vertex in front of the join (positive along a)
+  // is the tip's, and none is further than L h = 4 along a nor than h = 1 aside, within the 1/64 lattice, and the tip reaches the clip.
+  const double L = 4.0, h = 1.0, lattice = 1.0 / 64.0, root2 = std::sqrt(2.0);
+  for (double delta : {0.0, 1e-14, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4, 1e-2}) {
+    GSHGEOM_Path * p = sm::build({{'M', {0, 0}}, {'L', {-450, -450}}, {'L', {-450 + 100.0 + delta, -450 + 100.0}}});
+    GSHGEOM_Map m = identity();
+    GSHGEOM_Stroke s = plain();
+    s.width = 2.0 * h;
+    s.join = GSHGEOM_STROKE_JOIN_MITER_CLIP;
+    s.miter_limit = L;
+    GSHGEOM_Stroke_Outline * o = nullptr;
+    ASSERT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &o), GSHGEOM_OK) << delta;
+    const GSHGEOM_Flat_Path * body = gshgeom_stroke_outline_body(o);
+    ASSERT_NE(body, nullptr);
+    const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(body);
+    double far_forward = 0.0;
+    for (size_t i = 0; i < gshgeom_flat_path_point_count(body); i++) {
+      const double dx = pts[i].x / 64.0 + 450.0, dy = pts[i].y / 64.0 + 450.0;
+      const double along = (-dx - dy) / root2;   // along the incoming direction (-1, -1)/sqrt(2)
+      const double aside = (dx - dy) / root2;
+      if (along > lattice) {
+        EXPECT_LE(along, L * h + 2.0 * lattice) << "delta " << delta << " vertex " << i;
+        EXPECT_LE(std::fabs(aside), h + 2.0 * lattice) << "delta " << delta << " vertex " << i;
+        far_forward = std::fmax(far_forward, along);
+      }
+    }
+    EXPECT_GE(far_forward, L * h - 2.0 * lattice) << "delta " << delta << ": the tip reaches the clip line";
+    gshgeom_stroke_outline_destroy(o);
+    gshgeom_path_destroy(p);
+  }
+}
+
+TEST(StrokeJoin, AMiterClipFromALineIntoAnArcThatLeavesItInTheOppositeDirectionIsClippedWhereSvg2ClipsIt) {
+  // The same tip where the segment that leaves the join is an arc (found by libFuzzer): the line ends at J where the circular arc of radius
+  // 642.5 about (-908.68, 0) begins, at -45 degrees, and its tangent there is the incoming direction reversed to within the rounding of the
+  // doubles.  The exact orientation test sees a turn, and the sum of the outer normals, two nearly opposite unit vectors, is the rounding of
+  // their components: the clip line was placed anywhere and the tip reached 11 pixels from J.  SVG 2 puts it L h from J (here 4), and the
+  // tip's corners are sqrt((L h)^2 + h^2) from J at the most.  The tolerance is the fuzzer's (4).
+  GSHGEOM_Path * p = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &p), GSHGEOM_OK);
+  const GSHGEOM_Point jp = {-454.38239871039514, -454.33820238720568, 0};
+  ASSERT_EQ(gshgeom_path_move_to(p, GSHGEOM_Point{0, 0, 0}), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(p, jp), GSHGEOM_OK);
+  const GSHGEOM_Point end = {-908.67640907324653, 642.5, 0};
+  ASSERT_EQ(gshgeom_path_arc_center_to(p, GSHGEOM_Point{-908.67640907324653, 0, 0}, 642.5, 642.5, 0.0, GSHGEOM_ANGLE_RADIANS,
+                -0.78544679916415272, 2.3562431259590495, &end),
+      GSHGEOM_OK);
+  GSHGEOM_Map m = identity();
+  GSHGEOM_Stroke s = plain();
+  s.width = 2.0;
+  s.join = GSHGEOM_STROKE_JOIN_MITER_CLIP;
+  s.miter_limit = 4.0;
+  GSHGEOM_Stroke_Outline * o = nullptr;
+  ASSERT_EQ(gshgeom_stroke_expand_with_tolerance(p, &s, &m, 4, nullptr, nullptr, &o), GSHGEOM_OK);
+  const GSHGEOM_Flat_Path * body = gshgeom_stroke_outline_body(o);
+  ASSERT_NE(body, nullptr);
+  const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(body);
+  const double lattice = 1.0 / 64.0, root2 = std::sqrt(2.0);
+  double far_forward = 0.0;
+  for (size_t i = 0; i < gshgeom_flat_path_point_count(body); i++) {
+    const double dx = pts[i].x / 64.0 - jp.x, dy = pts[i].y / 64.0 - jp.y;
+    const double along = (-dx - dy) / root2;
+    const double aside = (dx - dy) / root2;
+    if (along > 0.0 && std::fabs(dx) + std::fabs(dy) < 50.0) { // the tip, not the body of either segment (the arc turns away)
+      EXPECT_LE(along, 4.0 + 2.0 * lattice) << "vertex " << i;
+      EXPECT_LE(std::fabs(aside), 1.0 + 2.0 * lattice) << "vertex " << i;
+      far_forward = std::fmax(far_forward, along);
+    }
+  }
+  EXPECT_GE(far_forward, 4.0 - 2.0 * lattice) << "the tip reaches the clip line";
+  gshgeom_stroke_outline_destroy(o);
+  gshgeom_path_destroy(p);
+}
+
 TEST(StrokeDashGate, APathPastTheCutPositionsErrorBoundIsTheLimitAndAShorterOneIsDrawn) {
   // SG26: the position of a cut is known to within a bound that grows with the total length of the path; where that
   // bound is past 2^-20 of a pixel (times the map's norm) the call refuses rather than place a dash by a guess.  Each
