@@ -1182,6 +1182,7 @@ void expect_matches_oracle(const ho::Contours & cs, int rule, const OFam & fam, 
 }  // namespace
 
 TEST(HatchLines, AVertexAHairFromTheLineIsOnTheSideTheExactSumSays) {
+  GSHGEOM_SKIP_UNDER_VALGRIND();  // the oracle computes in long double, which Valgrind computes as double
   // a 45 degree line whose direction (cos, sin) differs in the last place runs along the diagonal of a triangle within 1e-15: the
   // double side value of the far corner has the wrong sign for these origins, the exact sum has the right one, and a wrong side
   // changes the piece by a crossing in the middle of the diagonal
