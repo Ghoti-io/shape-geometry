@@ -424,7 +424,9 @@ static void read_line(const Region * R, Work * w, uint32_t nesting, GSHGEOM_Fill
   }
 }
 
-/** Merge the n intervals of w->iv into w->out (sorted, touching or overlapping ones joined). */
+/** Merge the n intervals of w->iv into w->out (sorted, those within a band of the end so far joined).  The band matters across the two
+ * readings, not within one: a group of crossings off the pixel grid can end an interval at its first position in one reading and
+ * begin one at its last position in the other, less than a band apart. */
 static void merge_intervals(Work * w, size_t n, double band_s) {
   w->out_n = 0;
   if (n == 0) {

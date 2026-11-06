@@ -1272,6 +1272,39 @@ TEST(HatchBand, CrossingsEachWithinTheBandOfTheLastNeverCutAnIntervalTheyLieIn) 
   }
 }
 
+TEST(HatchBand, TheTwoReadingsOfALineAreJoinedAcrossAGapOfAtMostTheBand) {
+  // The intervals of the two readings (the line shifted either way) are joined across a gap of a band or less, and only the merge does
+  // it.  A square above the line with its lower edge on it, wound one way, is inside the reading that counts the line's own vertices
+  // as below it and not inside the other; a rectangle across the line wound the other way begins at x = 5 in both.  In the first reading
+  // the winding there goes 1 -> 0 (the square's and the rectangle's cancel), so the interval [0, 5] ends at the first crossing of the
+  // group; in the second it goes 0 -> -1, so [., 20] begins at the last.  The group is the rectangle's edge and the two edges of a
+  // sliver, a triangle whose apex is a 64th of a pixel under the line and whose far side is Y pixels above it: they cross the line
+  // 2 and 3 / (4096 Y) after x = 5, and cancel each other.  The group's first and last crossing are not on the pixel grid, which is why
+  // the gap between the two readings' intervals can be less than a band: for Y = 65536 it is 1.1e-8 pixel (a band is 1.49e-8) and the
+  // line is one piece, for Y = 40000 it is 1.8e-8 and the line is two.
+  struct Case {
+    double y;
+    size_t pieces;
+  };
+  for (const Case c : {Case{65536.0, 1}, Case{40000.0, 2}}) {
+    const std::vector<std::vector<DP>> cs = {
+        {dp(0, 0), dp(10, 0), dp(10, 1), dp(0, 1)},                    // the square above the line, its lower edge on it
+        {dp(5, -1), dp(5, 1), dp(20, 1), dp(20, -1)},                  // the rectangle across it, wound the other way
+        {dp(5, -1.0 / 64.0), dp(5 + 2.0 / 64.0, c.y), dp(5 + 3.0 / 64.0, c.y)}};  // the sliver
+    uint64_t lines = 0;
+    const auto pcs = pieces_at_scale(cs, 1.0, 0.0, 1e7, 0, {}, &lines);
+    EXPECT_EQ(lines, 1u) << c.y;
+    ASSERT_EQ(pcs.size(), c.pieces) << "Y " << c.y;
+    EXPECT_NEAR(pcs.front()[0], 0.0, 1e-9);
+    EXPECT_NEAR(pcs.back()[2], 20.0, 1e-9);
+    if (c.pieces == 2) {
+      EXPECT_NEAR(pcs[0][2], 5.0, 1e-9);
+      EXPECT_NEAR(pcs[1][0], 5.0, 1e-7);
+      EXPECT_GT(pcs[1][0], pcs[0][2]);
+    }
+  }
+}
+
 TEST(HatchBand, AnIntervalBeginsAtTheLastCrossingOfTheGroupThatEntersTheRegion) {
   // three triangles of one orientation with a shared apex on (0, 0) and their lower edges at cot 0.4, 0.8 and 1.2: the line at depth
   // d meets them at 0.4 d, 0.8 d, 1.2 d (the winding goes 1, 2, 3) and the three right edges at x = 24.  When the three are one

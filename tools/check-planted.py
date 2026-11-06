@@ -3506,15 +3506,12 @@ hx("hx-dots-overrun-allowed", "      if (c->dot_i >= c->dot_n) {\n        return
 # The mutants no test sees, and why (none yet: every plant is expected to be caught; a survivor is listed here with its argument).
 # Equivalent mutants.  hx-dash-interval-skip-lost removes the loop that steps past intervals wholly before a dash: every later test of
 # an interval (a dash piece needs hi - lo > band, a dot needs s0 <= t1 + slack) fails for such an interval, so the output is the same
-# and only the time (quadratic in the intervals of a line) differs.  hx-merge-band-lost makes the merge join intervals that touch or
-# overlap only.  Within one reading two intervals are more than a band apart (a group is closed under "within a band of the last
-# crossing", so the next group starts more than a band after it, and the gap runs from the first position of one group to the last of
-# the next).  Across the two readings the crossings are the same except the ones at a vertex exactly on the line, which sit at the
-# same position in both.  No input separates the two: a randomized comparison of 200000 configurations (vertices on the line, edges
-# that cross a hair from a grid point, long thin edges, scaled, rotated and sheared chains, both fill rules, every nesting) gave
-# identical pieces with the merge band removed, while the same comparison with the band removed from the group rule differed in
-# 1064 of the first 20000.
-HX_UNSEEN = {"hx-dash-interval-skip-lost", "hx-merge-band-lost"}
+# and only the time (quadratic in the intervals of a line) differs.  (hx-merge-band-lost, which makes the merge join intervals that
+# touch or overlap only, was listed here as equivalent on the argument that two intervals are more than a band apart; the argument
+# held within one reading and not across the two, and TheTwoReadingsOfALineAreJoinedAcrossAGapOfAtMostTheBand separates it: a group
+# of crossings off the pixel grid has its first and last position less than a band apart, one reading ends an interval at the first
+# and the other begins one at the last.  It is a plant that is caught.)
+HX_UNSEEN = {"hx-dash-interval-skip-lost"}
 HX_UNSEEN_PLANTS = [p for p in HX_PLANTS if p[0] in HX_UNSEEN]
 PLANTS += [p for p in HX_PLANTS if p[0] not in HX_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
