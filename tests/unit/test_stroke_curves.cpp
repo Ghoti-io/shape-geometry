@@ -128,6 +128,39 @@ TEST(StrokeCurvesInputs, TheToleranceIsCheckedAtBothEdgesOfItsRange) {
   gshgeom_path_destroy(p);
 }
 
+TEST(StrokeCurvesInputs, TheMiddleWeightOfAConicIsAtMostOneWhateverTheRoundingOfTheDot) {
+  // A conic of a tiny turn has the middle weight cos(psi / 2) = sqrt((1 + p . q) / 2), an ulp below 1 or 1; the dot of the two unit directions
+  // rounds past 1 for some, and the square root of a value just past 1 was a weight above 1, which is a hyperbola (found by libFuzzer): a
+  // quadratic whose control point is its start (the tangent at the start is the chord), stroked 3 wide with round joins and caps at the
+  // tolerance 2^-10.  Every rational quadratic of the outline has the ends 1 and a middle weight in (0, 1].
+  GSHGEOM_Map m = identity();
+  GSHGEOM_Stroke s = plain();
+  s.width = 3.0;
+  s.join = GSHGEOM_STROKE_JOIN_ROUND;
+  s.cap = GSHGEOM_STROKE_CAP_ROUND;
+  GSHGEOM_Path * p = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &p), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_move_to(p, GSHGEOM_Point{0, 0, 0}), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_quadratic_to(p, GSHGEOM_Point{0, 0, 0}, GSHGEOM_Point{-1, 8, 0}), GSHGEOM_OK);
+  GSHGEOM_Stroke_Curves * o = nullptr;
+  ASSERT_EQ(expand(p, s, m, GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL, &o), GSHGEOM_OK);
+  const GSHGEOM_Path * body = gshgeom_stroke_curves_body(o);
+  ASSERT_NE(body, nullptr);
+  size_t checked = 0;
+  for (size_t k = 0; k < gshgeom_path_element_count(body); k++) {
+    GSHGEOM_Element el;
+    ASSERT_EQ(gshgeom_path_element(body, k, &el), GSHGEOM_OK);
+    if (el.verb == GSHGEOM_VERB_RATIONAL_QUADRATIC) {
+      EXPECT_TRUE(el.curve.w[0] == 1.0 && el.curve.w[2] == 1.0 && el.curve.w[1] > 0.0 && el.curve.w[1] <= 1.0)
+          << "element " << k << " weight " << el.curve.w[1];
+      checked++;
+    }
+  }
+  EXPECT_GT(checked, 0u);
+  gshgeom_stroke_curves_destroy(o);
+  gshgeom_path_destroy(p);
+}
+
 TEST(StrokeCurvesInputs, RefusalsAndTheFormRange) {
   GSHGEOM_Path * p = corner();
   GSHGEOM_Map m = identity();

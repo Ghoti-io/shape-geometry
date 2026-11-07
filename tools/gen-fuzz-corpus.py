@@ -430,6 +430,9 @@ def stroke_files():
     out = {}
     # Found by pass B's libFuzzer run: a miter-clip join from a line into an arc that leaves it in the opposite direction to within the
     # rounding of the doubles: the clip line was placed by the rounding of two nearly opposite unit vectors (SVG 2 puts it L h from the join).
+    # Found by pass B's libFuzzer run: the middle weight of a conic for a nearly flat arc, sqrt((1 + p . q) / 2) with a dot rounded past 1, came out
+    # one ulp above 1 (a hyperbola); it is at most 1.
+    out["regression-conic-weight-past-one.bin"] = base64.b64decode("AAAEGAAwAAEYAEABAAAAAAAAAAIAAAAYAAADGACAGABAGABAGADAGABOQBgAAA==")
     out["regression-miter-clip-at-a-near-reversal.bin"] = base64.b64decode("AAAEGAAgAAMYAEAAAAAAAAAAQAIAGAAAGAAACRgoKSgoKCgoKCgoKCgoKCgoKCgoAAAAAgAYAAAYAAAJGCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgAoBgA/uf/X+f/X+cAICgoKCgoKCgoKCgoKACgGAD+5/9f5/9f5wAg")
     for i in range(STROKE_BIASED_FILES):
         out["biased-%03d.bin" % i] = stroke_biased(i + 1)

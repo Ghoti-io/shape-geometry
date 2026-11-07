@@ -96,6 +96,13 @@ GSHGEOM_Result gshgeom_skc_cubic(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec p0, GSHGEOM_
   return push(c, &e);
 }
 
+/** The middle weight of the conic that turns through psi, cos(psi / 2) = sqrt((1 + p . q) / 2): at most 1, which the rounded dot of two
+ *  nearly equal directions can exceed by an ulp (the square root of a value just past 1), and a weight past 1 is not an ellipse. */
+static double half_turn_weight(double cpq) {
+  const double w = gmath_sqrt((1.0 + cpq) / 2.0);
+  return w > 1.0 ? 1.0 : w;
+}
+
 GSHGEOM_Result gshgeom_skc_conic(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec p0, GSHGEOM_SK_Vec p1, GSHGEOM_SK_Vec p2, double w) {
   GSHGEOM_SK_CElem e;
   e.deg = 2;
@@ -189,7 +196,7 @@ static GSHGEOM_Result arcs(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, double rad
   double h = rad;
   GSHGEOM_SK_Vec p0 = dev(c, centre, h, p), p2 = dev(c, centre, h, q);
   GSHGEOM_SK_Vec p1 = dev(c, centre, h / (1.0 + cpq), gshgeom_sk_add(p, q));
-  return gshgeom_skc_conic(c, p0, p1, p2, gmath_sqrt((1.0 + cpq) / 2.0));
+  return gshgeom_skc_conic(c, p0, p1, p2, half_turn_weight(cpq));
 }
 
 GSHGEOM_Result gshgeom_skc_sector(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec centre, GSHGEOM_SK_Vec p, GSHGEOM_SK_Vec q) {
@@ -439,7 +446,7 @@ static GSHGEOM_Result side_elements(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, c
     GSHGEOM_SK_Vec p2 = k + 2 == ne ? e->to : gshgeom_sk_add(e->z, gshgeom_sk_scale(e->r, q));
     GSHGEOM_SK_Vec p1 = gshgeom_sk_add(e->z, gshgeom_sk_scale(e->r / (1.0 + cpq), gshgeom_sk_add(p, q)));
     r = gshgeom_skc_conic(c, dev(c, anchor, 1.0, p0), dev(c, anchor, 1.0, p1), dev(c, anchor, 1.0, p2),
-        gmath_sqrt((1.0 + cpq) / 2.0));
+        half_turn_weight(cpq));
   }
   return r;
 }
