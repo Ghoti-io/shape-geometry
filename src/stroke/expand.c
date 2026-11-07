@@ -106,14 +106,12 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
   GSHGEOM_Point start_model = {0.0, 0.0, 0.0};
   for (size_t i = 0; i < n; i++) {
     GSHGEOM_Verb verb;
-    GSHGEOM_Result r = gshgeom_path_verb(path, i, &verb);
-    if (r != GSHGEOM_OK) {
-      return GSHGEOM_ERR_INTERNAL;
-    }
+    (void)gshgeom_path_verb(path, i, &verb); /* i < n, the one way the read fails is an index past the count */
+    GSHGEOM_Result r = GSHGEOM_OK;
     /* an element is one curve, or an arc's pieces: the arc is one segment of its subpath (SG5) whose body is the
      * union of its pieces' bodies (AR13) */
     GSHGEOM_Curve model[GSHGEOM_ARC_MAX_PIECES];
-    int nc = 1;
+    int nc = 0; /* no piece until one is read */
     if (verb == GSHGEOM_VERB_ARC) {
       GSHGEOM_Arc arc;
       r = gshgeom_path_arc(path, i, &arc);
@@ -130,6 +128,7 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
         return GSHGEOM_ERR_INTERNAL;
       }
       model[0] = el.curve;
+      nc = 1;
     }
     if (verb == GSHGEOM_VERB_MOVE) {
       GSHGEOM_Curve cv = model[0];

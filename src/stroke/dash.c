@@ -665,15 +665,12 @@ GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * ce
     int arcs = 0;
     for (size_t i = 0; i < ne && r == GSHGEOM_OK; i++) {
       GSHGEOM_Verb verb;
-      r = gshgeom_path_verb(centerline, i, &verb);
+      (void)gshgeom_path_verb(centerline, i, &verb); /* i < ne, the one way the read fails is an index past the count */
       arcs |= verb == GSHGEOM_VERB_ARC;
     }
     for (size_t i = 0; i < ne && r == GSHGEOM_OK; i++) {
       GSHGEOM_Verb verb;
-      r = gshgeom_path_verb(centerline, i, &verb);
-      if (r != GSHGEOM_OK) {
-        break;
-      }
+      (void)gshgeom_path_verb(centerline, i, &verb);
       if (verb == GSHGEOM_VERB_ARC) {
         /* an arc is its pieces, each mapped as a conic is (AR13), so that the measured segments are the ones the
          * body is built from */

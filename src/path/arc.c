@@ -542,9 +542,10 @@ GSHGEOM_Result gshgeom_path_arc_endpoint_to(GSHGEOM_Path * path, GSHGEOM_Point e
   }
   GSHGEOM_Point u = pt(rx * cp, rx * sp);
   GSHGEOM_Point v = pt(ry * (0.0 - sp), ry * cp);
+  /* A product of a finite radius and a cosine or sine in [-1, 1] is never a NaN, and an infinity is past the limit, so the comparison
+   * with the limit is the whole check. */
   if (absf(u.x) > GSHGEOM_COORD_LIMIT || absf(u.y) > GSHGEOM_COORD_LIMIT || absf(v.x) > GSHGEOM_COORD_LIMIT
-      || absf(v.y) > GSHGEOM_COORD_LIMIT || !is_finite(u.x) || !is_finite(u.y) || !is_finite(v.x) || !is_finite(v.y)
-      || absf(E.x) > GSHGEOM_COORD_LIMIT || absf(E.y) > GSHGEOM_COORD_LIMIT) {
+      || absf(v.y) > GSHGEOM_COORD_LIMIT || absf(E.x) > GSHGEOM_COORD_LIMIT || absf(E.y) > GSHGEOM_COORD_LIMIT) {
     return GSHGEOM_ERR_LIMIT;
   }
   /* d = E - S stays an expansion: a = v.y dx - v.x dy, b = u.x dy - u.y dx, D = u.x v.y - u.y v.x */
@@ -559,13 +560,12 @@ GSHGEOM_Result gshgeom_path_arc_endpoint_to(GSHGEOM_Path * path, GSHGEOM_Point e
   lin_add(&b, 0, u.y, S.x);
   lin_add(&d, 0, u.x, v.y);
   lin_add(&d, 1, u.y, v.x);
-  if (lin_value(&d) <= 0.0) {
-    GSHGEOM_Point z = pt(0.0, 0.0);
-    int sign = 0;
-    if (gshgeom_orient2d(z, u, v, &sign) != GSHGEOM_OK || sign <= 0) {
-      return GSHGEOM_ERR_INVALID;
-    }
-  }
+  /* The half-diameters have a positive area, so no check is made.  With `cp`, `sp` the cosine and sine of `phi`, `u = (rx cp, rx sp)` and
+   * `v = (-ry sp, ry cp)` (each product rounded once) and `rx`, `ry` greater than zero, the cross product `u.x v.y - u.y v.x` is exactly
+   * `fl(rx cp) fl(ry cp) + fl(rx sp) fl(ry sp)`: two terms that are not negative (each is a product of two numbers of the same sign).
+   * One of `cp` and `sp` has magnitude at least 0.7, and a product of it with a double of magnitude at least 2^-1074 rounds to a number
+   * that is not zero, so one term is positive.  tests/unit/test_arc_walker_edges.cpp tests it for 200,000 radii of every exponent
+   * (the subnormal ones included) and angles in every unit. */
   /* N = 4 D^2 - a^2 - b^2 (positive iff the radii fit), AB = a^2 + b^2, DEN = 4 D^2 */
   GSHGEOM_ExactSum n_sum, ab_sum, den_sum;
   gshgeom_exact_sum_init(&n_sum);

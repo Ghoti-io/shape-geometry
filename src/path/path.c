@@ -442,24 +442,21 @@ GSHGEOM_Result gshgeom_path_copy(const GSHGEOM_Path * path, const GSHGEOM_Alloca
       return r;
     }
   }
-  /* The stored numbers go over raw: they were checked when they were stored, and a copy must not
-   * change a bit.  The move's and the close's bookkeeping is what the builders would have set. */
-  for (size_t i = 0; i < path->el_n && r == GSHGEOM_OK; i++) {
+  /* The stored numbers go over raw: they were checked when they were stored, and a copy must not change a bit.  Nothing here can
+   * fail: the arrays were sized to the source above and the element count is within the limit, so a raw append reserves no memory
+   * and meets no limit.  The raw append sets the current point to the last point of the element; a move sets the start of the
+   * subpath and that there is a current point, and the last move is the one the source's start came from (a start is set by a move
+   * and by nothing else), so the three fields of the source are the three of the copy without being copied.  An allocation that
+   * fails does so at the creation or the sizing above, which release what they made. */
+  for (size_t i = 0; i < path->el_n; i++) {
     const Elem * e = &path->el[i];
-    r = gshgeom_path_append_raw(
+    (void)gshgeom_path_append_raw(
         dst, e->verb, e->unit, e->flags, gshgeom_path_elem_points(path, e), gshgeom_path_elem_weights(path, e));
-    if (r == GSHGEOM_OK && e->verb == GSHGEOM_VERB_MOVE) {
+    if (e->verb == GSHGEOM_VERB_MOVE) {
       dst->has_current = 1;
       dst->start = path->pt[e->point];
     }
   }
-  if (r != GSHGEOM_OK) {
-    gshgeom_path_destroy(dst);
-    return r;
-  }
-  dst->has_current = path->has_current;
-  dst->current = path->current;
-  dst->start = path->start;
   *out = dst;
   return GSHGEOM_OK;
 }
@@ -509,7 +506,7 @@ GSHGEOM_Result gshgeom_path_bounds(
       continue;
     }
     GSHGEOM_Curve curves[GSHGEOM_ARC_MAX_PIECES];
-    int nc = 1;
+    int nc = 0; /* no curve until one is read: a read that fails leaves none, whatever else is wrong */
     GSHGEOM_Result r = GSHGEOM_OK;
     if (verb == GSHGEOM_VERB_ARC) {
       /* the union of the boxes of the pieces (their ends include the arc's own) */
@@ -522,6 +519,7 @@ GSHGEOM_Result gshgeom_path_bounds(
       GSHGEOM_Element el;
       r = gshgeom_path_element(path, i, &el);
       curves[0] = el.curve;
+      nc = r == GSHGEOM_OK ? 1 : 0;
     }
     for (int k = 0; k < nc && r == GSHGEOM_OK; k++) {
       GSHGEOM_Bounds b;

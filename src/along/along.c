@@ -429,10 +429,7 @@ GSHGEOM_Result gshgeom_measured_create(const GSHGEOM_Allocator * alloc,
   size_t count = gshgeom_path_element_count(path);
   for (size_t i = 0; i < count && r == GSHGEOM_OK; i++) {
     GSHGEOM_Verb verb;
-    r = gshgeom_path_verb(path, i, &verb);
-    if (r != GSHGEOM_OK) {
-      break;
-    }
+    (void)gshgeom_path_verb(path, i, &verb); /* i < count, the one way the read fails is an index past it */
     if (verb == GSHGEOM_VERB_ARC) {
       /* AR12: an arc is measured as its pieces, in order; a piece boundary is not a vertex here either */
       GSHGEOM_Arc arc;

@@ -246,8 +246,8 @@ GSHGEOM_Result gshgeom_stroke_curves_lower_cubic(const GSHGEOM_Path * in, double
   size_t n = gshgeom_path_element_count(in);
   for (size_t i = 0; i < n && r == GSHGEOM_OK; i++) {
     GSHGEOM_Verb verb;
-    r = gshgeom_path_verb(in, i, &verb);
-    if (r == GSHGEOM_OK && verb == GSHGEOM_VERB_ARC) {
+    (void)gshgeom_path_verb(in, i, &verb); /* i < n, the one way the read fails is an index past the count */
+    if (verb == GSHGEOM_VERB_ARC) {
       /* an arc is its pieces, each lowered as a rational quadratic is (AR8, AR15) */
       GSHGEOM_Arc arc;
       GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];

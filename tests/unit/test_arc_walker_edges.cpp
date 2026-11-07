@@ -62,33 +62,81 @@ GSHGEOM_Result count_vertex(const GSHGEOM_Vertex *, void * ctx) {
 
 }  // namespace
 
-TEST(ArcWalkerEdges, EveryWalkerReportsAnArcThatCannotBeDecomposed) {
+namespace {
+
+// a path with a move and one record stored raw that no constructor stores: 0 and 1, an arc whose sweep is not a number and one whose
+// unit is past the last; 2, a line whose end is not a number; 3, a cubic whose end is not a number
+GSHGEOM_Path * corrupt_path(int which) {
   const double nan = std::nan("");
-  for (int which = 0; which < 2; which++) {
-    GSHGEOM_Path * p = which == 0 ? raw_arc_path(nan) : raw_arc_path(90, (unsigned)GSHGEOM_ANGLE_UNIT_COUNT);
+  GSHGEOM_Path * p = make();
+  EXPECT_EQ(gshgeom_path_move_to(p, P(1, 0)), GSHGEOM_OK);
+  if (which < 2) {
+    GSHGEOM_Point pts[4] = {P(0, 0), P(1, 0), P(0, 1), P(0, 1)};
+    const double w[2] = {0.0, which == 0 ? nan : 90.0};
+    EXPECT_EQ(gshgeom_path_append_raw(p, GSHGEOM_VERB_ARC, which == 0 ? (unsigned)GSHGEOM_ANGLE_DEGREES : (unsigned)GSHGEOM_ANGLE_UNIT_COUNT,
+                  GSHGEOM_ARC_CIRCULAR, pts, w), GSHGEOM_OK);
+  } else if (which == 2) {
+    const GSHGEOM_Point q[1] = {P(nan, 1)};
+    EXPECT_EQ(gshgeom_path_append_raw(p, GSHGEOM_VERB_LINE, 0, 0, q, nullptr), GSHGEOM_OK);
+  } else {
+    const GSHGEOM_Point q[3] = {P(2, 1), P(3, 1), P(4, nan)};
+    EXPECT_EQ(gshgeom_path_append_raw(p, GSHGEOM_VERB_CUBIC, 0, 0, q, nullptr), GSHGEOM_OK);
+  }
+  return p;
+}
+
+}  // namespace
+
+TEST(ArcWalkerEdges, EveryWalkerReportsARecordThatCannotBeRead) {
+  // The code each walker reports for each corrupt path (the walkers read a stored element and every failure of that read is the
+  // walker's own: an arc that cannot be decomposed, a curve that cannot be bounded or measured, an element that cannot be read).  A
+  // walker that lost one of these errors would report success, or a different code.
+  enum { BOUNDS, MEASURE, LOWER, STROKE, DASH, DASH_SCALED, DASH_DEVICE, VERTEX_COUNT, VERTICES, COLUMNS };
+  const GSHGEOM_Result want[4][COLUMNS] = {
+      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL,
+          GSHGEOM_ERR_INTERNAL, GSHGEOM_OK, GSHGEOM_ERR_INTERNAL},
+      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL,
+          GSHGEOM_ERR_INTERNAL, GSHGEOM_OK, GSHGEOM_ERR_INTERNAL},
+      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT,
+          GSHGEOM_ERR_INVALID, GSHGEOM_OK, GSHGEOM_OK},
+      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT,
+          GSHGEOM_ERR_INVALID, GSHGEOM_OK, GSHGEOM_OK},
+  };
+  for (int which = 0; which < 4; which++) {
+    GSHGEOM_Path * p = corrupt_path(which);
+    GSHGEOM_Result got[COLUMNS];
     GSHGEOM_Bounds b;
-    EXPECT_NE(gshgeom_path_bounds(p, &b), GSHGEOM_OK) << which;
+    got[BOUNDS] = gshgeom_path_bounds(p, &b);
     GSHGEOM_Measured * m = nullptr;
-    EXPECT_NE(gshgeom_measured_create(nullptr, nullptr, p, 0.25, &m), GSHGEOM_OK) << which;
+    got[MEASURE] = gshgeom_measured_create(nullptr, nullptr, p, 0.25, &m);
     EXPECT_EQ(m, nullptr);
     GSHGEOM_Path * lowered = nullptr;
-    EXPECT_NE(gshgeom_stroke_curves_lower_cubic(p, 0.25, nullptr, nullptr, &lowered), GSHGEOM_OK) << which;
+    got[LOWER] = gshgeom_stroke_curves_lower_cubic(p, 0.25, nullptr, nullptr, &lowered);
     EXPECT_EQ(lowered, nullptr);
     GSHGEOM_Stroke s;
     gshgeom_stroke_init(&s);
     s.width = 2.0;
-    GSHGEOM_Map map;
+    GSHGEOM_Map map, scaled;
     ASSERT_EQ(gshgeom_map_identity(2, &map), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_map_scale(2, 2.0, 3.0, 1.0, &scaled), GSHGEOM_OK);
     GSHGEOM_Stroke_Outline * o = nullptr;
-    EXPECT_NE(gshgeom_stroke_expand(p, &s, &map, nullptr, nullptr, &o), GSHGEOM_OK) << which;
+    got[STROKE] = gshgeom_stroke_expand(p, &s, &map, nullptr, nullptr, &o);
     EXPECT_EQ(o, nullptr);
     const double dashes[2] = {0.5, 0.5};
     s.dashes = dashes;
     s.dash_count = 2;
-    EXPECT_NE(gshgeom_stroke_expand(p, &s, &map, nullptr, nullptr, &o), GSHGEOM_OK) << which;
+    got[DASH] = gshgeom_stroke_expand(p, &s, &map, nullptr, nullptr, &o);
+    got[DASH_SCALED] = gshgeom_stroke_expand(p, &s, &scaled, nullptr, nullptr, &o);
+    s.width_space = GSHGEOM_STROKE_WIDTH_DEVICE;
+    got[DASH_DEVICE] = gshgeom_stroke_expand(p, &s, &scaled, nullptr, nullptr, &o);
     EXPECT_EQ(o, nullptr);
+    size_t count = 0;
+    got[VERTEX_COUNT] = gshgeom_path_vertex_count(p, &count);
     int n = 0;
-    EXPECT_NE(gshgeom_path_vertices(p, count_vertex, &n), GSHGEOM_OK) << which;
+    got[VERTICES] = gshgeom_path_vertices(p, count_vertex, &n);
+    for (int k = 0; k < COLUMNS; k++) {
+      EXPECT_EQ(got[k], want[which][k]) << "corrupt path " << which << ", walker " << k;
+    }
     gshgeom_path_destroy(p);
   }
 }

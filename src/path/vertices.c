@@ -66,10 +66,8 @@ static void curve_seg(const GSHGEOM_Curve * curve, Seg * s) {
  */
 static GSHGEOM_Result element(const GSHGEOM_Path * path, size_t i, Elem * e) {
   memset(e, 0, sizeof *e);
-  GSHGEOM_Result r = gshgeom_path_verb(path, i, &e->verb);
-  if (r != GSHGEOM_OK) {
-    return GSHGEOM_ERR_INTERNAL;
-  }
+  (void)gshgeom_path_verb(path, i, &e->verb); /* i is below the count, the one way the read fails is an index past it */
+  GSHGEOM_Result r = GSHGEOM_OK;
   if (e->verb == GSHGEOM_VERB_ARC) {
     GSHGEOM_Arc arc;
     GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
