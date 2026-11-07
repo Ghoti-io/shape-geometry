@@ -60,6 +60,12 @@ got_hthash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hatch-hash"{print $
 got_htcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hatch-count"{print $2}')
 want_hthash=$(awk '$1=="hatch-hash"{print $2}' "$file" 2>/dev/null)
 want_htcount=$(awk '$1=="hatch-count"{print $2}' "$file" 2>/dev/null)
+for g in arc lattice clip; do
+  eval "got_${g}_ghash=\$(printf '%s\\n' \"\$got\" | awk '\$1==\"shape-geometry.${g}-grid-hash\"{print \$2}')"
+  eval "got_${g}_gcount=\$(printf '%s\\n' \"\$got\" | awk '\$1==\"shape-geometry.${g}-grid-count\"{print \$2}')"
+  eval "want_${g}_ghash=\$(awk '\$1==\"${g}-grid-hash\"{print \$2}' \"\$file\" 2>/dev/null)"
+  eval "want_${g}_gcount=\$(awk '\$1==\"${g}-grid-count\"{print \$2}' \"\$file\" 2>/dev/null)"
+done
 if [ -z "$want_hash" ] || [ -z "$want_count" ] || [ -z "$got_hash" ] || [ -z "$got_count" ] ||
    [ -z "$want_phash" ] || [ -z "$want_pcount" ] || [ -z "$got_phash" ] || [ -z "$got_pcount" ] ||
    [ -z "$want_vhash" ] || [ -z "$want_vcount" ] || [ -z "$got_vhash" ] || [ -z "$got_vcount" ] ||
@@ -131,4 +137,11 @@ if [ "$got_hthash" != "$want_hthash" ] || [ "$got_htcount" != "$want_htcount" ];
     "$got_hthash" "$got_htcount" "$want_hthash" "$want_htcount" >&2
   exit 1
 fi
+for g in arc lattice clip; do
+  eval "gh=\$got_${g}_ghash; gc=\$got_${g}_gcount; wh=\$want_${g}_ghash; wc=\$want_${g}_gcount"
+  if [ -z "$wh" ] || [ -z "$wc" ] || [ -z "$gh" ] || [ -z "$gc" ] || [ "$gh" != "$wh" ] || [ "$gc" != "$wc" ]; then
+    printf 'check-corpus-hash: FAIL: %s grid %s over %s words, committed %s over %s\n' "$g" "$gh" "$gc" "$wh" "$wc" >&2
+    exit 1
+  fi
+done
 printf 'check-corpus-hash: ok, %s over %s results; predicate %s over %s; vertex %s over %s; arc %s over %s; arc-vertex %s over %s; conic %s over %s; shapes %s over %s; clip %s over %s; lattice %s over %s; devbox %s over %s; hatch %s over %s\n' "$got_hash" "$got_count" "$got_phash" "$got_pcount" "$got_vhash" "$got_vcount" "$got_ahash" "$got_acount" "$got_avhash" "$got_avcount" "$got_chash" "$got_ccount" "$got_shash" "$got_scount" "$got_klhash" "$got_klcount" "$got_lthash" "$got_ltcount" "$got_dbhash" "$got_dbcount" "$got_hthash" "$got_htcount"

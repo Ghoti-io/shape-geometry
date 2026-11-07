@@ -41,6 +41,8 @@
 
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 
+#include "../tests/grid_probe.h"
+
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1944,6 +1946,21 @@ int main(void) {
 #undef H_NEXT
     printf("shape-geometry.hatch-hash %016" PRIx64 "\n", gshgeom_hash_value(&h_total));
     printf("shape-geometry.hatch-count %lu\n", h_count);
+  }
+
+  /* The grids of tests/grid_probe.h (the arcs, the lattices and the clips over special and ordinary arguments): one pair each.  The unit
+   * tests of the grids compare the same text with the same lines of tests/corpus/geometry.hash. */
+  {
+    uint64_t words = 0;
+    uint64_t h = grid_arc_hash(&words);
+    printf("shape-geometry.arc-grid-hash %016" PRIx64 "\n", h);
+    printf("shape-geometry.arc-grid-count %lu\n", (unsigned long)words);
+    h = grid_lattice_hash(&words);
+    printf("shape-geometry.lattice-grid-hash %016" PRIx64 "\n", h);
+    printf("shape-geometry.lattice-grid-count %lu\n", (unsigned long)words);
+    h = grid_clip_hash(&words);
+    printf("shape-geometry.clip-grid-hash %016" PRIx64 "\n", h);
+    printf("shape-geometry.clip-grid-count %lu\n", (unsigned long)words);
   }
   return 0;
 }
