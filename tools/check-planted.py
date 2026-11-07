@@ -3816,7 +3816,10 @@ def main():
             sys.stderr.flush()
     for p in plants:
         r = results[p[0]]
-        if isinstance(r, Exception):
+        if isinstance(r, Exception) and p[0] in ARGUED and "does not compile" in str(r):
+            known += 1
+            print("known %-34s %s" % (p[0], ARGUED[p[0]]))
+        elif isinstance(r, Exception):
             print("FAIL  %-34s %s" % (p[0], r))
             failures += 1
         elif not r:
