@@ -339,6 +339,7 @@ ATTACK_CATCHERS = {
     "clip-limit-ignores-limits": ["testClip_attacks"],
     "lat-can-mul-sign-lost": ["testLattice_oracle"],
     "lat-can-mul-bound-dropped": ["testLattice_oracle"],
+    "lat-sign-filter-always-on": ["testLattice_oracle"],
 }
 
 

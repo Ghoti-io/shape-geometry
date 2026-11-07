@@ -305,6 +305,75 @@ TEST(LatticeOracle, ACopyPastTheCanonicalRangeIsALimitWhateverTheSignOfItsIndex)
   EXPECT_EQ(sx, -(((int64_t)1 << 40) - 1));
 }
 
+TEST(LatticeOracle, ACellAtTheScaleOfTheSmallestDoublesIsDecidedExactly) {
+  // Every coefficient of every half-plane is a sum of products of about 2^-530, so they are subnormal and carry a few bits: the
+  // rounded evaluation has no error bound there and must not decide.  The copies that hold the origin (the rectangle is that
+  // point) were found with an independent exact computation (rational arithmetic and a convex hull): the copies (87, j) for
+  // j from -14 to -1, and no others.
+  GSHGEOM_Lattice l;
+  std::memset(&l, 0, sizeof l);
+  l.x = -0x1.6e8e144954618p-527;
+  l.y = -0x1.f77458b3bddc5p-530;
+  l.w = 0x1.143cc0f3cb6e2p-533;
+  l.h = 0x1.9ebfcd613f234p-528;
+  l.x_step = 0x1.77219db76147p-533;
+  l.y_step = 0x1.f11ed8255939ep-532;
+  l.repeat_x = 1u;
+  l.repeat_y = 1u;
+  GSHGEOM_Map m;
+  ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
+  m.m[0][0] = 2.0;
+  m.m[0][1] = 1.0;
+  m.m[1][0] = 1.0;
+  m.m[1][1] = 2.0;
+  m.t[0] = -0x1.a9b23a76503a4p-528;
+  m.t[1] = 0x1.1e8385ce5b27p-533;
+  const int64_t rect[4] = {0, 0, 0, 0};
+  Collect c;
+  uint64_t count = 0;
+  ASSERT_EQ(gshgeom_lattice_each(&m, &l, rect, 2000, collect_row, &c, &count), GSHGEOM_OK);
+  EXPECT_EQ(count, 14u);
+  ASSERT_EQ(c.rows.size(), 14u);
+  for (int64_t k = 0; k < 14; k++) {
+    EXPECT_EQ(c.rows[(size_t)k].first, -14 + k);
+    EXPECT_EQ(c.rows[(size_t)k].second.first, 87);
+    EXPECT_EQ(c.rows[(size_t)k].second.second, 87);
+  }
+}
+
+TEST(LatticeOracle, CellsFromTheSmallestDoublesUpAreCountedExactlyAtAPoint) {
+  // Cells of side 2^e on steps of 2^e, from the smallest subnormal up to 2^-500, and a rectangle that is the origin: the four
+  // cells that share the origin as a corner, at every scale.  (A rectangle of one unit holds about 2^-e cells per side, which is
+  // the limit the call reports at any of these scales.)  For e below about -540 every coefficient of every half-plane underflows
+  // to zero while its exact sign is not zero, so the estimate that starts the search is 0 / 0 and is not a number.
+  const int64_t rect[4] = {0, 0, 0, 0};
+  for (int e = -1074; e <= -500; e += 7) {
+    const double t = std::ldexp(1.0, e);
+    GSHGEOM_Lattice l = {0.0, 0.0, t, t, t, t, 1u, 1u};
+    GSHGEOM_Map m;
+    ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
+    Collect c;
+    uint64_t count = 0;
+    ASSERT_EQ(gshgeom_lattice_each(&m, &l, rect, 100, collect_row, &c, &count), GSHGEOM_OK) << e;
+    EXPECT_EQ(count, 4u) << e;
+    ASSERT_EQ(c.rows.size(), 2u) << e;
+    EXPECT_EQ(c.rows[0].first, -1) << e;
+    EXPECT_EQ(c.rows[0].second.first, -1) << e;
+    EXPECT_EQ(c.rows[0].second.second, 0) << e;
+    EXPECT_EQ(c.rows[1].first, 0) << e;
+    EXPECT_EQ(c.rows[1].second.first, -1) << e;
+    EXPECT_EQ(c.rows[1].second.second, 0) << e;
+  }
+  // and the one-unit rectangle is a limit at the scale where the cells are many
+  GSHGEOM_Lattice l = {0.0, 0.0, 0x1p-600, 0x1p-600, 0x1p-600, 0x1p-600, 1u, 1u};
+  GSHGEOM_Map m;
+  ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
+  const int64_t one[4] = {0, 0, 1, 1};
+  uint64_t count = 0;
+  EXPECT_EQ(gshgeom_lattice_each(&m, &l, one, 100, nullptr, nullptr, &count), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(count, 101u);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
