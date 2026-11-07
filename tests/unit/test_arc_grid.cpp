@@ -36,7 +36,7 @@ extern "C" {
 
 namespace {
 
-constexpr uint64_t kGridHash = 0x02d67b4d7c9a5924ull;
+constexpr uint64_t kGridHash = 0xf64c369796dded10ull;
 
 struct Fold {
   uint64_t h = 1469598103934665603ull;
@@ -63,7 +63,9 @@ struct Fold {
     pt(a.center);
     pt(a.u);
     pt(a.v);
-    word((uint64_t)a.unit);
+    unsigned unit_bits;  // the field's bytes: a record a failed call left alone may hold a value that is no unit
+    std::memcpy(&unit_bits, &a.unit, sizeof unit_bits);
+    word(unit_bits);
     dbl(a.t0);
     dbl(a.sweep);
     word(a.flags);
@@ -112,7 +114,7 @@ void endpoint_grid(Fold & f) {
                     if (current) {
                       gshgeom_path_move_to(p, P(0.0, 0.0));
                     }
-                    GSHGEOM_Arc_Kind kind = (GSHGEOM_Arc_Kind)77;
+                    GSHGEOM_Arc_Kind kind = GSHGEOM_ARC_KIND_ARC;  // a value the call can leave alone (it writes the kind on success only)
                     GSHGEOM_Result r = gshgeom_path_arc_endpoint_to(p, P(ex, ey), rx, ry, phi, (GSHGEOM_Angle_Unit)u, large, sweep, &kind);
                     fold_path(f, r, p);
                     f.word((uint64_t)kind);
