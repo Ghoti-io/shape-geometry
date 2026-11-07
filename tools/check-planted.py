@@ -1619,6 +1619,7 @@ STROKE_PLANTS = [
     # SG8, SG9: joins
     ("sk-turn-side-inverted", "src", SKJ, "  int outer_left = sigma > 0;", "  int outer_left = sigma < 0;", STM),
     ("sk-smooth-gets-a-join", "src", SKJ, "  if (sigma == 0 && ds > 0) {\n    return GSHGEOM_OK; /* a smooth vertex: no join */\n  }", "  (void)ds;", STM),
+    ("sk-conic-weight-clamp-lost", "src", "src/stroke_curves/contour.c", "  return w > 1.0 ? 1.0 : w;\n", "  return w;\n", ["testStroke_curves"]),
     ("sk-miter-clip-tip-direction-noisy", "src", SKJ, "gshgeom_sk_dot(sum, sum) < 0x1p-26 ? gshgeom_sk_sub(ah, bh) : sum", "sum", STK),
     # Removed, sk-miter-clip-tip-direction-always-difference: the difference of the unit tangents IS the direction of the sum of the outer normals
     # (the sum is the difference turned a quarter, in exact arithmetic), so taking it everywhere changes the rounding and no rule.
@@ -3736,15 +3737,27 @@ def object_equivalence_main(plants):
             counts[verdict] = counts.get(verdict, 0) + 1
             print("%-9s %-40s %s" % (verdict, pid, detail))
     print("object equivalence: %d plants: %s" % (len(plants), ", ".join("%d %s" % (v, k) for k, v in sorted(counts.items()))))
-    return 0
+    return counts
 
 
 def main():
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
+    if os.environ.get("PLANT_OBJ_EQUIV") == "check":
+        # The plants tools/equivalent-plants.json holds are equivalent by their object code: every one must say so again.
+        import json as _eqjson
+        with open(ROOT / "tools" / "equivalent-plants.json") as _f:
+            listed = [tuple(x) for x in _eqjson.load(_f)]
+        counts = object_equivalence_main(listed)
+        if counts.get("equiv", 0) != len(listed):
+            print("FAIL  tools/equivalent-plants.json names plants that are not object-identical")
+            return 1
+        print("ok    %d plants of tools/equivalent-plants.json are equivalent by their object code" % len(listed))
+        return 0
     if os.environ.get("PLANT_OBJ_EQUIV"):
         chosen = [p for p in PLANTS if not ONLY or re.search(ONLY, p[0])]
-        return object_equivalence_main(chosen)
+        object_equivalence_main(chosen)
+        return 0
     srcs = sources()
     failures = 0
 
