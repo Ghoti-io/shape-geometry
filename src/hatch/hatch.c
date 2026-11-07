@@ -830,18 +830,21 @@ GSHGEOM_Result gshgeom_hatch_pieces_with_tolerance(const GSHGEOM_Path * region, 
   if (!region || !chain || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
     return GSHGEOM_ERR_INVALID;
   }
-  if (gshgeom_path_dimension(region) != 2) {
-    return GSHGEOM_ERR_UNSUPPORTED;
+  /* The order of the refusals is the documented one for the whole call (HX2: invalid, then unsupported, then limit), and it is decided
+   * before the region costs anything: the region's flattening can be a limit of its own and must not answer first. */
+  const GSHGEOM_Result hc = gshgeom_hatch_check(hatch);
+  if (hc == GSHGEOM_ERR_INVALID) {
+    return hc;
   }
   GSHGEOM_Result r = gshgeom_map_check(chain);
-  if (r != GSHGEOM_OK || chain->dim != 2) {
-    return r == GSHGEOM_OK ? GSHGEOM_ERR_UNSUPPORTED : GSHGEOM_ERR_INVALID;
-  }
-  /* A hatch the check refuses is that check's verdict whatever the region costs: the region's flattening, which can be a limit of
-   * its own, must not answer first (HX2's order is invalid, unsupported, limit). */
-  r = gshgeom_hatch_check(hatch);
   if (r != GSHGEOM_OK) {
-    return r;
+    return GSHGEOM_ERR_INVALID;
+  }
+  if (gshgeom_path_dimension(region) != 2 || chain->dim != 2) {
+    return GSHGEOM_ERR_UNSUPPORTED;
+  }
+  if (hc != GSHGEOM_OK) {
+    return hc; /* a 3D map of the hatch (unsupported) or one of its bounds (limit) */
   }
   GSHGEOM_Device_Path * dp = NULL;
   GSHGEOM_Flat_Path * flat = NULL;

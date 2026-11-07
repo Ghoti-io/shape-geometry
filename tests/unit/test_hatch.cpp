@@ -1437,6 +1437,24 @@ TEST(HatchLimits, AHatchTheCheckRefusesIsItsVerdictEvenWhenTheRegionExceedsTheLi
   ASSERT_EQ(gshgeom_map_identity(3, &solid3.map), GSHGEOM_OK);
   EXPECT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &solid3, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_UNSUPPORTED);
   EXPECT_EQ(p, nullptr);
+  // The order of HX2 holds for the whole call: an invalid hatch comes before a 3D path, a 3D path before a bound of the hatch, and a bound
+  // of the hatch before the region's own limit.
+  GSHGEOM_Path * solid = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 3, &solid), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_move_to(solid, GSHGEOM_Point{0, 0, 0}), GSHGEOM_OK);
+  ASSERT_EQ(gshgeom_path_line_to(solid, GSHGEOM_Point{5, 0, 1}), GSHGEOM_OK);
+  GSHGEOM_Hatch_Family big = f;
+  big.offset_across = std::ldexp(1.0, 65);  // past the band: a bound of the hatch
+  GSHGEOM_Hatch beyond = h;
+  beyond.families = &big;
+  EXPECT_EQ(gshgeom_hatch_pieces(solid, GSHGEOM_FILL_NONZERO, &invalid, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_INVALID)
+      << "an invalid hatch, a 3D path";
+  EXPECT_EQ(gshgeom_hatch_pieces(solid, GSHGEOM_FILL_NONZERO, &beyond, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_UNSUPPORTED)
+      << "a hatch bound, a 3D path";
+  EXPECT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &beyond, &chain, 0, nullptr, &tight, &p), GSHGEOM_ERR_LIMIT)
+      << "a hatch bound, the region's own limit";
+  EXPECT_EQ(p, nullptr);
+  gshgeom_path_destroy(solid);
   gshgeom_path_destroy(region);
 }
 

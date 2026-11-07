@@ -683,6 +683,9 @@ def hatch_files():
     out = hatch_scripted()
     # Found by pass B's libFuzzer run: a hatch with a 3D map and a region past the point limit, which answered with the region's
     # limit where the hatch check's unsupported comes first.
+    # Found by pass B's libFuzzer run: a hatch with a bound exceeded over a 3D path or chain: HX2's order across the whole call puts the
+    # unsupported before the limit.
+    out["regression-hatch-limit-and-an-unsupported-path.bin"] = base64.b64decode("SNUuHh4iivcY5ivpCsXaRiZ13smNAoaOhp7TUbnME2NO71Iw7BQ73FVEzFQvtaZyRNgaV3waMOr///8vDKfUJK8hJ3Ft9usv74gO+hrzL3SM04Bofvm9")
     out["regression-refused-hatch-and-a-region-past-the-limit.bin"] = base64.b64decode("AQAFAAEAAQAAAAAFAAICAAUACQk=")
     for i in range(HATCH_RANDOM_FILES):
         out["random-%03d.bin" % i] = hatch_random(i + 1)

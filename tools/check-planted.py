@@ -3406,6 +3406,8 @@ hx("hx-check-map-band-unchecked", "      if (!in_band(h->map.m[a][b])) {\n      
 hx("hx-check-no-pen-down-accepted", "      if (!down || !(total > 0.0)) {", "      if (!(total > 0.0)) {")
 hx("hx-check-no-length-accepted", "      if (!down || !(total > 0.0)) {", "      if (!down) {")
 hx("hx-check-dashes-null-accepted", "(f->dash_count && !f->dashes)) {", "0) {")
+hx("hx-pieces-limit-before-unsupported", "  if (gshgeom_path_dimension(region) != 2 || chain->dim != 2) {\n    return GSHGEOM_ERR_UNSUPPORTED;\n  }\n  if (hc != GSHGEOM_OK) {\n    return hc; /* a 3D map of the hatch (unsupported) or one of its bounds (limit) */\n  }", "  if (hc != GSHGEOM_OK) {\n    return hc;\n  }\n  if (gshgeom_path_dimension(region) != 2 || chain->dim != 2) {\n    return GSHGEOM_ERR_UNSUPPORTED;\n  }")
+hx("hx-pieces-invalid-hatch-after-unsupported", "  if (hc == GSHGEOM_ERR_INVALID) {\n    return hc;\n  }\n  GSHGEOM_Result r = gshgeom_map_check(chain);", "  GSHGEOM_Result r = gshgeom_map_check(chain);")
 hx("hx-check-dash-nonfinite-accepted", "      if (!is_fin(f->dashes[k])) {\n        return GSHGEOM_ERR_INVALID;\n      }\n", "")
 hx("hx-check-unit-unchecked", "h->angle_unit >= (uint32_t)GSHGEOM_ANGLE_UNIT_COUNT || h->nesting", "h->nesting")
 hx("hx-check-nesting-unchecked", "h->nesting >= (uint32_t)GSHGEOM_HATCH_NESTING_COUNT ||", "")

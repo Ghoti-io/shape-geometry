@@ -277,7 +277,11 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   const GSHGEOM_Result r = gshgeom_hatch_pieces(region, rule, &hatch, &chain, max_lines, &alloc, &limits, &pieces);
   CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_INVALID || r == GSHGEOM_ERR_UNSUPPORTED || r == GSHGEOM_ERR_LIMIT || r == GSHGEOM_ERR_OOM);
   if (hc != GSHGEOM_OK && r != GSHGEOM_ERR_OOM) {
-    CHECK(r == hc || (r == GSHGEOM_ERR_UNSUPPORTED && hc == GSHGEOM_ERR_INVALID));
+    /* HX2's order for the whole call: an invalid hatch or chain, then a 3D path, chain or hatch map, then a bound of the hatch. */
+    const GSHGEOM_Result want = hc == GSHGEOM_ERR_INVALID || gshgeom_map_check(&chain) != GSHGEOM_OK
+                                    ? GSHGEOM_ERR_INVALID
+                                    : (gshgeom_path_dimension(region) != 2 || chain.dim != 2) ? GSHGEOM_ERR_UNSUPPORTED : hc;
+    CHECK(r == want);
   }
   if (r != GSHGEOM_OK) {
     CHECK(pieces == NULL);
