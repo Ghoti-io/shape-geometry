@@ -330,6 +330,21 @@ CXX = env("PLANT_CXX")
 CXX_INCLUDE = env("PLANT_CXX_INCLUDE")
 LDFLAGS = env("PLANT_LDFLAGS")
 TESTS = env("PLANT_TESTS").split()
+
+# Plants the exhaustive grids could not tell from the code and that a test written from the plant's own text does: each is in the
+# sweep with that test (and out of the unseen sets), tests/unit/test_{arc_attacks,exact_sum_states,clip_attacks,lattice_oracle}.cpp.
+ATTACK_CATCHERS = {
+    **{i: ["testArc_attacks"] for i in "ar-lower-pieces-error-lost ar-map-unchecked ar-map-singular-accepted ar-map-error-lost-centre ar-map-error-lost-final ar-map-general-keeps-circular ar-endpoint-mag-clamp-constant ar-form-move-room-off-by-one ar-form-move-room-ignored ar-tangent-line-to-t1-by-value ar-bulge-centre-midpoint-sum".split()},
+    **{i: ["testExact_sum_states"] for i in "ar-sum-double-bad-is-value ar-sum-double-sign-bit ar-sum-double-top-word".split()},
+    "clip-limit-ignores-limits": ["testClip_attacks"],
+    "lat-can-mul-sign-lost": ["testLattice_oracle"],
+    "lat-can-mul-bound-dropped": ["testLattice_oracle"],
+}
+
+
+def attack_caught(plants):
+    return [p if p[0] not in ATTACK_CATCHERS else p[:5] + (list(p[5]) + ATTACK_CATCHERS[p[0]],) for p in plants]
+
 OBJ_DIR = Path(env("PLANT_OBJ_DIR"))
 LD_PATH = env("PLANT_LD_PATH")
 WORK = Path(env("PLANT_WORK"))
@@ -2856,6 +2871,8 @@ for _n in ('ar-endpoint-fits-on-rounded-sums', 'ar-endpoint-radicand-on-rounded-
 EXTRA_CATCHERS['arw-measure-arc-subpath-stays-needed'] = ["testWalkers"]
 EXTRA_CATCHERS['cvx-emit-line-leaf-level-lost'] = ["testStroke_curves_oracle"]
 ARC_PLANTS = [p if p[0] not in EXTRA_CATCHERS else p[:5] + (list(p[5]) + EXTRA_CATCHERS[p[0]],) for p in ARC_PLANTS]
+ARC_PLANTS = attack_caught(ARC_PLANTS)
+ARC_UNSEEN -= set(ATTACK_CATCHERS)
 ARC_UNSEEN_PLANTS = [p for p in ARC_PLANTS if p[0] in ARC_UNSEEN]
 PLANTS += [p for p in ARC_PLANTS if p[0] not in ARC_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
@@ -3032,6 +3049,8 @@ for _p in (
 ):
     CLIP_PLANTS.append((_p[0], "src", FBC, _p[1], _p[2], FBT))
 
+CLIP_PLANTS = attack_caught(CLIP_PLANTS)
+CLIP_UNSEEN -= set(ATTACK_CATCHERS)
 CLIP_UNSEEN_PLANTS = [p for p in CLIP_PLANTS if p[0] in CLIP_UNSEEN]
 PLANTS += [p for p in CLIP_PLANTS if p[0] not in CLIP_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
@@ -3362,6 +3381,8 @@ LAT_UNSEEN = {"lat-search-estimate-sign", "lat-search-estimate-ignores-other", "
               "lat-valid-nonfinite-step-accepted", "lat-filter-range-lower", "lat-filter-trusts-underflowed-c", "lat-sign-filter-bound-zero",
               "lat-sign-filter-ignores-g", "lat-sign-filter-ignores-j-term", "lat-sign-filter-always-on",
               "lat-can-mul-bound-dropped", "lat-can-mul-sign-lost"}
+LAT_PLANTS = attack_caught(LAT_PLANTS)
+LAT_UNSEEN -= set(ATTACK_CATCHERS)
 LAT_UNSEEN_PLANTS = [p for p in LAT_PLANTS if p[0] in LAT_UNSEEN]
 PLANTS += [p for p in LAT_PLANTS if p[0] not in LAT_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
@@ -3655,6 +3676,9 @@ def do_plant(plant, control_objs):
         hdr.write_text(text)
         objs = compile_all(d / "obj", srcs, pre=["-I" + str(d / "include")])
     caught_by = []
+    if os.environ.get("PLANT_TESTS_ONLY"):
+        # PLANT_TESTS_ONLY="testA testB": try each plant against these tests and no others (a quick separation attempt)
+        tests = os.environ["PLANT_TESTS_ONLY"].split()
     for test in tests:
         if test == "probe":
             rc, msg = probe_hash(objs, d)
