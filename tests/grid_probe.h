@@ -28,6 +28,8 @@
 
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 
+#include <ghoti.io/math/basic.h>
+
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -46,6 +48,37 @@ extern "C" {
 #define GRID_TWO_PI_BELOW 0x1.921fb54442d17p+2
 #define GRID_TWO_PI 6.283185307179586
 #define GRID_ARRAY_COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
+
+/* No function of the C library's math is called here (a cross probe is built without it): the scaling is math's own `gmath_scalbn`, correctly
+ * rounded, and the two below are bit moves. */
+static inline int grid_isnan(double d) {
+  return d != d;
+}
+
+static inline double grid_fabs(double d) {
+  return d < 0.0 ? -d : d;
+}
+
+/** The next double from @p x toward @p toward (both finite, @p x not zero in the uses here). */
+static inline double grid_nextafter(double x, double toward) {
+  uint64_t b;
+  memcpy(&b, &x, 8);
+  if (x == toward) {
+    return toward;
+  }
+  if (x == 0.0) {
+    b = 1; /* the least subnormal, with the sign of the direction */
+    if (toward < 0.0) {
+      b |= 0x8000000000000000ull;
+    }
+  } else if ((x < toward) == (x > 0.0)) {
+    b++;
+  } else {
+    b--;
+  }
+  memcpy(&x, &b, 8);
+  return x;
+}
 
 typedef struct Grid_Fold {
   uint64_t h;
@@ -70,7 +103,7 @@ static inline void grid_dbl(Grid_Fold * f, double d) {
   uint64_t w;
   memcpy(&w, &d, 8);
   /* all NaNs are one for the hash: the library does not promise a payload */
-  grid_word(f, isnan(d) ? 0x7ff8000000000000ull : w);
+  grid_word(f, grid_isnan(d) ? 0x7ff8000000000000ull : w);
 }
 
 static inline void grid_pt(Grid_Fold * f, const GSHGEOM_Point * p) {
@@ -358,7 +391,7 @@ static inline GSHGEOM_Arc * grid_arc_family(size_t * count_out) {
         d.sweep = a.sweep >= 0 ? turns[i] : -turns[i];
         GRID_PUSH(d);
         d = a;
-        d.sweep = (a.sweep >= 0 ? 1.0 : -1.0) * nextafter(turns[i], 2.0 * turns[i]);
+        d.sweep = (a.sweep >= 0 ? 1.0 : -1.0) * grid_nextafter(turns[i], 2.0 * turns[i]);
         GRID_PUSH(d);
         d = a;
         d.v = d.u;
@@ -367,13 +400,13 @@ static inline GSHGEOM_Arc * grid_arc_family(size_t * count_out) {
         d.v = grid_P(-a.u.y * 0x1p-1000, a.u.x * 0x1p-1000);
         GRID_PUSH(d);
         d = a;
-        d.end.x = nextafter(a.end.x, 1e300);
+        d.end.x = grid_nextafter(a.end.x, 1e300);
         GRID_PUSH(d);
         d = a;
-        d.end.x = a.end.x + 1e-9 * (fabs(a.u.x) + 1.0);
+        d.end.x = a.end.x + 1e-9 * (grid_fabs(a.u.x) + 1.0);
         GRID_PUSH(d);
         d = a;
-        d.start.y = a.start.y + 1e-9 * (fabs(a.u.x) + 1.0);
+        d.start.y = a.start.y + 1e-9 * (grid_fabs(a.u.x) + 1.0);
         GRID_PUSH(d);
       }
     }
@@ -600,15 +633,15 @@ static inline double grid_sum_number(Grid_Rng * rng) {
   uint64_t bitsrc = grid_next(rng);
   double m = 1.0 + (double)((bitsrc >> 12) & ((1ull << 52) - 1)) * 0x1p-52;
   switch (kind) {
-    case 0: return ldexp(m, e);
-    case 1: return -ldexp(m, e);
-    case 2: return ldexp(1.0, e);
-    case 3: return ldexp(1.0 + 0x1p-52, e);
-    case 4: return ldexp(1.0 + 0x1p-26, e);
-    case 5: return ldexp(m, e - 900);
-    case 6: return ldexp(m, e + 900);
+    case 0: return gmath_scalbn(m, e);
+    case 1: return -gmath_scalbn(m, e);
+    case 2: return gmath_scalbn(1.0, e);
+    case 3: return gmath_scalbn(1.0 + 0x1p-52, e);
+    case 4: return gmath_scalbn(1.0 + 0x1p-26, e);
+    case 5: return gmath_scalbn(m, e - 900);
+    case 6: return gmath_scalbn(m, e + 900);
     case 7: return 0.0;
-    default: return ldexp(1.0 - 0x1p-53, e);
+    default: return gmath_scalbn(1.0 - 0x1p-53, e);
   }
 }
 
@@ -635,7 +668,7 @@ static inline void grid_arc_sums(Grid_Fold * f) {
         int e2 = (int)(grid_next(&rng) % 200) - 100;
         int neg2 = (int)(grid_next(&rng) & 1);
         gshgeom_exact_sum_add(&sum, 1, n, fac);
-        tiny[0] = ldexp(1.0, e2);
+        tiny[0] = gmath_scalbn(1.0, e2);
         gshgeom_exact_sum_add(&sum, neg2, 1, tiny);
       }
     }
@@ -649,9 +682,9 @@ static inline void grid_arc_sums(Grid_Fold * f) {
     double odd[1];
     double sticky[1];
     gshgeom_exact_sum_init(&sum);
-    big[0] = ldexp(1.0, 53 + k % 3);
+    big[0] = gmath_scalbn(1.0, 53 + k % 3);
     odd[0] = (double)(1 + 2 * (k % 5));
-    sticky[0] = ldexp(1.0, -(k + 1));
+    sticky[0] = gmath_scalbn(1.0, -(k + 1));
     gshgeom_exact_sum_add(&sum, k & 1, 1, big);
     gshgeom_exact_sum_add(&sum, k & 1, 1, odd);
     if (k % 4 >= 2) {
