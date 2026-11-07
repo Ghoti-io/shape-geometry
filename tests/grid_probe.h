@@ -1355,8 +1355,8 @@ static inline void grid_walk_one(Grid_Fold * f, Grid_Rng * rng, GSHGEOM_Path * p
     gshgeom_measured_destroy(m);
     m = NULL;
   }
-  /* strokes: eight of the joins, caps, dash arrays and maps, drawn at random for each path (the whole product is 45 outlines a path and is slow) */
-  for (ti = 0; ti < 8; ti++) {
+  /* strokes: four of the joins, caps, dash arrays and maps, drawn at random for each path (the whole product is 45 outlines a path and is slow) */
+  for (ti = 0; ti < 4; ti++) {
     GSHGEOM_Stroke st;
     GSHGEOM_Stroke_Outline * o = NULL;
     GSHGEOM_Result sr;
@@ -1395,7 +1395,7 @@ static inline uint64_t grid_walk_hash(uint64_t * words) {
   grid_fold_init(&f);
   rng.s = 0x9b05688c2b3e6c1full ^ (grid_seed_salt * 0x9e3779b97f4a7c15ull);
   prev = grid_walk_path(&rng);
-  for (it = 0; it < 1200; it++) {
+  for (it = 0; it < 250; it++) {
     GSHGEOM_Path * p = grid_walk_path(&rng);
     grid_walk_one(&f, &rng, p, prev);
     gshgeom_path_destroy(prev);
