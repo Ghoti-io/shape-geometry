@@ -1952,7 +1952,12 @@ int main(void) {
    * tests of the grids compare the same text with the same lines of tests/corpus/geometry.hash. */
   {
     uint64_t words = 0;
-    uint64_t h = grid_arc_hash(&words);
+    uint64_t h;
+    const char * salt = getenv("GSHGEOM_GRID_SALT");
+    if (salt) {
+      grid_seed_salt = strtoull(salt, NULL, 0);
+    }
+    h = grid_arc_hash(&words);
     printf("shape-geometry.arc-grid-hash %016" PRIx64 "\n", h);
     printf("shape-geometry.arc-grid-count %lu\n", (unsigned long)words);
     h = grid_lattice_hash(&words);
@@ -1961,6 +1966,12 @@ int main(void) {
     h = grid_clip_hash(&words);
     printf("shape-geometry.clip-grid-hash %016" PRIx64 "\n", h);
     printf("shape-geometry.clip-grid-count %lu\n", (unsigned long)words);
+    h = grid_walk_hash(&words);
+    printf("shape-geometry.walk-grid-hash %016" PRIx64 "\n", h);
+    printf("shape-geometry.walk-grid-count %lu\n", (unsigned long)words);
+    h = grid_shapes_hash(&words);
+    printf("shape-geometry.shapes-grid-hash %016" PRIx64 "\n", h);
+    printf("shape-geometry.shapes-grid-count %lu\n", (unsigned long)words);
   }
   return 0;
 }

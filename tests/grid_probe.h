@@ -32,6 +32,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,6 +80,9 @@ static inline double grid_nextafter(double x, double toward) {
   memcpy(&x, &b, 8);
   return x;
 }
+
+/** Added to every seed: 0 in the pinned grids; the probe takes it from GSHGEOM_GRID_SALT, to try other inputs (the audit of the argued plants). */
+static uint64_t grid_seed_salt = 0;
 
 typedef struct Grid_Fold {
   uint64_t h;
@@ -303,7 +307,7 @@ static inline GSHGEOM_Arc * grid_arc_family(size_t * count_out) {
   size_t n = 0;
   size_t cap = 0;
   int i, k;
-  rng.s = 88172645463325252ull;
+  rng.s = 88172645463325252ull ^ (grid_seed_salt * 0x9e3779b97f4a7c15ull);
 #define GRID_PUSH(arcval) \
   do { \
     if (n == cap) { \
@@ -648,7 +652,7 @@ static inline double grid_sum_number(Grid_Rng * rng) {
 static inline void grid_arc_sums(Grid_Fold * f) {
   Grid_Rng rng;
   int i, k;
-  rng.s = 0x9e3779b97f4a7c15ull;
+  rng.s = 0x9e3779b97f4a7c15ull ^ (grid_seed_salt * 0x9e3779b97f4a7c15ull);
   for (i = 0; i < 40000; i++) {
     GSHGEOM_ExactSum sum;
     int terms, t;
@@ -767,7 +771,7 @@ static inline void grid_lattice_run(Grid_Fold * f) {
   static const int64_t jjs[4] = {0, 2, -GRID_IDX + 1, GRID_IDX};
   Grid_Rng rng;
   int it;
-  rng.s = 0x2545f4914f6cdd1dull;
+  rng.s = 0x2545f4914f6cdd1dull ^ (grid_seed_salt * 0x9e3779b97f4a7c15ull);
   for (it = 0; it < 2200; it++) {
     GSHGEOM_Lattice l;
     int valid, mk;
@@ -1003,7 +1007,7 @@ static inline uint64_t grid_clip_hash(uint64_t * words) {
   GSHGEOM_Flat_Path * res = NULL;
   GSHGEOM_Device_Point q[4];
   grid_fold_init(f);
-  rng.s = 0x853c49e6748fea9bull;
+  rng.s = 0x853c49e6748fea9bull ^ (grid_seed_salt * 0x9e3779b97f4a7c15ull);
   for (it = 0; it < 30000; it++) {
     int64_t range = ext[grid_next(&rng) % 10];
     GSHGEOM_Device_Point pts[32];
@@ -1109,6 +1113,387 @@ static inline uint64_t grid_clip_hash(uint64_t * words) {
   grid_word(f, (uint64_t)gshgeom_flat_path_clip_convex(NULL, q, NULL, NULL, &res));
   *words = f->n;
   return f->h;
+}
+
+
+/* ---- walkers, shapes and strokes ----------------------------------------------------------------------------------------- */
+
+/** A coordinate on the grid of an eighth, in [-range, range]: one draw. */
+static inline double grid_q8(Grid_Rng * rng, int range) {
+  uint64_t d = grid_next(rng);
+  return (double)((int64_t)(d % (uint64_t)(range * 16 + 1)) - (int64_t)(range * 8)) / 8.0;
+}
+
+/** A positive length on the grid of an eighth, in [1/8, range]: one draw. */
+static inline double grid_len8(Grid_Rng * rng, int range) {
+  uint64_t d = grid_next(rng);
+  return (double)(1 + (int64_t)(d % (uint64_t)(range * 8))) / 8.0;
+}
+
+/** A path of a few random elements of every verb, arcs among them (every constructor of arc.h). */
+static inline GSHGEOM_Path * grid_walk_path(Grid_Rng * rng) {
+  GSHGEOM_Path * p = grid_make();
+  int n, i;
+  double x = grid_q8(rng, 20);
+  double y = grid_q8(rng, 20);
+  gshgeom_path_move_to(p, grid_P(x, y));
+  n = 3 + (int)(grid_next(rng) % 6);
+  for (i = 0; i < n; i++) {
+    int kind = (int)(grid_next(rng) % 10);
+    double ax = grid_q8(rng, 20);
+    double ay = grid_q8(rng, 20);
+    double bx = grid_q8(rng, 20);
+    double by = grid_q8(rng, 20);
+    double cx = grid_q8(rng, 20);
+    double cy = grid_q8(rng, 20);
+    switch (kind) {
+      case 0:
+      case 1:
+        gshgeom_path_line_to(p, grid_P(ax, ay));
+        break;
+      case 2:
+        gshgeom_path_quadratic_to(p, grid_P(ax, ay), grid_P(bx, by));
+        break;
+      case 3:
+        gshgeom_path_cubic_to(p, grid_P(ax, ay), grid_P(bx, by), grid_P(cx, cy));
+        break;
+      case 4:
+      case 5: {
+        double rx = grid_len8(rng, 15);
+        double ry = grid_len8(rng, 15);
+        double phi = grid_q8(rng, 45);
+        int large = (int)(grid_next(rng) % 2);
+        int sweep = (int)(grid_next(rng) % 2);
+        GSHGEOM_Arc_Kind ak;
+        gshgeom_path_arc_endpoint_to(p, grid_P(ax, ay), rx, ry, phi, GSHGEOM_ANGLE_DEGREES, large, sweep, &ak);
+        break;
+      }
+      case 6: {
+        double rx = grid_len8(rng, 15);
+        double ry = grid_len8(rng, 15);
+        double t0 = grid_q8(rng, 200);
+        double sw = grid_q8(rng, 45) * 8.0;
+        gshgeom_path_arc_center_to(p, grid_P(ax, ay), rx, ry, 0.0, GSHGEOM_ANGLE_DEGREES, t0, sw, NULL);
+        break;
+      }
+      case 7:
+        gshgeom_path_arc_tangent_to(p, grid_P(ax, ay), grid_P(bx, by), grid_len8(rng, 10));
+        break;
+      case 8:
+        gshgeom_path_arc_bulge_to(p, grid_P(ax, ay), grid_q8(rng, 3));
+        break;
+      default:
+        gshgeom_path_close(p);
+        gshgeom_path_move_to(p, grid_P(cx, cy));
+        break;
+    }
+  }
+  return p;
+}
+
+typedef struct Grid_Dump {
+  Grid_Fold * f;
+} Grid_Dump;
+
+/** The text a dump writes, folded: the stream is a temporary file, the only portable sink of a FILE *. */
+static inline void grid_fold_text(Grid_Fold * f, FILE * t) {
+  long n;
+  long i;
+  if (!t) {
+    grid_word(f, 0xdeadull);
+    return;
+  }
+  n = ftell(t);
+  rewind(t);
+  grid_word(f, (uint64_t)n);
+  for (i = 0; i < n; i++) {
+    int c = fgetc(t);
+    f->h ^= (uint64_t)(unsigned char)c;
+    f->h *= 1099511628211ull;
+  }
+  f->n++;
+  fclose(t);
+}
+
+static inline GSHGEOM_Result grid_vertex_fn(const GSHGEOM_Vertex * v, void * ctx) {
+  Grid_Fold * f = (Grid_Fold *)ctx;
+  grid_word(f, v->element);
+  grid_word(f, v->subpath);
+  grid_word(f, v->flags);
+  grid_pt(f, &v->point);
+  grid_pt(f, &v->in);
+  grid_pt(f, &v->out);
+  grid_pt(f, &v->direction);
+  return GSHGEOM_OK;
+}
+
+static inline void grid_fold_bounds(Grid_Fold * f, GSHGEOM_Result r, const GSHGEOM_Bounds * b) {
+  grid_word(f, (uint64_t)r);
+  grid_word(f, (uint64_t)(int64_t)b->empty);
+  grid_pt(f, &b->min);
+  grid_pt(f, &b->max);
+}
+
+static inline void grid_walk_one(Grid_Fold * f, Grid_Rng * rng, GSHGEOM_Path * p, GSHGEOM_Path * other) {
+  static const double dash_a[2] = {3.0, 2.0};
+  static const double dash_b[1] = {1.5};
+  static const double dash_c[4] = {0.25, 0.5, 4.0, 1.0};
+  size_t n = gshgeom_path_element_count(p);
+  size_t i;
+  GSHGEOM_Bounds b;
+  GSHGEOM_Path * copy = NULL;
+  GSHGEOM_Map maps[3];
+  int mi;
+  FILE * t;
+  size_t vcount = 0;
+  GSHGEOM_Measured * m = NULL;
+  int ti;
+  gshgeom_map_identity(2, &maps[0]);
+  gshgeom_map_scale(2, 3.0, 0.5, 1.0, &maps[1]);
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &maps[2]);
+  grid_word(f, gshgeom_path_hash(p));
+  grid_word(f, n);
+  for (i = 0; i <= n; i++) {
+    GSHGEOM_Verb verb = GSHGEOM_VERB_MOVE;
+    GSHGEOM_Element el;
+    GSHGEOM_Arc arc;
+    GSHGEOM_Result vr = gshgeom_path_verb(p, i, &verb);
+    GSHGEOM_Result er;
+    unsigned vb = 0;
+    grid_word(f, (uint64_t)vr);
+    memcpy(&vb, &verb, sizeof vb < sizeof verb ? sizeof vb : sizeof verb);
+    grid_word(f, vb);
+    memset(&el, 0x22, sizeof el);
+    er = gshgeom_path_element(p, i, &el);
+    grid_word(f, (uint64_t)er);
+    if (er == GSHGEOM_OK) {
+      int q;
+      unsigned verb_bits;
+      memcpy(&verb_bits, &el.verb, sizeof verb_bits < sizeof el.verb ? sizeof verb_bits : sizeof el.verb);
+      grid_word(f, verb_bits);
+      grid_word(f, (uint64_t)el.curve.kind);
+      grid_word(f, (uint64_t)(int64_t)el.curve.dim);
+      for (q = 0; q < 4; q++) {
+        grid_pt(f, &el.curve.p[q]);
+        grid_dbl(f, el.curve.w[q]);
+      }
+    }
+    memset(&arc, 0, sizeof arc);
+    grid_word(f, (uint64_t)gshgeom_path_arc(p, i, &arc));
+    grid_arc(f, &arc);
+  }
+  if (gshgeom_path_copy(p, NULL, NULL, &copy) == GSHGEOM_OK) {
+    grid_word(f, gshgeom_path_hash(copy));
+    grid_word(f, (uint64_t)(int64_t)gshgeom_path_equal(p, copy));
+    grid_word(f, (uint64_t)(int64_t)gshgeom_path_equal(copy, other));
+    gshgeom_path_destroy(copy);
+  }
+  grid_word(f, (uint64_t)(int64_t)gshgeom_path_equal(p, other));
+  memset(&b, 0, sizeof b);
+  grid_fold_bounds(f, gshgeom_path_bounds(p, &b), &b);
+  t = tmpfile();
+  if (t) {
+    grid_word(f, (uint64_t)gshgeom_path_dump(p, t));
+  }
+  grid_fold_text(f, t);
+  grid_word(f, (uint64_t)gshgeom_path_vertex_count(p, &vcount));
+  grid_word(f, vcount);
+  grid_word(f, (uint64_t)gshgeom_path_vertices(p, grid_vertex_fn, f));
+  for (mi = 0; mi < 3; mi++) {
+    GSHGEOM_Device_Path * dp = NULL;
+    GSHGEOM_Result dr = gshgeom_device_path_from_model(p, &maps[mi], NULL, NULL, &dp);
+    grid_word(f, (uint64_t)dr);
+    if (dr == GSHGEOM_OK) {
+      grid_word(f, gshgeom_device_path_hash(dp));
+      grid_word(f, gshgeom_device_path_element_count(dp));
+    }
+    gshgeom_device_path_destroy(dp);
+  }
+  {
+    GSHGEOM_Path * low = NULL;
+    GSHGEOM_Result lr = gshgeom_stroke_curves_lower_cubic(p, 0.25, NULL, NULL, &low);
+    grid_word(f, (uint64_t)lr);
+    if (lr == GSHGEOM_OK && low) {
+      grid_word(f, gshgeom_path_hash(low));
+    }
+    gshgeom_path_destroy(low);
+  }
+  for (ti = 0; ti < 2; ti++) {
+    GSHGEOM_Result mr = gshgeom_measured_create(NULL, NULL, p, ti ? 0.0625 : 0.5, &m);
+    grid_word(f, (uint64_t)mr);
+    if (mr == GSHGEOM_OK && m) {
+      double len = gshgeom_measured_length(m);
+      int q;
+      grid_dbl(f, len);
+      grid_word(f, gshgeom_measured_segment_count(m));
+      grid_word(f, gshgeom_measured_row_count(m));
+      grid_word(f, gshgeom_measured_subpath_count(m));
+      grid_word(f, gshgeom_measured_hash(m));
+      for (q = -1; q <= 5; q++) {
+        GSHGEOM_Measured_Frame fr;
+        double s = len * (double)q / 4.0;
+        GSHGEOM_Result ar;
+        memset(&fr, 0, sizeof fr);
+        ar = gshgeom_measured_at(m, s, &fr);
+        grid_word(f, (uint64_t)ar);
+        grid_pt(f, &fr.point);
+        grid_pt(f, &fr.tangent);
+        grid_pt(f, &fr.normal);
+        grid_word(f, fr.element);
+        grid_word(f, fr.piece);
+        grid_dbl(f, fr.t);
+        memset(&fr, 0, sizeof fr);
+        grid_word(f, (uint64_t)gshgeom_measured_at_clamped(m, s, &fr));
+        grid_pt(f, &fr.point);
+      }
+      t = tmpfile();
+      if (t) {
+        grid_word(f, (uint64_t)gshgeom_measured_dump(m, t));
+      }
+      grid_fold_text(f, t);
+    }
+    gshgeom_measured_destroy(m);
+    m = NULL;
+  }
+  /* strokes: eight of the joins, caps, dash arrays and maps, drawn at random for each path (the whole product is 45 outlines a path and is slow) */
+  for (ti = 0; ti < 8; ti++) {
+    GSHGEOM_Stroke st;
+    GSHGEOM_Stroke_Outline * o = NULL;
+    GSHGEOM_Result sr;
+    uint64_t dd = grid_next(rng);
+    int dsel = (int)(dd % 4);
+    int jn = (int)(dd >> 4 & 7) % 5;
+    int cp = (int)(dd >> 8 & 3) % 3;
+    mi = (int)(dd >> 12 & 3) % 3;
+    memset(&st, 0, sizeof st);
+    st.width = 1.0 + (double)(dd >> 16 & 7) * 0.5;
+    st.width_space = GSHGEOM_STROKE_WIDTH_LOCAL;
+    st.join = (uint32_t)jn;
+    st.miter_limit = 4.0;
+    st.cap = (uint32_t)cp;
+    st.degenerate = GSHGEOM_STROKE_DEGENERATE_DRAW;
+    st.dash_count = dsel == 1 ? 2 : dsel == 2 ? 1 : dsel == 3 ? 4 : 0;
+    st.dashes = dsel == 1 ? dash_a : dsel == 2 ? dash_b : dsel == 3 ? dash_c : NULL;
+    st.dash_offset = dsel ? (double)(dd >> 20 & 3) * 0.75 : 0.0;
+    st.dash_scope = (dd >> 24 & 1) ? GSHGEOM_STROKE_DASH_PATH : GSHGEOM_STROKE_DASH_PER_SUBPATH;
+    st.alignment = GSHGEOM_STROKE_ALIGN_CENTER;
+    sr = gshgeom_stroke_expand(p, &st, &maps[mi], NULL, NULL, &o);
+    grid_word(f, (uint64_t)sr);
+    if (sr == GSHGEOM_OK && o) {
+      grid_word(f, gshgeom_stroke_outline_hash(o));
+    }
+    gshgeom_stroke_outline_destroy(o);
+  }
+}
+
+/** The grid of the walkers: random paths of every verb, arcs among them, through every reader and the strokes. */
+static inline uint64_t grid_walk_hash(uint64_t * words) {
+  Grid_Fold f;
+  Grid_Rng rng;
+  int it;
+  GSHGEOM_Path * prev = NULL;
+  grid_fold_init(&f);
+  rng.s = 0x9b05688c2b3e6c1full ^ (grid_seed_salt * 0x9e3779b97f4a7c15ull);
+  prev = grid_walk_path(&rng);
+  for (it = 0; it < 1200; it++) {
+    GSHGEOM_Path * p = grid_walk_path(&rng);
+    grid_walk_one(&f, &rng, p, prev);
+    gshgeom_path_destroy(prev);
+    prev = p;
+  }
+  gshgeom_path_destroy(prev);
+  *words = f.n;
+  return f.h;
+}
+
+/** The shapes (rect, rounded rect, ellipse) over special and ordinary arguments, and flat paths from points. */
+static inline uint64_t grid_shapes_hash(uint64_t * words) {
+  static const double v[8] = {0.0, 1.0, 4.0, -3.0, (double)NAN, (double)INFINITY, GRID_BIG, 0x1p-1000};
+  static const double rr[6] = {0.0, 1.0, 2.0, 5.0, -1.0, (double)NAN};
+  Grid_Fold f;
+  int fx, fy, a, b, c, d, i, j;
+  grid_fold_init(&f);
+  for (fx = 0; fx < 2; fx++) {
+    for (fy = 0; fy < 2; fy++) {
+      for (a = 0; a < 8; a++) {
+        for (b = 0; b < 8; b++) {
+          for (c = 0; c < 8; c++) {
+            for (d = 0; d < 8; d++) {
+              GSHGEOM_Path * p = grid_make();
+              grid_word(&f, (uint64_t)gshgeom_path_add_rect(p, v[a], v[b], v[c], v[d], fx, fy));
+              grid_word(&f, gshgeom_path_hash(p));
+              gshgeom_path_destroy(p);
+              p = grid_make();
+              grid_word(&f, (uint64_t)gshgeom_path_add_ellipse(p, v[a], v[b], v[c], v[d], fx, fy));
+              grid_word(&f, gshgeom_path_hash(p));
+              gshgeom_path_destroy(p);
+            }
+          }
+        }
+      }
+      for (a = 0; a < 6; a++) {
+        for (b = 0; b < 6; b++) {
+          for (c = 0; c < 6; c++) {
+            for (d = 0; d < 6; d++) {
+              GSHGEOM_Corner r[4];
+              GSHGEOM_Path * p = grid_make();
+              double w = (a % 3) == 0 ? 10.0 : (a % 3) == 1 ? 3.0 : 0.0;
+              double h = (b % 3) == 0 ? 8.0 : (b % 3) == 1 ? 2.0 : (double)NAN;
+              r[0].rx = rr[a];
+              r[0].ry = rr[b];
+              r[1].rx = rr[c];
+              r[1].ry = rr[d];
+              r[2].rx = rr[b];
+              r[2].ry = rr[c];
+              r[3].rx = rr[d];
+              r[3].ry = rr[a];
+              grid_word(&f, (uint64_t)gshgeom_rounded_rect_check(w, h, r));
+              grid_word(&f, (uint64_t)gshgeom_path_add_rounded_rect(p, 1.0, 2.0, w, h, r, fx, fy));
+              grid_word(&f, gshgeom_path_hash(p));
+              gshgeom_path_destroy(p);
+            }
+          }
+        }
+      }
+    }
+  }
+  /* flat paths from points: subpaths that do not tile the points, none, NULL arrays, counts past the limit */
+  for (i = 0; i < 4; i++) {
+    for (j = 0; j < 4; j++) {
+      GSHGEOM_Device_Point pts[4];
+      GSHGEOM_Flat_Subpath subs[2];
+      GSHGEOM_Flat_Path * fp = NULL;
+      GSHGEOM_Limits lim;
+      size_t np = (size_t)i;
+      size_t ns = (size_t)j;
+      pts[0] = grid_dp(0, 0);
+      pts[1] = grid_dp(64, 0);
+      pts[2] = grid_dp(64, 64);
+      pts[3] = grid_dp(0, 64);
+      subs[0].first = 0;
+      subs[0].count = (size_t)(i > 1 ? 2 : 1);
+      subs[0].closed = j % 2;
+      subs[1].first = subs[0].count;
+      subs[1].count = (size_t)(i > 2 ? i - 2 : 1);
+      subs[1].closed = 1;
+      gshgeom_limits_default(&lim);
+      lim.max_points = (size_t)(1 + (i + j) % 3);
+      grid_word(&f, (uint64_t)gshgeom_flat_path_from_points(np ? pts : NULL, np, ns ? subs : NULL, ns, NULL, NULL, &fp));
+      if (fp) {
+        grid_word(&f, gshgeom_flat_path_hash(fp));
+        gshgeom_flat_path_destroy(fp);
+        fp = NULL;
+      }
+      grid_word(&f, (uint64_t)gshgeom_flat_path_from_points(pts, np, subs, ns, NULL, &lim, &fp));
+      if (fp) {
+        grid_word(&f, gshgeom_flat_path_hash(fp));
+        gshgeom_flat_path_destroy(fp);
+      }
+      grid_word(&f, (uint64_t)gshgeom_flat_path_from_points(pts, np, subs, ns, NULL, NULL, NULL));
+    }
+  }
+  *words = f.n;
+  return f.h;
 }
 
 #endif /* GHOTI_IO_GSHGEOM_TESTS_GRID_PROBE_H */

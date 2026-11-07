@@ -1920,9 +1920,9 @@ PLANTS += CURVE_PLANTS
 ARCS = "src/path/arc.c"
 ARCH = "include/ghoti.io/shape-geometry/arc.h"
 AT = ["testArc", "testArc_rules", "testArc_grid"]
-AWT = ["testArc_walk"]
+AWT = ["testArc_walk", "testWalk_grid"]
 CNT = ["testConic"]
-WKT = ["testWalkers"]
+WKT = ["testWalkers", "testWalk_grid"]
 ARC_PLANTS = []
 
 
@@ -2604,7 +2604,7 @@ ap("arw-lower-cubic-arc-control-points", SCL, "        r = conic(dst, pt(q[0].x,
 ap("arw-lower-cubic-arc-continue-dropped", SCL, "        r = conic(dst, pt(q[0].x, q[0].y), pt(q[1].x, q[1].y), pt(q[2].x, q[2].y), ws, tolerance, 0);\n      }\n      continue;", "        r = conic(dst, pt(q[0].x, q[0].y), pt(q[1].x, q[1].y), pt(q[2].x, q[2].y), ws, tolerance, 0);\n      }", LW_)
 ap("arw-lower-cubic-element-error-lost", SCL, "    if (r == GSHGEOM_OK) {\n      r = gshgeom_path_element(in, i, &el);\n    }\n    if (r != GSHGEOM_OK) {", "    if (r == GSHGEOM_OK) {\n      gshgeom_path_element(in, i, &el);\n    }\n    if (r != GSHGEOM_OK) {", LW_)
 # CV1, CV3, CV4: the device path of a model path with an arc (device.c) and the revision.
-DVT = ["testConic", "testDevice", "testWalkers"]
+DVT = ["testConic", "testDevice", "testWalkers", "testWalk_grid"]
 ap("cvx-arc-device-verb-error-lost", DV, "    GSHGEOM_Result r = gshgeom_path_verb(path, i, &verb);\n    if (r != GSHGEOM_OK) {\n      return GSHGEOM_ERR_INTERNAL;\n    }\n    if (verb == GSHGEOM_VERB_ARC) {", "    gshgeom_path_verb(path, i, &verb);\n    GSHGEOM_Result r = GSHGEOM_OK;\n    if (verb == GSHGEOM_VERB_ARC) {", DVT)
 ap("cvx-arc-device-arc-skipped", DV, "    if (verb == GSHGEOM_VERB_ARC) {\n      GSHGEOM_Arc arc;\n      r = gshgeom_path_arc(path, i, &arc);", "    if (0) {\n      GSHGEOM_Arc arc;\n      r = gshgeom_path_arc(path, i, &arc);", DVT)
 # Removed, cvx-arc-device-arc-continue-dropped: the loop became an if/else (an arc, or an element), so there is no `continue` to drop; an arc that also
@@ -2688,7 +2688,7 @@ ap("cvx-hdr-conic-depth-raised", "include/ghoti.io/shape-geometry/flatten.h", "#
 # (one rounding, a zero term, the exchange of edges and the flips), the rect, the rounded rectangle (the start, the order of the radii,
 # each corner's t0, the lines that are always there, the square corner), the ellipse (the flips, the order of the ends), the circular
 # flag, the limits and the order of refusals, the all-or-nothing of a failed call, and the copy sized to its contents (path.c).
-SHT = ["testShapes"]
+SHT = ["testShapes", "testShapes_grid"]
 # @@A2-PLANTS@@
 ap('sh-overlap-rounded-sum', 'src/path/shapes.c', '  return gshgeom_exact_sum_sign(&s) > 0;\n}\n\n/** The distance', '  return (a + b) > c;\n}\n\n/** The distance', SHT)
 ap('sh-overlap-equal-invalid', 'src/path/shapes.c', '  return gshgeom_exact_sum_sign(&s) > 0;', '  return gshgeom_exact_sum_sign(&s) >= 0;', SHT)
@@ -3011,7 +3011,7 @@ CLIP_UNSEEN = {"clip-eq-fast-path-off", "clip-eq-no-lexicographic-swap", "clip-e
                "fb-points-without-subpaths"}
 
 FBC = "src/flatten/flatten.c"
-FBT = ["testFlat_build"]
+FBT = ["testFlat_build", "testShapes_grid"]
 for _p in (
     ("fb-gap-accepted", "subpaths[s].first != next || subpaths[s].count == 0 ||", "subpaths[s].count == 0 ||"),
     ("fb-empty-subpath-accepted", "subpaths[s].first != next || subpaths[s].count == 0 ||", "subpaths[s].first != next ||"),

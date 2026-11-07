@@ -60,7 +60,7 @@ got_hthash=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hatch-hash"{print $
 got_htcount=$(printf '%s\n' "$got" | awk '$1=="shape-geometry.hatch-count"{print $2}')
 want_hthash=$(awk '$1=="hatch-hash"{print $2}' "$file" 2>/dev/null)
 want_htcount=$(awk '$1=="hatch-count"{print $2}' "$file" 2>/dev/null)
-for g in arc lattice clip; do
+for g in arc lattice clip walk shapes; do
   eval "got_${g}_ghash=\$(printf '%s\\n' \"\$got\" | awk '\$1==\"shape-geometry.${g}-grid-hash\"{print \$2}')"
   eval "got_${g}_gcount=\$(printf '%s\\n' \"\$got\" | awk '\$1==\"shape-geometry.${g}-grid-count\"{print \$2}')"
   eval "want_${g}_ghash=\$(awk '\$1==\"${g}-grid-hash\"{print \$2}' \"\$file\" 2>/dev/null)"
@@ -137,7 +137,7 @@ if [ "$got_hthash" != "$want_hthash" ] || [ "$got_htcount" != "$want_htcount" ];
     "$got_hthash" "$got_htcount" "$want_hthash" "$want_htcount" >&2
   exit 1
 fi
-for g in arc lattice clip; do
+for g in arc lattice clip walk shapes; do
   eval "gh=\$got_${g}_ghash; gc=\$got_${g}_gcount; wh=\$want_${g}_ghash; wc=\$want_${g}_gcount"
   if [ -z "$wh" ] || [ -z "$wc" ] || [ -z "$gh" ] || [ -z "$gc" ] || [ "$gh" != "$wh" ] || [ "$gc" != "$wc" ]; then
     printf 'check-corpus-hash: FAIL: %s grid %s over %s words, committed %s over %s\n' "$g" "$gh" "$gc" "$wh" "$wc" >&2
