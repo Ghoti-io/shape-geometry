@@ -61,3 +61,5 @@ shape-scene|src/resource/resource.c|gshscene_store_intern_path_tagged|confirmed|
 shape-scene|examples/primitive.c|*|support|builds tagged paths and reads them back; feeds the arc to the library, which is what it is for|-
 shape-scene|tests/fuzz/fuzz_record.c|*|support|interns paths of arcs and primitives and reads their verbs back to count the arcs; feeds the arc to the library, which is what it is for|-
 shape-scene|tools/corpus-hash.c|*|support|builds paths of arcs and primitives for the cross-target hash; feeds the arc to the library, which is what it is for|-
+shape-geometry|tests/unit/test_arc_grid.cpp|*|support|feeds the arcs of arc.h every argument that decides a check and hashes what comes back, which is what it is for|-
+shape-geometry|tools/argued-plants.json|*|support|names the plants no test catches and the argument for each; reads no path|-
