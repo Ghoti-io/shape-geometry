@@ -22,6 +22,7 @@ extern "C" {
 }
 
 #include <cmath>
+#include <utility>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -164,6 +165,97 @@ TEST(WorkCounts, AnArcThatCannotBeDecomposedIsRefusedBeforeAnyTrigonometry) {
   EXPECT_EQ(trig(b, out, &np, &r), 4u);
   b.sweep = 360;
   EXPECT_EQ(trig(b, out, &np, &r), 5u);
+}
+
+TEST(WorkCounts, TheTotalWorkOfAFixedSetOfThreeThousandLatticesIsPinned) {
+  // lattices of ordinary, fractional, tiny and huge-index shapes from a fixed generator: the sum of the evaluations of the search (every
+  // estimate, every step of a gallop and of a bisection) and of the copies reported is one number each, so a change to how the search
+  // starts, steps or splits is a change of the sum
+  uint64_t seed = 0x9e3779b97f4a7c15ull;
+  auto next = [&]() {
+    seed ^= seed << 13;
+    seed ^= seed >> 7;
+    seed ^= seed << 17;
+    return seed;
+  };
+  auto range = [&](int64_t lo, int64_t hi) { return lo + (int64_t)(next() % (uint64_t)(hi - lo + 1)); };
+  auto dyadic = [&](int64_t lo, int64_t hi, int shift) { return std::ldexp((double)range(lo, hi), shift); };
+  uint64_t total_work = 0, total_count = 0;
+  int limits = 0;
+  for (int trial = 0; trial < 3000; trial++) {
+    const int kind = (int)(next() % 4);
+    GSHGEOM_Lattice l;
+    std::memset(&l, 0, sizeof l);
+    GSHGEOM_Map m = identity();
+    int64_t rect[4];
+    if (kind == 0) {  // small integers
+      l.x = (double)range(-6, 6);
+      l.y = (double)range(-6, 6);
+      l.w = (double)range(1, 5);
+      l.h = (double)range(1, 5);
+      l.x_step = (double)range(1, 6);
+      l.y_step = (double)range(1, 6);
+      for (auto & row : m.m) for (int c = 0; c < 2; c++) row[c] = (double)range(-3, 3);
+      m.t[0] = (double)range(-8, 8);
+      m.t[1] = (double)range(-8, 8);
+      for (int k = 0; k < 4; k++) rect[k] = range(-30, 30);
+    } else if (kind == 1) {  // fractions
+      l.x = dyadic(-40, 40, -3);
+      l.y = dyadic(-40, 40, -3);
+      l.w = dyadic(1, 40, -4);
+      l.h = dyadic(1, 40, -4);
+      l.x_step = dyadic(1, 60, -4);
+      l.y_step = dyadic(1, 60, -4);
+      m.m[0][0] = dyadic(-24, 24, -3);
+      m.m[0][1] = dyadic(-24, 24, -4);
+      m.m[1][0] = dyadic(-24, 24, -4);
+      m.m[1][1] = dyadic(-24, 24, -3);
+      m.t[0] = dyadic(-200, 200, -4);
+      m.t[1] = dyadic(-200, 200, -4);
+      for (int k = 0; k < 4; k++) rect[k] = range(-300, 300);
+    } else if (kind == 2) {  // tiny cells and steps: the coefficients are tiny
+      const int e = -(int)range(40, 560);
+      l.x = dyadic(-8, 8, e);
+      l.y = dyadic(-8, 8, e);
+      l.w = dyadic(1, 8, e);
+      l.h = dyadic(1, 8, e);
+      l.x_step = dyadic(1, 8, e);
+      l.y_step = dyadic(1, 8, e);
+      m.m[0][0] = (double)range(-2, 2);
+      m.m[0][1] = (double)range(-2, 2);
+      m.m[1][0] = (double)range(-2, 2);
+      m.m[1][1] = (double)range(-2, 2);
+      m.t[0] = dyadic(-8, 8, e);
+      m.t[1] = dyadic(-8, 8, e);
+      for (int k = 0; k < 4; k++) rect[k] = range(-2, 2);
+    } else {  // a long way out: indices past a billion, and the range of indices itself
+      l.x = (double)range(-3, 3);
+      l.y = (double)range(-3, 3);
+      l.w = 1.0;
+      l.h = 1.0;
+      l.x_step = 1.0;
+      l.y_step = (double)range(1, 3);
+      m.t[0] = (double)range(-1000, 1000);
+      const int64_t far = ((int64_t)1 << 53) - range(0, 40);
+      rect[0] = (next() & 1) ? far - range(0, 20) : -far;
+      rect[2] = (next() & 1) ? far : rect[0] + range(0, 20);
+      rect[1] = range(-5, 5);
+      rect[3] = rect[1] + range(0, 9);
+    }
+    l.repeat_x = (uint32_t)(next() % 8 != 0);
+    l.repeat_y = (uint32_t)(next() % 3 != 0);
+    if (rect[0] > rect[2]) std::swap(rect[0], rect[2]);
+    if (rect[1] > rect[3]) std::swap(rect[1], rect[3]);
+    GSHGEOM_Lattice_Stats st = {0};
+    uint64_t count = 0;
+    const GSHGEOM_Result r = gshgeom_lattice_each_counted(&m, &l, rect, 5000, nullptr, nullptr, &count, &st);
+    total_work += st.evaluations;
+    total_count += count;
+    limits += r == GSHGEOM_ERR_LIMIT;
+  }
+  EXPECT_EQ(total_work, 21752323ull);
+  EXPECT_EQ(total_count, 3877875ull);
+  EXPECT_EQ(limits, 711);
 }
 
 int main(int argc, char ** argv) {
