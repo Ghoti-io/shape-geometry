@@ -63,3 +63,6 @@ shape-scene|tests/fuzz/fuzz_record.c|*|support|interns paths of arcs and primiti
 shape-scene|tools/corpus-hash.c|*|support|builds paths of arcs and primitives for the cross-target hash; feeds the arc to the library, which is what it is for|-
 shape-geometry|tools/argued-plants.json|*|support|names the plants no test catches and the argument for each; reads no path|-
 shape-geometry|tests/grid_probe.h|*|support|feeds the arcs of arc.h every argument that decides a check and hashes what comes back, which is what it is for|-
+shape-geometry|tests/unit/test_arc_attacks.cpp|*|support|feeds arcs, records stored raw and maps to the arc functions and the walkers: it is where they are exercised|-
+shape-geometry|tests/unit/test_arc_walker_edges.cpp|*|support|feeds arcs and records stored raw to every walker and pins the code each returns|-
+vector|src/codec/svg/lower/lower_clip.c|merge_box|owner|reads a path by element, and gshgeom_path_element refuses an arc (AR15), so a path with an arc is not bounded there and the clip is not lowered: nothing to change here|shape-geometry:tests/unit/test_walkers.cpp:Walkers.PathElementBoundsHashDumpCopyEqualAndVerbKnowTheArc

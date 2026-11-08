@@ -371,7 +371,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   }
 
   GSHGEOM_Flat_Path * out = NULL;
-  GSHGEOM_Clip_Stats stats = {0, 0, 0};
+  GSHGEOM_Clip_Stats stats = {0, 0, 0, 0};
   const GSHGEOM_Result r = gshgeom_clip_convex_counted(flat, quad, &alloc, &limits, &out, &stats);
   CHECK(r == GSHGEOM_OK || r == GSHGEOM_ERR_INVALID || r == GSHGEOM_ERR_LIMIT || r == GSHGEOM_ERR_OOM);
   CHECK((r == GSHGEOM_ERR_INVALID) == !valid);
