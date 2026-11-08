@@ -1618,3 +1618,29 @@ TEST(HatchExpand, EachDotIsDrawnAlongItsOwnDirectionMappedByTheMapUnderDeviceWid
   gshgeom_path_destroy(one);
   gshgeom_path_destroy(path);
 }
+
+// HX2: a dash that is not a finite number is invalid, whichever entry of the array holds it and whichever way it is not finite, and it is
+// the check's answer and the whole call's (the later checks, of the band and of a pen-down element, never see it).
+TEST(HatchCheck, ADashThatIsNotFiniteIsInvalidInEveryPosition) {
+  const double bad[] = {std::nan(""), HUGE_VAL, -HUGE_VAL};
+  GSHGEOM_Path * region = rect_path(0, 0, 20, 20);
+  GSHGEOM_Map chain = identity();
+  for (size_t at = 0; at < 3; at++) {
+    for (double v : bad) {
+      std::vector<double> dashes = {2.0, -1.0, 3.0};
+      dashes[at] = v;
+      GSHGEOM_Hatch_Family f;
+      const GSHGEOM_Hatch h = one_family(f, 0, 0, 0, 0, 5.0, dashes, identity());
+      EXPECT_EQ(gshgeom_hatch_check(&h), GSHGEOM_ERR_INVALID) << at << " " << v;
+      GSHGEOM_Hatch_Pieces * p = nullptr;
+      EXPECT_EQ(gshgeom_hatch_pieces(region, GSHGEOM_FILL_NONZERO, &h, &chain, 0, nullptr, nullptr, &p), GSHGEOM_ERR_INVALID) << at << " " << v;
+      EXPECT_EQ(p, nullptr);
+    }
+  }
+  // and the same array with finite entries is valid, so the refusal above is the entry's
+  std::vector<double> ok = {2.0, -1.0, 3.0};
+  GSHGEOM_Hatch_Family g;
+  const GSHGEOM_Hatch hok = one_family(g, 0, 0, 0, 0, 5.0, ok, identity());
+  EXPECT_EQ(gshgeom_hatch_check(&hok), GSHGEOM_OK);
+  gshgeom_path_destroy(region);
+}
