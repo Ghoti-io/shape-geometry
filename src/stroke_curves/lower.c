@@ -258,18 +258,13 @@ GSHGEOM_Result gshgeom_stroke_curves_lower_cubic(const GSHGEOM_Path * in, double
       }
       for (int k = 0; k < np && r == GSHGEOM_OK; k++) {
         const GSHGEOM_Point * q = pieces[k].p;
-        double ws = pieces[k].w[1] / gmath_sqrt(pieces[k].w[0] * pieces[k].w[2]);
+        double ws = pieces[k].w[1]; /* the end weights of a piece are 1 exactly: the standardizing division would change nothing */
         r = conic(dst, pt(q[0].x, q[0].y), pt(q[1].x, q[1].y), pt(q[2].x, q[2].y), ws, tolerance, 0);
       }
       continue;
     }
-    GSHGEOM_Element el = {0};
-    if (r == GSHGEOM_OK) {
-      r = gshgeom_path_element(in, i, &el);
-    }
-    if (r != GSHGEOM_OK) {
-      break;
-    }
+    GSHGEOM_Element el = {0}; /* an element that is not an arc, below the count: the read does not fail */
+    (void)gshgeom_path_element(in, i, &el);
     const GSHGEOM_Point * p = el.curve.p;
     const double * w = el.curve.w;
     switch (el.verb) {

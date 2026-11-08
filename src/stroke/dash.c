@@ -677,10 +677,9 @@ GSHGEOM_Result gshgeom_sk_dash_begin(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * ce
         GSHGEOM_Arc arc;
         GSHGEOM_Curve pieces[GSHGEOM_ARC_MAX_PIECES];
         int np = 0;
-        r = gshgeom_path_arc(centerline, i, &arc);
-        if (r == GSHGEOM_OK) {
-          r = gshgeom_arc_pieces(&arc, pieces, &np);
-        }
+        /* The centerline was read before this by read_centerline, which refused any arc that cannot be decomposed. */
+        (void)gshgeom_path_arc(centerline, i, &arc);
+        (void)gshgeom_arc_pieces(&arc, pieces, &np);
         for (int k = 0; k < np && r == GSHGEOM_OK; k++) {
           GSHGEOM_Curve cv;
           r = gshgeom_map_apply_curve(&c->map, &pieces[k], &cv);

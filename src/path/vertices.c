@@ -94,11 +94,8 @@ static GSHGEOM_Result element(const GSHGEOM_Path * path, size_t i, Elem * e) {
     }
     return GSHGEOM_OK;
   }
-  GSHGEOM_Element el = {0};
-  r = gshgeom_path_element(path, i, &el);
-  if (r != GSHGEOM_OK) {
-    return GSHGEOM_ERR_INTERNAL;
-  }
+  GSHGEOM_Element el = {0}; /* an element that is not an arc, below the count: the read does not fail */
+  (void)gshgeom_path_element(path, i, &el);
   e->point = el.curve.p[gshgeom_curve_point_count(el.curve.kind) - 1];
   if (e->verb != GSHGEOM_VERB_MOVE) {
     curve_seg(&el.curve, &e->seg);

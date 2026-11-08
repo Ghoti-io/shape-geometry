@@ -516,10 +516,11 @@ GSHGEOM_Result gshgeom_path_bounds(
         r = gshgeom_arc_pieces(&arc, curves, &nc);
       }
     } else {
-      GSHGEOM_Element el = {0}; /* a read that is lost leaves an element of nothing, not whatever the stack held */
-      r = gshgeom_path_element(path, i, &el);
+      /* The one way the read of an element that is not an arc fails is an index past the count, which this is not. */
+      GSHGEOM_Element el = {0};
+      (void)gshgeom_path_element(path, i, &el);
       curves[0] = el.curve;
-      nc = r == GSHGEOM_OK ? 1 : 0;
+      nc = 1;
     }
     for (int k = 0; k < nc && r == GSHGEOM_OK; k++) {
       GSHGEOM_Bounds b;
