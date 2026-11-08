@@ -41,6 +41,7 @@ typedef struct GSHGEOM_Clip_Stats {
   size_t crossings;       /**< Crossing points computed, over all four cuts and every contour. */
   size_t contours_in;     /**< Contours cut (partly inside and partly outside some side). */
   size_t contours_copied; /**< Contours copied bit for bit (wholly inside). */
+  size_t cuts;            /**< Passes over a contour's points by one side of the quadrilateral (the work of the cut). */
 } GSHGEOM_Clip_Stats;
 
 /** ::gshgeom_flat_path_clip_convex, also filling @p stats (NULL to leave it). */

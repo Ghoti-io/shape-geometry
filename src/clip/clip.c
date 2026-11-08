@@ -125,11 +125,9 @@ static int is_zero128(U128 a) {
   return a.hi == 0 && a.lo == 0;
 }
 
-/** `a * b` for a product below 2^128 (the callers' are below 2^100). */
+/** `a * b` for an `a` below 2^64 (a side value is, as the exactness paragraph above says) and a product below 2^128 (the callers' are below 2^100). */
 static U128 mul128_64(U128 a, uint64_t b) {
-  U128 r = mul64(a.lo, b);
-  r.hi += a.hi * b;
-  return r;
+  return mul64(a.lo, b);
 }
 
 /** The bit `i` (0 is the least significant). */
@@ -167,11 +165,7 @@ static void divmod128(U128 n, U128 d, U128 * q, U128 * r) {
     rem.lo = (rem.lo << 1) | bit128(n, i);
     if (cmp128(rem, d) >= 0) {
       rem = sub128(rem, d);
-      if (i >= 64) {
-        quo.hi |= UINT64_C(1) << (i - 64);
-      } else {
-        quo.lo |= UINT64_C(1) << i;
-      }
+      quo.lo |= UINT64_C(1) << i; /* the quotients here are below 2^34: no bit of the high word is set */
     }
   }
   *q = quo;
@@ -187,7 +181,7 @@ typedef struct S128 {
 
 static S128 s_make(int neg, U128 m) {
   S128 r;
-  r.neg = is_zero128(m) ? 0 : neg;
+  r.neg = neg; /* the sign of a zero is never read: a sum of values of different signs takes the first operand's */
   r.m = m;
   return r;
 }
@@ -253,11 +247,6 @@ static S128 side_value(Pt l0, Pt l1, Pt p) {
   return s_add(s_make(p1.neg, (U128){0, p1.m}), s_neg(s_make(p2.neg, (U128){0, p2.m})));
 }
 
-/** Whether point (ax, ay) comes before (bx, by) in the order of the coordinates: x, then y. */
-static int before(Pt a, Pt b) {
-  return a.x < b.x || (a.x == b.x && a.y < b.y);
-}
-
 /**
  * `floor(v + 1/2)` for `v = (neg ? -1 : 1) num / den`, `den > 0`: the nearest integer with ties upward, exactly.  It is
  * `floor(N / D)` for `N = den + (neg ? -2 num : 2 num)` and `D = 2 den`.  The result is below 2^63 in magnitude (the
@@ -286,18 +275,9 @@ int gshgeom_clip_crossing(Pt a, Pt b, Pt l0, Pt l1, Pt * out) {
   if (sa * sb >= 0) {
     return 0;
   }
-  /* The end points of the edge and the points of the line in lexicographic order, so the arithmetic below is the same
-   * for the same edge and line however they were named (CK3). */
-  if (before(b, a)) {
-    const Pt t = a;
-    a = b;
-    b = t;
-  }
-  if (before(l1, l0)) {
-    const Pt t = l0;
-    l0 = l1;
-    l1 = t;
-  }
+  /* The point is the exact one rounded half up (below), a function of the edge and the line and not of the names of their ends, so the
+   * same for the same edge and line however they were named (CK3): tests/unit/test_clip_attacks.cpp compares it with exact rational
+   * arithmetic in all four orders of the names. */
   const S128 fa = side_value(l0, l1, a);
   const S128 fb = side_value(l0, l1, b);
   /* The side values have opposite strict signs, so |fa - fb| = |fa| + |fb| and t = |fa| / (|fa| + |fb|). */
@@ -346,7 +326,7 @@ static GSHGEOM_Result sides_of(const Pt quad[4], Side sides[4], int * count) {
     }
   }
   /* Not all collinear, and an area: the fan from corner 0 has the triangles at corners 1 and 3 (the turns there). */
-  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {
+  if (sigma == 0) {
     return GSHGEOM_ERR_INVALID;
   }
   int n = 0;
@@ -354,7 +334,7 @@ static GSHGEOM_Result sides_of(const Pt quad[4], Side sides[4], int * count) {
     const Pt a = quad[i];
     const Pt b = quad[(i + 1) % 4];
     if (a.x == b.x && a.y == b.y) {
-      continue;
+      continue; /* a side of zero length cuts nothing, and would be a pass over every point of every contour */
     }
     sides[n].a = a;
     sides[n].b = b;
@@ -459,7 +439,7 @@ GSHGEOM_Result gshgeom_clip_convex_counted(const GSHGEOM_Flat_Path * path, const
     alloc = gshgeom_allocator_default();
   }
   const size_t max_points = (limits && limits->max_points) ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;
-  GSHGEOM_Clip_Stats local = {0, 0, 0};
+  GSHGEOM_Clip_Stats local = {0, 0, 0, 0};
   const Pt * points = gshgeom_flat_path_points(path);
   const size_t subpaths = gshgeom_flat_path_subpath_count(path);
   GSHGEOM_Flat_Path * result = NULL;
@@ -478,6 +458,7 @@ GSHGEOM_Result gshgeom_clip_convex_counted(const GSHGEOM_Flat_Path * path, const
     int empty = 0;
     for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {
       Cut what = CUT_SAME;
+      local.cuts++;
       status = cut(alloc, &sides[i], cur, count, &bufs[which], &what, &local.crossings);
       if (status != GSHGEOM_OK) {
         break;
@@ -503,7 +484,7 @@ GSHGEOM_Result gshgeom_clip_convex_counted(const GSHGEOM_Flat_Path * path, const
       local.contours_copied++;
     }
     if (count > max_points - gshgeom_flat_path_point_count(result)) {
-      status = GSHGEOM_ERR_LIMIT;
+      status = GSHGEOM_ERR_LIMIT; /* decided before the contour is copied, not by the add that meets the cap */
       break;
     }
     status = gshgeom_flat_path_begin(result, cur[0]);

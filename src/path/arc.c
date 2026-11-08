@@ -116,7 +116,7 @@ static double turn_of(GSHGEOM_Angle_Unit unit) {
 }
 
 GSHGEOM_Result gshgeom_arc_point(const GSHGEOM_Arc_Form * form, double t, GSHGEOM_Point * out) {
-  if (!form || !out || (unsigned)form->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT) {
+  if (!form || !out) {
     return GSHGEOM_ERR_INVALID;
   }
   double c;
@@ -134,14 +134,8 @@ GSHGEOM_Result gshgeom_arc_point(const GSHGEOM_Arc_Form * form, double t, GSHGEO
 }
 
 static GSHGEOM_Arc_Form form_of(const GSHGEOM_Arc * a) {
-  GSHGEOM_Arc_Form f;
-  f.center = a->center;
-  f.u = a->u;
-  f.v = a->v;
-  f.unit = a->unit;
-  f.t0 = a->t0;
-  f.sweep = a->sweep;
-  f.flags = a->flags;
+  /* The flags are a record's, not a form's to read back: nothing that reads this form (a point, the pieces) looks at them. */
+  GSHGEOM_Arc_Form f = {a->center, a->u, a->v, a->unit, a->t0, a->sweep, 0u};
   return f;
 }
 
@@ -221,7 +215,7 @@ static GSHGEOM_Result validate(const GSHGEOM_Arc * a, GSHGEOM_Point current, int
   if (absf(a->sweep) == turn) {
     return same_xy(a->start, a->end) ? pieces_within_limit(a) : GSHGEOM_ERR_INVALID;
   }
-  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p);
+  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p); /* past the limit of quarter turns when t0 is not: ::GSHGEOM_ERR_LIMIT */
   if (r != GSHGEOM_OK) {
     return r;
   }
@@ -286,6 +280,14 @@ static double param_at(const GSHGEOM_Arc * a, int k, int n) {
 
 GSHGEOM_Result gshgeom_arc_pieces(
     const GSHGEOM_Arc * arc, GSHGEOM_Curve out[GSHGEOM_ARC_MAX_PIECES], int * np) {
+  return gshgeom_arc_pieces_counted(arc, out, np, NULL);
+}
+
+GSHGEOM_Result gshgeom_arc_pieces_counted(
+    const GSHGEOM_Arc * arc, GSHGEOM_Curve out[GSHGEOM_ARC_MAX_PIECES], int * np, GSHGEOM_Arc_Stats * stats) {
+  if (stats) {
+    stats->trig = 0;
+  }
   if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)
       || !is_finite(arc->t0) || arc->sweep == 0.0) {
     return GSHGEOM_ERR_INVALID;
@@ -309,10 +311,16 @@ GSHGEOM_Result gshgeom_arc_pieces(
   const double h = hu * per_unit_of(arc->unit);
   const double w = quarter_piece ? gmath_sqrt(0.5) : gmath_cos(h);
   const double th = quarter_piece ? 1.0 : gmath_tan(h);
+  if (stats) {
+    stats->trig += quarter_piece ? 0u : 2u; /* the cosine and the tangent of the half sweep */
+  }
   GSHGEOM_Arc_Form f = form_of(arc);
   double cs_a = 0.0;
   double sn_a = 0.0;
   GSHGEOM_Result r = gshgeom_sincos(arc->unit, param_at(arc, 0, n), &cs_a, &sn_a);
+  if (stats) {
+    stats->trig++;
+  }
   if (r != GSHGEOM_OK) {
     return r;
   }
@@ -321,6 +329,9 @@ GSHGEOM_Result gshgeom_arc_pieces(
     double cs_b;
     double sn_b;
     r = gshgeom_sincos(arc->unit, param_at(arc, k + 1, n), &cs_b, &sn_b);
+    if (stats) {
+      stats->trig++;
+    }
     if (r != GSHGEOM_OK) {
       return r;
     }
@@ -651,11 +662,8 @@ static GSHGEOM_Result add_form(GSHGEOM_Path * path, const GSHGEOM_Arc_Form * for
   memset(&a, 0, sizeof a);
   a.start = path->has_current ? pt(path->current.x, path->current.y) : p0;
   a.center = form->center;
-  a.center.z = 0.0;
   a.u = form->u;
-  a.u.z = 0.0;
   a.v = form->v;
-  a.v.z = 0.0;
   a.unit = form->unit;
   a.t0 = form->t0;
   a.sweep = form->sweep;
@@ -698,8 +706,7 @@ GSHGEOM_Result gshgeom_path_arc_conjugate_to(
 GSHGEOM_Result gshgeom_path_arc_center_to(GSHGEOM_Path * path, GSHGEOM_Point center, double rx, double ry,
     double phi, GSHGEOM_Angle_Unit unit, double t0, double sweep, const GSHGEOM_Point * end) {
   GSHGEOM_Result r = begin_check(path);
-  if (r != GSHGEOM_OK || !is_finite(rx) || !is_finite(ry) || !(rx > 0.0) || !(ry > 0.0) || !is_finite(phi)
-      || (unsigned)unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT) {
+  if (r != GSHGEOM_OK || !is_finite(rx) || !is_finite(ry) || !(rx > 0.0) || !(ry > 0.0)) {
     return GSHGEOM_ERR_INVALID;
   }
   double cp;
@@ -721,8 +728,7 @@ GSHGEOM_Result gshgeom_path_arc_center_to(GSHGEOM_Path * path, GSHGEOM_Point cen
 
 GSHGEOM_Result gshgeom_path_arc_tangent_to(GSHGEOM_Path * path, GSHGEOM_Point p1, GSHGEOM_Point p2, double r) {
   GSHGEOM_Result res = begin_check(path);
-  if (res != GSHGEOM_OK || !path->has_current || !is_finite(r) || r < 0.0 || !is_finite(p1.x) || !is_finite(p1.y)
-      || !is_finite(p2.x) || !is_finite(p2.y)) {
+  if (res != GSHGEOM_OK || !is_finite(r) || r < 0.0) {
     return GSHGEOM_ERR_INVALID;
   }
   const GSHGEOM_Point p0 = pt(path->current.x, path->current.y);
@@ -733,7 +739,8 @@ GSHGEOM_Result gshgeom_path_arc_tangent_to(GSHGEOM_Path * path, GSHGEOM_Point p1
   if (res != GSHGEOM_OK) {
     return res;
   }
-  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0 || sign == 0) {
+  /* A point that is the same as its neighbour (the first as the second, the second as the third) is collinear with them: the sign is 0. */
+  if (r == 0.0 || sign == 0) {
     return gshgeom_path_line_to(path, p1);
   }
   const double l0 = gmath_hypot(p0.x - p1.x, p0.y - p1.y);
@@ -778,7 +785,7 @@ GSHGEOM_Result gshgeom_path_arc_tangent_to(GSHGEOM_Path * path, GSHGEOM_Point p1
 
 GSHGEOM_Result gshgeom_path_arc_bulge_to(GSHGEOM_Path * path, GSHGEOM_Point q, double bulge) {
   GSHGEOM_Result res = begin_check(path);
-  if (res != GSHGEOM_OK || !path->has_current || !is_finite(bulge) || !is_finite(q.x) || !is_finite(q.y)) {
+  if (res != GSHGEOM_OK || !path->has_current || !is_finite(bulge)) {
     return GSHGEOM_ERR_INVALID;
   }
   const GSHGEOM_Point s = pt(path->current.x, path->current.y);

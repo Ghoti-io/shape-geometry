@@ -120,6 +120,28 @@ TEST(ArcAttack, TheToleranceOfTheAgreementCountsTheCentre) {
   EXPECT_EQ(append(a), GSHGEOM_ERR_INVALID);
 }
 
+TEST(ArcAttack, AnEndPastTheLimitOfQuarterTurnsIsALimitWhenTheStartIsNot) {
+  // t0 is exactly at the limit of 2^40 quarter turns and the sweep carries the end one quarter past it: the point of the end cannot be
+  // read, and the record is a limit (the code of the angle), not a disagreement of the end
+  const double t0 = 90.0 * 0x1p40;
+  GSHGEOM_Arc a = unit_arc();
+  a.t0 = t0;
+  a.sweep = 90;
+  a.start = P(1, 0);   // t0 is a whole number of turns
+  a.end = P(0, 1);
+  EXPECT_EQ(append(a), GSHGEOM_ERR_LIMIT);
+  GSHGEOM_Arc b = a;
+  b.sweep = -90;       // the other way, the end is inside the limit and the record is as good as any
+  b.end = P(0, -1);
+  EXPECT_EQ(append(b), GSHGEOM_OK);
+  // the same through the conjugate form, which reads the end itself
+  GSHGEOM_Path * p = make();
+  GSHGEOM_Arc_Form f = {P(0, 0), P(1, 0), P(0, 1), GSHGEOM_ANGLE_DEGREES, t0, 90, GSHGEOM_ARC_CIRCULAR};
+  EXPECT_EQ(gshgeom_path_arc_conjugate_to(p, &f, nullptr), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_path_element_count(p), 0u);
+  gshgeom_path_destroy(p);
+}
+
 // ---------------------------------------------------------------------------
 // gshgeom_arc_pieces and the lowering
 // ---------------------------------------------------------------------------

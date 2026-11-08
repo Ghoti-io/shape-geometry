@@ -48,6 +48,7 @@
 #include <ghoti.io/shape-geometry/stroke.h>
 
 #include "../exact/exact.h"
+#include "lattice_internal.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -337,9 +338,13 @@ typedef struct Probe {
   int var;        /* 0: the variable is i; 1: it is j */
   int64_t other;  /* the other index */
   int dir;        /* +1: feasible for small values; -1: for large ones (t = -v) */
+  uint64_t * work; /* counts the evaluations, or NULL */
 } Probe;
 
 static int feasible(const Probe * p, int64_t t) {
+  if (p->work) {
+    ++*p->work;
+  }
   const int64_t v = p->dir > 0 ? t : -t;
   return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) <= 0;
 }
@@ -401,7 +406,7 @@ static int64_t last_feasible(const Probe * p, int64_t est) {
  * The integers `v` of the variable @p var (0: i, 1: j), with the other index @p other, that satisfy every constraint: an
  * interval, clamped to the index range.  Returns 0 when there are none.
  */
-static int interval(const Con * ks, size_t n, int var, int64_t other, int64_t * lo, int64_t * hi) {
+static int interval(const Con * ks, size_t n, int var, int64_t other, int64_t * lo, int64_t * hi, uint64_t * work) {
   int64_t l = -INDEX_MAX;
   int64_t h = INDEX_MAX;
   for (size_t m = 0; m < n; m++) {
@@ -411,6 +416,9 @@ static int interval(const Con * ks, size_t n, int var, int64_t other, int64_t * 
     const int cvs = var == 0 ? k->cs : k->es;
     if (cvs == 0) {
       /* The variable does not appear: the row is feasible or not as a whole. */
+      if (work) {
+        ++*work;
+      }
       if (con_sign(k, var == 0 ? 0 : other, var == 0 ? other : 0) > 0) {
         return 0;
       }
@@ -421,17 +429,17 @@ static int interval(const Con * ks, size_t n, int var, int64_t other, int64_t * 
     p.var = var;
     p.other = other;
     p.dir = cvs > 0 ? 1 : -1;
+    p.work = work;
     const double vstar = -(co * i2d(other) + k->g) / cv;
     const int64_t est = d2i_floor_clamped(p.dir > 0 ? vstar : -vstar);
+    /* `t` is -INDEX_MAX - 1 when no index is feasible: then `h` falls below `l` (or `l` rises past `h`) and the test below ends the search. */
     const int64_t t = last_feasible(&p, est);
-    if (t < -INDEX_MAX) {
-      return 0;
-    }
     if (p.dir > 0) {
       h = t < h ? t : h;
     } else {
       l = -t > l ? -t : l;
     }
+    /* An interval that is empty is not searched further: each of the constraints that follow costs a gallop from its estimate. */
     if (l > h) {
       return 0;
     }
@@ -477,8 +485,12 @@ static void dir_set(Dir * d, double ux1, double ux0, double uy1, double uy0) {
   d->uy0 = uy0;
 }
 
-GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Lattice * l, const int64_t rect[4], uint64_t max_count,
-    GSHGEOM_Lattice_Row_Fn row_fn, void * ctx, uint64_t * count) {
+GSHGEOM_Result gshgeom_lattice_each_counted(const GSHGEOM_Map * map, const GSHGEOM_Lattice * l, const int64_t rect[4], uint64_t max_count,
+    GSHGEOM_Lattice_Row_Fn row_fn, void * ctx, uint64_t * count, GSHGEOM_Lattice_Stats * stats) {
+  uint64_t * work = stats ? &stats->evaluations : NULL;
+  if (stats) {
+    stats->evaluations = 0;
+  }
   if (!count || !rect || !map_ok(map) || !lattice_valid(l) || max_count > (uint64_t)INDEX_MAX) {
     return GSHGEOM_ERR_INVALID;
   }
@@ -551,7 +563,7 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
     for (int a = 0; a < 4; a++) {
       for (int b = a + 1; b < 4; b++) {
         if (cx.Q[a][0] == cx.Q[b][0] && cx.Q[a][1] == cx.Q[b][1]) {
-          continue;
+          continue; /* the direction zero: its half-plane `0 <= 0` bounds nothing, and each one is a test of every row */
         }
         /* n = (-(by - ay), bx - ax) and -n */
         dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);
@@ -566,13 +578,13 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
   if (!rx && !ry) {
     int64_t lo;
     int64_t hi;
-    if (interval(ks, nk, 0, 0, &lo, &hi) && lo <= 0 && 0 <= hi) {
+    if (interval(ks, nk, 0, 0, &lo, &hi, work) && lo <= 0 && 0 <= hi) {
       (void)emit_row(&em, 0, 0, 0);
     }
   } else if (rx && !ry) {
     int64_t lo;
     int64_t hi;
-    if (interval(ks, nk, 0, 0, &lo, &hi)) {
+    if (interval(ks, nk, 0, 0, &lo, &hi, work)) {
       if (emit_row(&em, 0, lo, hi) == EMIT_LIMIT) {
         result = GSHGEOM_ERR_LIMIT;
       }
@@ -580,7 +592,7 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
   } else if (!rx && ry) {
     int64_t lo;
     int64_t hi;
-    if (interval(ks, nk, 1, 0, &lo, &hi)) {
+    if (interval(ks, nk, 1, 0, &lo, &hi, work)) {
       const uint64_t len = (uint64_t)(hi - lo) + 1u;
       if (!row_fn) {
         if (len > max_count) {
@@ -612,7 +624,7 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
     con_build(&cx, d, &vk[1]);
     int64_t jlo;
     int64_t jhi;
-    if (interval(vk, 2, 1, 0, &jlo, &jhi)) {
+    if (interval(vk, 2, 1, 0, &jlo, &jhi, work)) {
       const uint64_t budget = 2u * max_count + GSHGEOM_LATTICE_ROW_WORK;
       uint64_t visited = 0;
       for (int64_t j = jlo; j <= jhi; j++) {
@@ -623,7 +635,7 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
         }
         int64_t lo;
         int64_t hi;
-        if (!interval(ks, nk, 0, j, &lo, &hi)) {
+        if (!interval(ks, nk, 0, j, &lo, &hi, work)) {
           continue;
         }
         const int s = emit_row(&em, j, lo, hi);
@@ -639,6 +651,11 @@ GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Latti
   }
   *count = em.count;
   return result;
+}
+
+GSHGEOM_Result gshgeom_lattice_each(const GSHGEOM_Map * map, const GSHGEOM_Lattice * l, const int64_t rect[4], uint64_t max_count,
+    GSHGEOM_Lattice_Row_Fn row_fn, void * ctx, uint64_t * count) {
+  return gshgeom_lattice_each_counted(map, l, rect, max_count, row_fn, ctx, count, NULL);
 }
 
 /* --- the integer lattice and the canonical position of a copy (LT5) --------------------------------------------------- */

@@ -83,6 +83,15 @@ size_t gshgeom_path_verb_weights(int verb);
 GSHGEOM_Result gshgeom_path_append_raw(GSHGEOM_Path * path, int verb, unsigned unit,
     unsigned flags, const GSHGEOM_Point * pts, const double * weights);
 
+/** What the decomposition of an arc did: the trigonometric evaluations (the cosine and tangent of the half sweep, and the sine and cosine of each end). */
+typedef struct GSHGEOM_Arc_Stats {
+  unsigned trig;
+} GSHGEOM_Arc_Stats;
+
+/** ::gshgeom_arc_pieces, also counting the evaluations in @p stats (NULL for none): a refusal is reached before the first. */
+GSHGEOM_Result gshgeom_arc_pieces_counted(
+    const GSHGEOM_Arc * arc, GSHGEOM_Curve out[GSHGEOM_ARC_MAX_PIECES], int * np, GSHGEOM_Arc_Stats * stats);
+
 /** The state to return to when a constructor that adds several elements fails part way. */
 typedef struct PathMark {
   size_t el_n, pt_n, wt_n;

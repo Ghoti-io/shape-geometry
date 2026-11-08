@@ -340,6 +340,11 @@ ATTACK_CATCHERS = {
     "lat-can-mul-sign-lost": ["testLattice_oracle"],
     "lat-can-mul-bound-dropped": ["testLattice_oracle"],
     "lat-sign-filter-always-on": ["testLattice_oracle"],
+    "lat-search-empty-not-detected-early": ["testWork_counts"],
+    "ar-pieces-t0-finite-unchecked": ["testWork_counts"],
+    "ar-pieces-sweep-finite-unchecked": ["testWork_counts"],
+    "ar-pieces-unit-unchecked": ["testWork_counts"],
+    "ar-pieces-null-out": ["testWork_counts"],
 }
 
 
@@ -1978,10 +1983,19 @@ ap("ar-valid-agree-start-y-only", ARCS, "  if (absf(p.x - a->start.x) > tol || a
 ap("ar-valid-agree-end-x-only", ARCS, "  if (absf(p.x - a->end.x) > tol || absf(p.y - a->end.y) > tol) {", "  if (absf(p.x - a->end.x) > tol) {", AT)
 ap("ar-valid-agree-end-y-only", ARCS, "  if (absf(p.x - a->end.x) > tol || absf(p.y - a->end.y) > tol) {", "  if (absf(p.y - a->end.y) > tol) {", AT)
 ap("ar-valid-agree-start-inclusive", ARCS, "  if (absf(p.x - a->start.x) > tol || absf(p.y - a->start.y) > tol) {", "  if (absf(p.x - a->start.x) >= tol || absf(p.y - a->start.y) >= tol) {", AT)
+ap("ar-valid-agree-error-lost", ARCS, "  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p); /* past the limit of quarter turns when t0 is not: ::GSHGEOM_ERR_LIMIT */\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n", "  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p);\n", ["testArc_attacks"])
+ap("ar-valid-start-error-lost", ARCS, "  GSHGEOM_Result r = gshgeom_arc_point(&f, a->t0, &p);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n", "  GSHGEOM_Result r = gshgeom_arc_point(&f, a->t0, &p);\n", AT)
+ap("ar-form-end-error-lost", ARCS, "    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);\n    if (r != GSHGEOM_OK) {\n      return r;\n    }\n", "    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);\n", ["testArc_attacks"])
+ap("ar-pieces-null-arc", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", AT)
+ap("ar-pieces-null-count", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!arc || !out || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", AT)
+ap("ar-pieces-zero-sweep-ok", ARCS, "      || !is_finite(arc->t0) || arc->sweep == 0.0) {", "      || !is_finite(arc->t0)) {", AT)
+ap("ar-pieces-null-out", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!arc || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", AT)
+ap("ar-pieces-unit-unchecked", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!arc || !out || !np || !is_finite(arc->sweep)", AT)
+ap("ar-pieces-sweep-finite-unchecked", ARCS, "(unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)\n      || !is_finite(arc->t0) || arc->sweep == 0.0) {", "(unsigned)GSHGEOM_ANGLE_UNIT_COUNT\n      || !is_finite(arc->t0) || arc->sweep == 0.0) {", AT)
+ap("ar-pieces-t0-finite-unchecked", ARCS, "      || !is_finite(arc->t0) || arc->sweep == 0.0) {", "      || arc->sweep == 0.0) {", AT)
 ap("ar-valid-agree-start-at-zero", ARCS, "GSHGEOM_Result r = gshgeom_arc_point(&f, a->t0, &p);", "GSHGEOM_Result r = gshgeom_arc_point(&f, 0.0, &p);", AT)
-ap("ar-valid-agree-end-at-t0", ARCS, "  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p);", "  r = gshgeom_arc_point(&f, a->t0, &p);", AT)
-ap("ar-valid-agree-end-sweep-only", ARCS, "  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p);", "  r = gshgeom_arc_point(&f, a->sweep, &p);", AT)
-ap("ar-valid-agree-error-lost", ARCS, "  GSHGEOM_Result r = gshgeom_arc_point(&f, a->t0, &p);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }", "  GSHGEOM_Result r = gshgeom_arc_point(&f, a->t0, &p);\n  (void)r;", AT)
+ap("ar-valid-agree-end-at-t0", ARCS, "  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p); /* past the limit of quarter turns when t0 is not: ::GSHGEOM_ERR_LIMIT */", "  r = gshgeom_arc_point(&f, a->t0, &p);", AT)
+ap("ar-valid-agree-end-sweep-only", ARCS, "  r = gshgeom_arc_point(&f, a->t0 + a->sweep, &p); /* past the limit of quarter turns when t0 is not: ::GSHGEOM_ERR_LIMIT */", "  r = gshgeom_arc_point(&f, a->sweep, &p);", AT)
 ap("ar-valid-full-turn-needs-no-closure", ARCS, "    return same_xy(a->start, a->end) ? pieces_within_limit(a) : GSHGEOM_ERR_INVALID;", "    return pieces_within_limit(a);", AT)
 ap("ar-valid-full-turn-closes-by-value", ARCS, "    return same_xy(a->start, a->end) ? pieces_within_limit(a) : GSHGEOM_ERR_INVALID;", "    return (a->start.x == a->end.x && a->start.y == a->end.y) ? pieces_within_limit(a) : GSHGEOM_ERR_INVALID;", AT)
 ap("ar-valid-full-turn-never", ARCS, "  if (absf(a->sweep) == turn) {\n    return same_xy", "  if (absf(a->sweep) > turn) {\n    return same_xy", AT)
@@ -2011,10 +2025,8 @@ ap("ar-point-centre-subtracted", ARCS, "  out->x = form->center.x + ix;", "  out
 ap("ar-point-centre-y-dropped", ARCS, "  out->y = form->center.y + iy;", "  out->y = iy;", AT)
 ap("ar-point-v-for-u", ARCS, "  double ix = (form->u.x * c) + (form->v.x * s);", "  double ix = (form->v.x * c) + (form->v.x * s);", AT)
 ap("ar-point-z-kept", ARCS, "  out->y = form->center.y + iy;\n  out->z = 0.0;", "  out->y = form->center.y + iy;\n  out->z = form->center.z;", AT)
-ap("ar-point-unit-unchecked", ARCS, "  if (!form || !out || (unsigned)form->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT) {", "  if (!form || !out) {", AT)
-ap("ar-point-null-form", ARCS, "  if (!form || !out || (unsigned)form->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT) {", "  if (!out || (unsigned)form->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT) {", AT)
+ap("ar-point-null-form", ARCS, "  if (!form || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double c;", "  if (!out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double c;", AT)
 ap("ar-point-sincos-error-lost", ARCS, "  GSHGEOM_Result r = gshgeom_sincos(form->unit, t, &c, &s);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  double ix", "  GSHGEOM_Result r = gshgeom_sincos(form->unit, t, &c, &s);\n  (void)r;\n  double ix", AT)
-ap("ar-formof-flags-dropped", ARCS, "  f.sweep = a->sweep;\n  f.flags = a->flags;\n  return f;", "  f.sweep = a->sweep;\n  f.flags = 0u;\n  return f;", AT)
 
 # AR1, AR15: appending and reading back a record.
 ap("ar-append-3d-path", ARCS, "  if (path->dim != 2 || !path->has_current) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = validate", "  if (!path->has_current) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = validate", AT)
@@ -2043,13 +2055,6 @@ ap("ar-readback-t0-sweep-swapped", ARCS, "  a.t0 = path->wt[e->weight];\n  a.swe
 ap("ar-readback-flags-dropped", ARCS, "  a.flags = e->flags;\n  *out = a;", "  a.flags = 0u;\n  *out = a;", AT)
 ap("ar-readback-out-unwritten", ARCS, "  a.flags = e->flags;\n  *out = a;\n  return GSHGEOM_OK;", "  a.flags = e->flags;\n  return GSHGEOM_OK;", AT)
 # AR8: the decomposition.
-ap("ar-pieces-null-arc", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", AT)
-ap("ar-pieces-null-out", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!arc || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", AT)
-ap("ar-pieces-null-count", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!arc || !out || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", AT)
-ap("ar-pieces-unit-unchecked", ARCS, "  if (!arc || !out || !np || (unsigned)arc->unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)", "  if (!arc || !out || !np || !is_finite(arc->sweep)", AT)
-ap("ar-pieces-sweep-finite-unchecked", ARCS, "(unsigned)GSHGEOM_ANGLE_UNIT_COUNT || !is_finite(arc->sweep)\n      || !is_finite(arc->t0) || arc->sweep == 0.0) {", "(unsigned)GSHGEOM_ANGLE_UNIT_COUNT\n      || !is_finite(arc->t0) || arc->sweep == 0.0) {", AT)
-ap("ar-pieces-t0-finite-unchecked", ARCS, "      || !is_finite(arc->t0) || arc->sweep == 0.0) {", "      || arc->sweep == 0.0) {", AT)
-ap("ar-pieces-zero-sweep-ok", ARCS, "      || !is_finite(arc->t0) || arc->sweep == 0.0) {", "      || !is_finite(arc->t0)) {", AT)
 ap("ar-pieces-one-quarter-is-two", ARCS, "  if (a <= q) {\n    n = 1;", "  if (a < q) {\n    n = 1;", AT)
 ap("ar-pieces-two-quarters-is-three", ARCS, "  } else if (a <= 2.0 * q) {\n    n = 2;", "  } else if (a < 2.0 * q) {\n    n = 2;", AT)
 ap("ar-pieces-three-quarters-is-four", ARCS, "  } else if ((a - 2.0 * q) <= q) {\n    n = 3;", "  } else if ((a - 2.0 * q) < q) {\n    n = 3;", AT)
@@ -2286,7 +2291,6 @@ ap("ar-form-point-error-lost", ARCS, "  r = gshgeom_arc_point(form, form->t0, &p
 ap("ar-form-start-ignores-current", ARCS, "  a.start = path->has_current ? pt(path->current.x, path->current.y) : p0;", "  a.start = p0;", AT)
 ap("ar-form-start-always-current", ARCS, "  a.start = path->has_current ? pt(path->current.x, path->current.y) : p0;", "  a.start = pt(path->current.x, path->current.y);", AT)
 ap("ar-form-start-from-end", ARCS, "  a.start = path->has_current ? pt(path->current.x, path->current.y) : p0;", "  a.start = path->has_current ? pt(path->start.x, path->start.y) : p0;", AT)
-ap("ar-form-centre-z-kept", ARCS, "  a.center.z = 0.0;\n  a.u = form->u;", "  a.u = form->u;", AT)
 ap("ar-form-flags-dropped", ARCS, "  a.sweep = form->sweep;\n  a.flags = form->flags;\n  if (end) {", "  a.sweep = form->sweep;\n  a.flags = 0u;\n  if (end) {", AT)
 ap("ar-form-unit-dropped", ARCS, "  a.unit = form->unit;\n  a.t0 = form->t0;", "  a.unit = GSHGEOM_ANGLE_RADIANS;\n  a.t0 = form->t0;", AT)
 ap("ar-form-end-override-ignored", ARCS, "  if (end) {\n    a.end = pt(end->x, end->y);\n  } else if", "  if (0) {\n    a.end = pt(end->x, end->y);\n  } else if", AT)
@@ -2295,9 +2299,8 @@ ap("ar-form-turn-ignores-unit", ARCS, "  } else if (is_finite(form->sweep) && ab
 ap("ar-form-turn-needs-no-closure", ARCS, "  } else if (is_finite(form->sweep) && absf(form->sweep) == turn_of(form->unit)) {\n    a.end = a.start;", "  } else if (0) {\n    a.end = a.start;", AT)
 ap("ar-form-turn-closes-to-p0", ARCS, "    a.end = a.start;\n  } else {\n    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", "    a.end = p0;\n  } else {\n    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", AT)
 ap("ar-form-turn-closes-at-all-sweeps", ARCS, "absf(form->sweep) == turn_of(form->unit)) {", "absf(form->sweep) >= 0.5 * turn_of(form->unit)) {", AT)
-ap("ar-form-end-at-t0", ARCS, "    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", "    r = gshgeom_arc_point(form, form->t0, &a.end);", AT)
-ap("ar-form-end-at-sweep", ARCS, "    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", "    r = gshgeom_arc_point(form, form->sweep, &a.end);", AT)
-ap("ar-form-end-error-lost", ARCS, "    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);\n    if (r != GSHGEOM_OK) {\n      return r;\n    }", "    r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", AT)
+ap("ar-form-end-at-t0", ARCS, "r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", "r = gshgeom_arc_point(form, form->t0, &a.end);", AT)
+ap("ar-form-end-at-sweep", ARCS, "r = gshgeom_arc_point(form, form->t0 + form->sweep, &a.end);", "r = gshgeom_arc_point(form, form->sweep, &a.end);", AT)
 ap("ar-form-move-then-validate-skipped", ARCS, "    r = validate(&a, a.start, path->el_n + 1 < path->max_elements);\n    if (r != GSHGEOM_OK) {\n      return r;\n    }\n    r = gshgeom_path_move_to(path, a.start);", "    r = gshgeom_path_move_to(path, a.start);", AT)
 ap("ar-form-move-room-off-by-one", ARCS, "    r = validate(&a, a.start, path->el_n + 1 < path->max_elements);", "    r = validate(&a, a.start, path->el_n < path->max_elements);", AT)
 ap("ar-form-move-room-ignored", ARCS, "    r = validate(&a, a.start, path->el_n + 1 < path->max_elements);", "    r = validate(&a, a.start, 1);", AT)
@@ -2305,12 +2308,10 @@ ap("ar-form-move-room-too-strict", ARCS, "    r = validate(&a, a.start, path->el
 ap("ar-form-move-error-lost", ARCS, "    r = gshgeom_path_move_to(path, a.start);\n    if (r != GSHGEOM_OK) {\n      return r;\n    }\n  }\n  r = append_checked", "    r = gshgeom_path_move_to(path, a.start);\n  }\n  r = append_checked", AT)
 ap("ar-form-move-not-rolled-back", ARCS, "  r = append_checked(path, &a);\n  if (r != GSHGEOM_OK) {\n    path_rollback(path, &mark);\n  }\n  return r;\n}\n\nGSHGEOM_Result gshgeom_path_arc_conjugate_to", "  r = append_checked(path, &a);\n  return r;\n}\n\nGSHGEOM_Result gshgeom_path_arc_conjugate_to", AT)
 ap("ar-form-mark-after-move", ARCS, "  PathMark mark;\n  path_mark(path, &mark);\n  if (!path->has_current) {\n    /* a subpath begins", "  PathMark mark;\n  memset(&mark, 0, sizeof mark);\n  if (!path->has_current) {\n    /* a subpath begins", AT)
-ap("ar-center-radii-zero-ok", ARCS, "|| !is_finite(rx) || !is_finite(ry) || !(rx > 0.0) || !(ry > 0.0) || !is_finite(phi)", "|| !is_finite(rx) || !is_finite(ry) || !(rx >= 0.0) || !(ry >= 0.0) || !is_finite(phi)", AT)
-ap("ar-center-rx-sign-unchecked", ARCS, "|| !(rx > 0.0) || !(ry > 0.0) ||", "|| !(ry > 0.0) ||", AT)
-ap("ar-center-ry-sign-unchecked", ARCS, "|| !(rx > 0.0) || !(ry > 0.0) ||", "|| !(rx > 0.0) ||", AT)
+ap("ar-center-radii-zero-ok", ARCS, "|| !(rx > 0.0) || !(ry > 0.0)) {", "|| !(rx >= 0.0) || !(ry >= 0.0)) {", AT)
+ap("ar-center-rx-sign-unchecked", ARCS, "|| !(rx > 0.0) || !(ry > 0.0)) {", "|| !(ry > 0.0)) {", AT)
+ap("ar-center-ry-sign-unchecked", ARCS, "|| !(rx > 0.0) || !(ry > 0.0)) {", "|| !(rx > 0.0)) {", AT)
 ap("ar-center-rx-finite-unchecked", ARCS, "  if (r != GSHGEOM_OK || !is_finite(rx) || !is_finite(ry) || !(rx > 0.0)", "  if (r != GSHGEOM_OK || !is_finite(ry) || !(rx > 0.0)", AT)
-ap("ar-center-phi-finite-unchecked", ARCS, "|| !(ry > 0.0) || !is_finite(phi)\n      || (unsigned)unit", "|| !(ry > 0.0)\n      || (unsigned)unit", AT)
-ap("ar-center-unit-unchecked", ARCS, "|| !is_finite(phi)\n      || (unsigned)unit >= (unsigned)GSHGEOM_ANGLE_UNIT_COUNT) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double cp;", "|| !is_finite(phi)) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  double cp;", AT)
 ap("ar-center-sincos-error-lost", ARCS, "  r = gshgeom_sincos(unit, phi, &cp, &sp);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  GSHGEOM_Arc_Form f;", "  r = gshgeom_sincos(unit, phi, &cp, &sp);\n  GSHGEOM_Arc_Form f;", AT)
 ap("ar-center-u-from-ry", ARCS, "  f.u = pt(rx * cp, rx * sp);\n  f.v = pt(ry * (0.0 - sp), ry * cp);", "  f.u = pt(ry * cp, ry * sp);\n  f.v = pt(ry * (0.0 - sp), ry * cp);", AT)
 ap("ar-center-v-from-rx", ARCS, "  f.u = pt(rx * cp, rx * sp);\n  f.v = pt(ry * (0.0 - sp), ry * cp);", "  f.u = pt(rx * cp, rx * sp);\n  f.v = pt(rx * (0.0 - sp), rx * cp);", AT)
@@ -2325,18 +2326,12 @@ ap("ar-center-sweep-dropped", ARCS, "  f.t0 = t0;\n  f.sweep = sweep;\n  f.flags
 ap("ar-center-unit-dropped", ARCS, "  f.unit = unit;\n  f.t0 = t0;", "  f.unit = GSHGEOM_ANGLE_RADIANS;\n  f.t0 = t0;", AT)
 ap("ar-center-centre-dropped", ARCS, "  f.center = center;\n  f.u = pt(rx * cp, rx * sp);", "  f.center = pt(0.0, 0.0);\n  f.u = pt(rx * cp, rx * sp);", AT)
 # AR7: the tangent forms.
-ap("ar-tangent-no-current-point", ARCS, "  if (res != GSHGEOM_OK || !path->has_current || !is_finite(r) || r < 0.0 || !is_finite(p1.x)", "  if (res != GSHGEOM_OK || !is_finite(r) || r < 0.0 || !is_finite(p1.x)", AT)
-ap("ar-tangent-radius-nonfinite", ARCS, "|| !path->has_current || !is_finite(r) || r < 0.0 || !is_finite(p1.x)", "|| !path->has_current || r < 0.0 || !is_finite(p1.x)", AT)
-ap("ar-tangent-radius-negative", ARCS, "|| !path->has_current || !is_finite(r) || r < 0.0 || !is_finite(p1.x)", "|| !path->has_current || !is_finite(r) || !is_finite(p1.x)", AT)
-ap("ar-tangent-radius-zero-refused", ARCS, "|| !path->has_current || !is_finite(r) || r < 0.0 || !is_finite(p1.x)", "|| !path->has_current || !is_finite(r) || r <= 0.0 || !is_finite(p1.x)", AT)
-ap("ar-tangent-p1x-unchecked", ARCS, "|| !is_finite(p1.x) || !is_finite(p1.y)\n      || !is_finite(p2.x) || !is_finite(p2.y)) {", "|| !is_finite(p1.y)\n      || !is_finite(p2.x) || !is_finite(p2.y)) {", AT)
-ap("ar-tangent-p2y-unchecked", ARCS, "|| !is_finite(p1.x) || !is_finite(p1.y)\n      || !is_finite(p2.x) || !is_finite(p2.y)) {", "|| !is_finite(p1.x) || !is_finite(p1.y)\n      || !is_finite(p2.x)) {", AT)
+ap("ar-tangent-radius-nonfinite", ARCS, "|| !is_finite(r) || r < 0.0) {", "|| r < 0.0) {", AT)
+ap("ar-tangent-radius-negative", ARCS, "|| !is_finite(r) || r < 0.0) {", "|| !is_finite(r)) {", AT)
+ap("ar-tangent-radius-zero-refused", ARCS, "|| !is_finite(r) || r < 0.0) {", "|| !is_finite(r) || r <= 0.0) {", AT)
 ap("ar-tangent-orient-error-lost", ARCS, "  res = gshgeom_orient2d(p0, p1, p2, &sign);\n  if (res != GSHGEOM_OK) {\n    return res;\n  }", "  res = gshgeom_orient2d(p0, p1, p2, &sign);", AT)
-ap("ar-tangent-p0-equals-p1-by-value", ARCS, "  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0 || sign == 0) {", "  if ((p0.x == p1.x && p0.y == p1.y) || same_xy(p1, p2) || r == 0.0 || sign == 0) {", AT)
-ap("ar-tangent-p0-equals-p1-ignored", ARCS, "  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0 || sign == 0) {", "  if (same_xy(p1, p2) || r == 0.0 || sign == 0) {", AT)
-ap("ar-tangent-p1-equals-p2-ignored", ARCS, "  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0 || sign == 0) {", "  if (same_xy(p0, p1) || r == 0.0 || sign == 0) {", AT)
-ap("ar-tangent-zero-radius-ignored", ARCS, "  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0 || sign == 0) {", "  if (same_xy(p0, p1) || same_xy(p1, p2) || sign == 0) {", AT)
-ap("ar-tangent-collinear-ignored", ARCS, "  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0 || sign == 0) {", "  if (same_xy(p0, p1) || same_xy(p1, p2) || r == 0.0) {", AT)
+ap("ar-tangent-zero-radius-ignored", ARCS, "  if (r == 0.0 || sign == 0) {", "  if (sign == 0) {", AT)
+ap("ar-tangent-collinear-ignored", ARCS, "  if (r == 0.0 || sign == 0) {", "  if (r == 0.0) {", AT)
 ap("ar-tangent-line-to-p2", ARCS, "    return gshgeom_path_line_to(path, p1);\n  }\n  const double l0", "    return gshgeom_path_line_to(path, p2);\n  }\n  const double l0", AT)
 ap("ar-tangent-l0-is-l2", ARCS, "  const double l0 = gmath_hypot(p0.x - p1.x, p0.y - p1.y);", "  const double l0 = gmath_hypot(p2.x - p1.x, p2.y - p1.y);", AT)
 ap("ar-tangent-l2-is-l0", ARCS, "  const double l2 = gmath_hypot(p2.x - p1.x, p2.y - p1.y);", "  const double l2 = gmath_hypot(p0.x - p1.x, p0.y - p1.y);", AT)
@@ -2373,8 +2368,7 @@ ap("ar-tangent-line-error-lost", ARCS, "    res = gshgeom_path_line_to(path, t1)
 ap("ar-tangent-not-rolled-back", ARCS, "  res = append_checked(path, &a);\n  if (res != GSHGEOM_OK) {\n    path_rollback(path, &mark);\n  }\n  return res;", "  res = append_checked(path, &a);\n  return res;", AT)
 # AR7: the bulge.
 ap("ar-bulge-no-current-point", ARCS, "  if (res != GSHGEOM_OK || !path->has_current || !is_finite(bulge)", "  if (res != GSHGEOM_OK || !is_finite(bulge)", AT)
-ap("ar-bulge-nonfinite", ARCS, "|| !path->has_current || !is_finite(bulge) || !is_finite(q.x)", "|| !path->has_current || !is_finite(q.x)", AT)
-ap("ar-bulge-q-nonfinite", ARCS, "|| !is_finite(bulge) || !is_finite(q.x) || !is_finite(q.y)) {", "|| !is_finite(bulge)) {", AT)
+ap("ar-bulge-nonfinite", ARCS, "|| !path->has_current || !is_finite(bulge)) {", "|| !path->has_current) {", AT)
 ap("ar-bulge-same-end-by-value", ARCS, "  if (same_xy(s, q)) {\n    return GSHGEOM_OK;", "  if (s.x == q.x && s.y == q.y) {\n    return GSHGEOM_OK;", AT)
 ap("ar-bulge-same-end-adds-line", ARCS, "  if (same_xy(s, q)) {\n    return GSHGEOM_OK;", "  if (same_xy(s, q)) {\n    return gshgeom_path_line_to(path, q);", AT)
 ap("ar-bulge-same-end-ignored", ARCS, "  if (same_xy(s, q)) {\n    return GSHGEOM_OK;\n  }\n  if (bulge == 0.0) {", "  if (bulge == 0.0) {", AT)
@@ -2827,7 +2821,7 @@ ap('sh-quarter-sweep-ignored', 'src/path/shapes.c', '  a.sweep = sweep;\n  a.fla
 # @@A2-PLANTS-END@@
 # The plants below were run and not caught, and are not shown to be a defect: see "Exact arcs: what is not planted" in the header.
 # They stay in the file as data, outside the sweep; PLANT_UNSEEN=1 adds them (each then fails the sweep, as it did).
-ARC_UNSEEN = {'ar-tangent-p2y-unchecked', 'ar-point-unit-unchecked', 'ar-append-null-arc', 'ar-pieces-curve-error-lost', 'ar-readback-index-unchecked', 'ar-sum-double-scale-up-step', 'arw-lower-cubic-arc-weight-first-piece', 'ar-sum-double-scale-down-step', 'ar-pieces-unit-unchecked', 'rat-forced-not-an-error', 'ar-endpoint-midpoint-sum', 'ar-tangent-no-current-point', 'arw-stroke-arc-seam-from-index', 'arw-dash-arc-piece-weight-one', 'ar-endpoint-fits-at-equality', 'arw-bounds-element-error-lost', 'ar-formof-flags-dropped', 'ar-valid-agree-error-lost', 'arw-dump-arc-head-error-lost', 'arw-lower-cubic-element-error-lost', 'ar-endpoint-no-current-point', 'ar-bulge-no-current-point', 'ar-center-rx-finite-unchecked', 'ar-sum-double-top-word', 'arw-stroke-clip-device-tolerance-default', 'ar-lower-pieces-error-lost', 'arw-lower-cubic-arc-weight-unstandardized', 'ar-tangent-line-error-lost', 'ar-form-move-then-validate-skipped', 'ar-pieces-weight-quarter-constant', 'ar-tangent-p0-equals-p1-by-value', 'ar-tangent-radius-negative', 'ar-valid-limit-before-flat', 'ar-pieces-t0-finite-unchecked', 'ar-endpoint-limit-u-unchecked', 'ar-endpoint-mag-clamp-constant', 'arw-vertex-element-move-reads-seg', 'arw-dash-nonarc-origin-always', 'ar-pieces-quarter-test-eighth-of-radians', 'ar-center-radii-zero-ok', 'arw-dash-locate-origin-bound', 'ar-map-circular-by-numbers', 'ar-endpoint-limit-v-unchecked', 'arw-lower-cubic-arc-pieces-error-lost', 'ar-endpoint-limit-end-unchecked', 'ar-pieces-sweep-finite-unchecked', 'ar-tangent-orient-error-lost', 'arw-vertex-arc-pieces-error-lost', 'ar-bulge-nonfinite', 'ar-sum-double-sign-bit', 'arw-element-start-of-first', 'arw-dash-locate-search-element-checked', 'ar-map-error-lost-centre', 'ar-form-centre-z-kept', 'arw-dash-origin-count-not-reset', 'ar-circle-radius-not-hypot', 'ar-tangent-radius-nonfinite', 'ar-bulge-centre-midpoint-sum', 'ar-valid-t0-limit-sign', 'ar-form-end-error-lost', 'ar-sum-double-renormalize-dropped', 'ar-tangent-line-to-t1-by-value', 'ar-form-move-room-ignored', 'ar-valid-unit-unchecked', 'arw-bounds-curve-error-lost', 'arw-dump-arc-weights-error-lost', 'arw-vertex-element-error-lost', 'arw-measure-arc-pieces-error-lost', 'cvx-arc-device-pieces-error-lost', 'ar-form-move-room-off-by-one', 'ar-pieces-null-out', 'arw-stroke-arc-pieces-error-lost', 'ar-tangent-not-rolled-back', 'ar-tangent-p1x-unchecked', 'ar-map-error-lost-final', 'ar-map-general-keeps-circular', 'ar-sum-double-sticky-start', 'ar-sum-double-below-zero-filled', 'ar-center-phi-finite-unchecked', 'ar-map-singular-accepted', 'arw-dump-arc-vectors-error-lost', 'ar-bulge-q-nonfinite', 'arw-equal-verb-ignored', 'ar-tangent-p0-equals-p1-ignored', 'ar-sum-double-bad-is-value', 'ar-form-point-error-lost', 'ar-append-no-current-point', 'arw-bounds-arc-pieces-error-lost', 'arw-dash-arc-pieces-error-lost', 'ar-endpoint-end-x-unchecked', 'arw-dash-seam-join', 'ar-map-unchecked', 'ar-center-unit-unchecked', 'ar-tangent-p1-equals-p2-ignored', 'cvx-arc-device-verb-error-lost', 'ar-endpoint-end-y-unchecked', 'ar-valid-scale-without-centre', 'arw-dash-seam-join-of-this', 'cvx-arc-device-piece-weights-first', 'cvx-arc-device-readback-error-hidden', 'ar-endpoint-unit-unchecked'}
+ARC_UNSEEN = {"ar-pieces-t0-finite-unchecked", "ar-pieces-sweep-finite-unchecked", "ar-pieces-unit-unchecked", "ar-pieces-null-out", 'ar-append-null-arc', 'ar-pieces-curve-error-lost', 'ar-readback-index-unchecked', 'ar-sum-double-scale-up-step', 'arw-lower-cubic-arc-weight-first-piece', 'ar-sum-double-scale-down-step', 'rat-forced-not-an-error', 'ar-endpoint-midpoint-sum', 'arw-stroke-arc-seam-from-index', 'arw-dash-arc-piece-weight-one', 'ar-endpoint-fits-at-equality', 'arw-bounds-element-error-lost', 'arw-dump-arc-head-error-lost', 'arw-lower-cubic-element-error-lost', 'ar-endpoint-no-current-point', 'ar-bulge-no-current-point', 'ar-center-rx-finite-unchecked', 'ar-sum-double-top-word', 'arw-stroke-clip-device-tolerance-default', 'ar-lower-pieces-error-lost', 'arw-lower-cubic-arc-weight-unstandardized', 'ar-tangent-line-error-lost', 'ar-form-move-then-validate-skipped', 'ar-pieces-weight-quarter-constant', 'ar-tangent-radius-negative', 'ar-valid-limit-before-flat', 'ar-endpoint-limit-u-unchecked', 'ar-endpoint-mag-clamp-constant', 'arw-vertex-element-move-reads-seg', 'arw-dash-nonarc-origin-always', 'ar-pieces-quarter-test-eighth-of-radians', 'ar-center-radii-zero-ok', 'arw-dash-locate-origin-bound', 'ar-map-circular-by-numbers', 'ar-endpoint-limit-v-unchecked', 'arw-lower-cubic-arc-pieces-error-lost', 'ar-endpoint-limit-end-unchecked', 'ar-tangent-orient-error-lost', 'arw-vertex-arc-pieces-error-lost', 'ar-bulge-nonfinite', 'ar-sum-double-sign-bit', 'arw-element-start-of-first', 'arw-dash-locate-search-element-checked', 'ar-map-error-lost-centre', 'arw-dash-origin-count-not-reset', 'ar-circle-radius-not-hypot', 'ar-tangent-radius-nonfinite', 'ar-bulge-centre-midpoint-sum', 'ar-valid-t0-limit-sign', 'ar-sum-double-renormalize-dropped', 'ar-tangent-line-to-t1-by-value', 'ar-form-move-room-ignored', 'ar-valid-unit-unchecked', 'arw-bounds-curve-error-lost', 'arw-dump-arc-weights-error-lost', 'arw-vertex-element-error-lost', 'arw-measure-arc-pieces-error-lost', 'cvx-arc-device-pieces-error-lost', 'ar-form-move-room-off-by-one', 'arw-stroke-arc-pieces-error-lost', 'ar-tangent-not-rolled-back', 'ar-map-error-lost-final', 'ar-map-general-keeps-circular', 'ar-sum-double-sticky-start', 'ar-sum-double-below-zero-filled', 'ar-map-singular-accepted', 'arw-dump-arc-vectors-error-lost', 'arw-equal-verb-ignored', 'ar-sum-double-bad-is-value', 'ar-form-point-error-lost', 'ar-append-no-current-point', 'arw-bounds-arc-pieces-error-lost', 'arw-dash-arc-pieces-error-lost', 'ar-endpoint-end-x-unchecked', 'arw-dash-seam-join', 'ar-map-unchecked', 'cvx-arc-device-verb-error-lost', 'ar-endpoint-end-y-unchecked', 'ar-valid-scale-without-centre', 'arw-dash-seam-join-of-this', 'cvx-arc-device-piece-weights-first', 'cvx-arc-device-readback-error-hidden', 'ar-endpoint-unit-unchecked'}
 # Named primitives (shapes.h): four plants of the limit and finiteness pre-checks that no input separates from the code without them.  Every
 # coordinate is also checked by the path verb that stores it (a point past the limit is ::GSHGEOM_ERR_LIMIT, a quarter arc's ends and
 # half-diameters likewise), and a failed call is rolled back, so a pre-check that looks at one point instead of all of them, or at the
@@ -2881,13 +2875,17 @@ def cp(pid, old, new, tests=CT, fname=CL):
 
 
 # the quadrilateral (CK1)
-cp("clip-quad-clockwise-refused", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (sigma <= 0 || (turn[1] == 0 && turn[3] == 0)) {")
-cp("clip-quad-counterclockwise-refused", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (sigma >= 0 || (turn[1] == 0 && turn[3] == 0)) {")
+cp("clip-quad-repeated-side-cuts", "    if (a.x == b.x && a.y == b.y) {\n      continue; /* a side of zero length cuts nothing, and would be a pass over every point of every contour */\n    }\n    sides[n].a = a;", "    sides[n].a = a;", ["testWork_counts"])
+cp("clip-limit-per-contour", "    if (count > max_points - gshgeom_flat_path_point_count(result)) {", "    if (count > max_points) {")
+cp("clip-limit-ignores-limits", "  const size_t max_points = (limits && limits->max_points) ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n  GSHGEOM_Clip_Stats", "  const size_t max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n  GSHGEOM_Clip_Stats")
+cp("clip-limit-off-by-one", "    if (count > max_points - gshgeom_flat_path_point_count(result)) {", "    if (count >= max_points - gshgeom_flat_path_point_count(result)) {")
+cp("clip-limit-error-lost", "      status = GSHGEOM_ERR_LIMIT; /* decided before the contour is copied, not by the add that meets the cap */\n      break;", "      continue;")
+cp("clip-quad-clockwise-refused", "  if (sigma == 0) {\n    return GSHGEOM_ERR_INVALID;", "  if (sigma <= 0) {\n    return GSHGEOM_ERR_INVALID;")
+cp("clip-quad-counterclockwise-refused", "  if (sigma == 0) {\n    return GSHGEOM_ERR_INVALID;", "  if (sigma >= 0) {\n    return GSHGEOM_ERR_INVALID;")
 cp("clip-quad-nonconvex-accepted", "      if (sigma != 0 && turn[i] != sigma) {\n        return GSHGEOM_ERR_INVALID; /* turns of both signs: not convex */\n      }\n", "      if (sigma != 0 && turn[i] != sigma) {\n        /* accepted */\n      }\n")
-cp("clip-quad-collinear-accepted", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (0) {")
+cp("clip-quad-collinear-accepted", "  if (sigma == 0) {\n    return GSHGEOM_ERR_INVALID;", "  if (0) {\n    return GSHGEOM_ERR_INVALID;")
 cp("clip-quad-turn-uses-wrong-corner", "gshgeom_orient2d_exact(as_point(quad[(i + 3) % 4]), as_point(quad[i]), as_point(quad[(i + 1) % 4]), &turn[i]);", "gshgeom_orient2d_exact(as_point(quad[(i + 3) % 4]), as_point(quad[i]), as_point(quad[(i + 2) % 4]), &turn[i]);")
 cp("clip-quad-sigma-ignored", "    sides[n].sigma = sigma;", "    sides[n].sigma = 1;")
-cp("clip-quad-repeated-side-cuts", "    if (a.x == b.x && a.y == b.y) {\n      continue;\n    }\n    sides[n].a = a;", "    sides[n].a = a;")
 cp("clip-quad-last-side-skipped", "  for (int i = 0; i < 4; i++) {\n    const Pt a = quad[i];", "  for (int i = 0; i < 3; i++) {\n    const Pt a = quad[i];")
 cp("clip-quad-side-reversed", "    sides[n].a = a;\n    sides[n].b = b;", "    sides[n].a = b;\n    sides[n].b = a;")
 cp("clip-quad-null-allowed", "  if (!path || !quad || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  Side sides[4];", "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  Side sides[4];")
@@ -2921,16 +2919,12 @@ cp("clip-contour-cut-left-open", "    if (status == GSHGEOM_OK && (changed || su
 cp("clip-contour-copy-forced-closed", "    if (status == GSHGEOM_OK && (changed || sub.closed)) {", "    if (status == GSHGEOM_OK) {")
 cp("clip-contour-copy-counted-as-cut", "      local.contours_copied++;", "      local.contours_in++;")
 cp("clip-contour-cut-not-counted", "      local.contours_in++;\n      if (count < 3) {", "      if (count < 3) {")
-cp("clip-contour-stage-order-reversed", "    for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {\n      Cut what = CUT_SAME;\n      status = cut(alloc, &sides[i],", "    for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {\n      Cut what = CUT_SAME;\n      status = cut(alloc, &sides[side_count - 1 - i],")
+cp("clip-contour-stage-order-reversed", "    for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {\n      Cut what = CUT_SAME;\n      local.cuts++;\n      status = cut(alloc, &sides[i],", "    for (int i = 0; i < side_count && !empty && status == GSHGEOM_OK; i++) {\n      Cut what = CUT_SAME;\n      local.cuts++;\n      status = cut(alloc, &sides[side_count - 1 - i],")
 cp("clip-contour-last-side-never-cut", "    for (int i = 0; i < side_count && !empty", "    for (int i = 0; i + 1 < side_count && !empty")
 cp("clip-contour-empty-continues-cutting", "      if (what == CUT_EMPTY) {\n        empty = 1;", "      if (what == CUT_EMPTY) {\n        empty = 0;\n        count = 0;")
 cp("clip-contour-changed-not-recorded", "        which = 1 - which;\n        changed = 1;", "        which = 1 - which;")
 cp("clip-contour-buffer-not-swapped", "        which = 1 - which;\n        changed = 1;", "        changed = 1;")
 # the limit and the release
-cp("clip-limit-off-by-one", "    if (count > max_points - gshgeom_flat_path_point_count(result)) {", "    if (count >= max_points - gshgeom_flat_path_point_count(result)) {")
-cp("clip-limit-per-contour", "    if (count > max_points - gshgeom_flat_path_point_count(result)) {", "    if (count > max_points) {")
-cp("clip-limit-ignores-limits", "  const size_t max_points = (limits && limits->max_points) ? limits->max_points : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;", "  const size_t max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;")
-cp("clip-limit-error-lost", "      status = GSHGEOM_ERR_LIMIT;\n      break;", "      continue;")
 cp("clip-release-scratch-0", "  gcu_allocator_free(alloc, bufs[0].p);", "")
 cp("clip-release-scratch-1", "  gcu_allocator_free(alloc, bufs[1].p);", "")
 cp("clip-release-result-on-error", "  if (status != GSHGEOM_OK) {\n    gshgeom_flat_path_destroy(result);\n    return status;\n  }\n  if (stats) {", "  if (status != GSHGEOM_OK) {\n    return status;\n  }\n  if (stats) {")
@@ -2969,7 +2963,7 @@ cp("clip-round-denominator-not-doubled", "  const U128 d2 = add128(den, den);", 
 cp("clip-round-twice-numerator-once", "  const U128 twice = add128(num, num);", "  const U128 twice = num;")
 cp("clip-round-remainder-ignored", "    if (!is_zero128(r)) {\n      q = add128(q, (U128){0, 1});\n    }", "    if (is_zero128(r)) {\n      q = add128(q, (U128){0, 1});\n    }")
 # not canonical: the arithmetic follows the traversal, and a tie goes away from the start
-cp("clip-crossing-direction-dependent", "  if (before(b, a)) {\n    const Pt t = a;\n    a = b;\n    b = t;\n  }\n  if (before(l1, l0)) {\n    const Pt t = l0;\n    l0 = l1;\n    l1 = t;\n  }\n  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l1, b);\n  /* The side values have opposite strict signs, so |fa - fb| = |fa| + |fb| and t = |fa| / (|fa| + |fb|). */\n  const U128 den = add128(fa.m, fb.m);\n  const int64_t dx = (int64_t)b.x - a.x;\n  const int64_t dy = (int64_t)b.y - a.y;\n  const U128 nx = mul128_64(fa.m, abs64(dx));\n  const U128 ny = mul128_64(fa.m, abs64(dy));\n  const int64_t x = (int64_t)a.x + round_half_up(dx < 0, nx, den);\n  const int64_t y = (int64_t)a.y + round_half_up(dy < 0, ny, den);",
+cp("clip-crossing-direction-dependent", "  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l1, b);\n  /* The side values have opposite strict signs, so |fa - fb| = |fa| + |fb| and t = |fa| / (|fa| + |fb|). */\n  const U128 den = add128(fa.m, fb.m);\n  const int64_t dx = (int64_t)b.x - a.x;\n  const int64_t dy = (int64_t)b.y - a.y;\n  const U128 nx = mul128_64(fa.m, abs64(dx));\n  const U128 ny = mul128_64(fa.m, abs64(dy));\n  const int64_t x = (int64_t)a.x + round_half_up(dx < 0, nx, den);\n  const int64_t y = (int64_t)a.y + round_half_up(dy < 0, ny, den);",
    "  const S128 fa = side_value(l0, l1, a);\n  const S128 fb = side_value(l0, l1, b);\n  const U128 den = add128(fa.m, fb.m);\n  const int64_t dx = (int64_t)b.x - a.x;\n  const int64_t dy = (int64_t)b.y - a.y;\n  const U128 nx = mul128_64(fa.m, abs64(dx));\n  const U128 ny = mul128_64(fa.m, abs64(dy));\n  const int64_t rx = round_half_up(0, nx, den);\n  const int64_t ry = round_half_up(0, ny, den);\n  const int64_t x = (int64_t)a.x + (dx < 0 ? -rx : rx);\n  const int64_t y = (int64_t)a.y + (dy < 0 ? -ry : ry);")
 # the 128-bit arithmetic
 cp("clip-mul64-middle-carry", "  const uint64_t mid = (p00 >> 32) + (p01 & M32) + (p10 & M32);", "  const uint64_t mid = (p00 >> 32) + (p01 & M32);", CTP)
@@ -2978,20 +2972,14 @@ cp("clip-add128-carry", "  r.hi = a.hi + b.hi + (r.lo < a.lo ? 1u : 0u);", "  r.
 cp("clip-sub128-borrow", "  r.hi = a.hi - b.hi - (a.lo < b.lo ? 1u : 0u);", "  r.hi = a.hi - b.hi;", CTP)
 cp("clip-cmp128-low-words", "  if (a.lo != b.lo) {\n    return a.lo < b.lo ? -1 : 1;\n  }\n  return 0;", "  return 0;")
 cp("clip-cmp128-high-first", "  if (a.hi != b.hi) {\n    return a.hi < b.hi ? -1 : 1;\n  }\n  if (a.lo", "  if (a.lo != b.lo) {\n    return a.lo < b.lo ? -1 : 1;\n  }\n  if (a.hi != b.hi) {\n    return a.hi < b.hi ? -1 : 1;\n  }\n  if (a.lo")
-cp("clip-mul128-high-word", "  r.hi += a.hi * b;", "", CTP)
 cp("clip-div-remainder-compare-strict", "    if (cmp128(rem, d) >= 0) {\n      rem = sub128(rem, d);", "    if (cmp128(rem, d) > 0) {\n      rem = sub128(rem, d);", CTP)
-cp("clip-div-quotient-high-bit", "      if (i >= 64) {\n        quo.hi |= UINT64_C(1) << (i - 64);", "      if (i > 64) {\n        quo.hi |= UINT64_C(1) << (i - 64);", CTP)
 cp("clip-div-remainder-shift-carry", "    rem.hi = (rem.hi << 1) | (rem.lo >> 63);", "    rem.hi = (rem.hi << 1);", CTP)
 cp("clip-div-bit-of-numerator", "  return (unsigned)(i >= 64 ? (a.hi >> (i - 64)) & 1u : (a.lo >> i) & 1u);", "  return (unsigned)(i > 64 ? (a.hi >> (i - 64)) & 1u : (a.lo >> i) & 1u);", CTP)
 cp("clip-div-bits-high", "  if (a.hi) {\n    n = 64;\n  }", "  if (a.hi) {\n    n = 63;\n  }", CTP)
 cp("clip-div-fast-path-remainder", "    r->lo = n.lo % d.lo;", "    r->lo = 0;")
 cp("clip-signed-add-order", "  if (cmp128(a.m, b.m) >= 0) {\n    return s_make(a.neg, sub128(a.m, b.m));\n  }\n  return s_make(b.neg, sub128(b.m, a.m));", "  return s_make(a.neg, sub128(a.m, b.m));", CTP)
-cp("clip-signed-zero-negative", "  r.neg = is_zero128(m) ? 0 : neg;", "  r.neg = neg;")
 # the equivalent mutants (CLIP_UNSEEN below): no input tells them from the code
 cp("clip-eq-fast-path-off", "  if (n.hi == 0 && d.hi == 0) {\n    q->hi = 0;", "  if (0 && n.hi == 0 && d.hi == 0) {\n    q->hi = 0;")
-cp("clip-eq-no-lexicographic-swap", "  if (before(b, a)) {\n    const Pt t = a;\n    a = b;\n    b = t;\n  }\n  if (before(l1, l0)) {\n    const Pt t = l0;\n    l0 = l1;\n    l1 = t;\n  }\n", "")
-cp("clip-eq-area-check-dropped", "  if (sigma == 0 || (turn[1] == 0 && turn[3] == 0)) {", "  if (sigma == 0) {")
-cp("clip-eq-before-by-y-first", "  return a.x < b.x || (a.x == b.x && a.y < b.y);", "  return a.y < b.y || (a.y == b.y && a.x < b.x);")
 # Equivalent mutants: no input can tell them from the code, and the cause of each.
 #   clip-eq-fast-path-off                the 64-bit fast path of the division gives the answers of the long division
 #   clip-eq-no-lexicographic-swap        the exact rational is the same from either end; only a rounding that depends on the
@@ -3122,9 +3110,10 @@ lp("lat-dir-minus-y-missing", "    dir_set(&d, 0.0, 0.0, 0.0, 1.0);\n    con_bui
 lp("lat-dir-pair-normal-missing", "        dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);\n        con_build(&cx, d, &ks[nk++]);", "        dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);")
 lp("lat-dir-pair-opposite-normal-missing", "        dir_set(&d, cx.Q[b][1], cx.Q[a][1], cx.Q[a][0], cx.Q[b][0]);\n        con_build(&cx, d, &ks[nk++]);", "        dir_set(&d, cx.Q[b][1], cx.Q[a][1], cx.Q[a][0], cx.Q[b][0]);")
 lp("lat-dir-normal-not-rotated", "        dir_set(&d, cx.Q[a][1], cx.Q[b][1], cx.Q[b][0], cx.Q[a][0]);", "        dir_set(&d, cx.Q[a][0], cx.Q[b][0], cx.Q[b][1], cx.Q[a][1]);")
-lp("lat-dir-pairs-from-one-vertex", "      for (int b = a + 1; b < 4; b++) {\n        if (cx.Q[a][0]", "      for (int b = a + 1; b < 2; b++) {\n        if (cx.Q[a][0]")
+lp("lat-search-empty-not-detected-early", "    if (l > h) {\n      return 0;\n    }\n  }", "  }")
+lp("lat-dir-equal-points-not-skipped", "        if (cx.Q[a][0] == cx.Q[b][0] && cx.Q[a][1] == cx.Q[b][1]) {\n          continue; /* the direction zero: its half-plane `0 <= 0` bounds nothing, and each one is a test of every row */\n        }\n", "", ["testWork_counts"])
+lp("lat-dir-pairs-from-one-vertex", "      for (int b = a + 1; b < 4; b++) {\n        if (cx.Q", "      for (int b = a + 1; b < 2; b++) {\n        if (cx.Q")
 lp("lat-dir-pair-last-vertex-skipped", "    for (int a = 0; a < 4; a++) {\n      for (int b = a + 1; b < 4; b++) {", "    for (int a = 0; a < 3; a++) {\n      for (int b = a + 1; b < 3; b++) {")
-lp("lat-dir-equal-points-not-skipped", "        if (cx.Q[a][0] == cx.Q[b][0] && cx.Q[a][1] == cx.Q[b][1]) {\n          continue;\n        }\n", "")
 # the constraint: extreme corner and point, the terms
 lp("lat-con-extreme-corner-is-minimum", "    dot_terms(t, &n, 0, &u, cx->R[c][0], cx->R[c][1], 0, 0.0);\n    dot_terms(t, &n, 1, &u, cx->R[best][0], cx->R[best][1], 0, 0.0);\n    if (gshgeom_exact_sign(t, n) > 0) {", "    dot_terms(t, &n, 0, &u, cx->R[c][0], cx->R[c][1], 0, 0.0);\n    dot_terms(t, &n, 1, &u, cx->R[best][0], cx->R[best][1], 0, 0.0);\n    if (gshgeom_exact_sign(t, n) < 0) {")
 lp("lat-con-extreme-corner-first-only", "    if (gshgeom_exact_sign(t, n) > 0) {\n      best = c;", "    if (0) {\n      best = c;")
@@ -3178,8 +3167,6 @@ lp("lat-search-lower-bound-lost", "      l = -t > l ? -t : l;", "      l = l;")
 lp("lat-search-upper-bound-last-wins", "      h = t < h ? t : h;", "      h = t;")
 lp("lat-search-lower-bound-last-wins", "      l = -t > l ? -t : l;", "      l = -t;")
 lp("lat-search-lower-bound-sign", "      l = -t > l ? -t : l;", "      l = t > l ? t : l;")
-lp("lat-search-none-not-empty", "    if (t < -INDEX_MAX) {\n      return 0;\n    }", "    if (t < -INDEX_MAX - 1) {\n      return 0;\n    }")
-lp("lat-search-empty-not-detected-early", "    if (l > h) {\n      return 0;\n    }\n  }", "  }")
 lp("lat-search-empty-interval-reported", "  *hi = h;\n  return l <= h;", "  *hi = h;\n  return 1;")
 lp("lat-search-feasible-sign-strict", "  return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) <= 0;", "  return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) < 0;")
 lp("lat-search-feasible-var-swapped", "  return con_sign(p->k, p->var == 0 ? v : p->other, p->var == 0 ? p->other : v) <= 0;", "  return con_sign(p->k, p->var == 0 ? p->other : v, p->var == 0 ? v : p->other) <= 0;")
@@ -3203,11 +3190,11 @@ lp("lat-index-trunc-sign", "  return neg ? -(int64_t)v : (int64_t)v;", "  return
 lp("lat-index-trunc-below-one", "  if (ex < 1023) {\n    return 0;\n  }", "  if (ex < 1022) {\n    return 0;\n  }")
 lp("lat-i2d-low-word-signed", "  const uint32_t lo = (uint32_t)((uint64_t)v & 0xffffffffu);\n  return (double)hi * 4294967296.0 + (double)lo;", "  const int32_t lo = (int32_t)((uint64_t)v & 0xffffffffu);\n  return (double)hi * 4294967296.0 + (double)lo;")
 # the enumeration
-lp("lat-each-point-case-index-ignored", "    if (interval(ks, nk, 0, 0, &lo, &hi) && lo <= 0 && 0 <= hi) {", "    if (interval(ks, nk, 0, 0, &lo, &hi)) {")
+lp("lat-each-point-case-index-ignored", "    if (interval(ks, nk, 0, 0, &lo, &hi, work) && lo <= 0 && 0 <= hi) {", "    if (interval(ks, nk, 0, 0, &lo, &hi, work)) {")
 lp("lat-each-point-case-is-row", "      (void)emit_row(&em, 0, 0, 0);", "      (void)emit_row(&em, 0, lo, hi);")
 lp("lat-each-x-only-reports-j-one", "      if (emit_row(&em, 0, lo, hi) == EMIT_LIMIT) {", "      if (emit_row(&em, 1, lo, hi) == EMIT_LIMIT) {")
 lp("lat-each-x-only-limit-lost", "      if (emit_row(&em, 0, lo, hi) == EMIT_LIMIT) {\n        result = GSHGEOM_ERR_LIMIT;\n      }", "      (void)emit_row(&em, 0, lo, hi);")
-lp("lat-each-y-only-solves-for-i", "    if (interval(ks, nk, 1, 0, &lo, &hi)) {\n      const uint64_t len", "    if (interval(ks, nk, 0, 0, &lo, &hi)) {\n      const uint64_t len")
+lp("lat-each-y-only-solves-for-i", "    if (interval(ks, nk, 1, 0, &lo, &hi, work)) {\n      const uint64_t len", "    if (interval(ks, nk, 0, 0, &lo, &hi, work)) {\n      const uint64_t len")
 lp("lat-each-y-only-count-limit-off-by-one", "        if (len > max_count) {\n          em.count = max_count + 1u;", "        if (len >= max_count) {\n          em.count = max_count + 1u;")
 lp("lat-each-y-only-count-not-len", "          em.count = len;", "          em.count = len - 1u;")
 lp("lat-each-y-only-row-index", "          const int s = emit_row(&em, j, 0, 0);", "          const int s = emit_row(&em, j, j, j);")
@@ -3217,13 +3204,13 @@ lp("lat-each-strip-from-b", "    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    c
 lp("lat-each-strip-plus-missing", "    con_build(&cx, d, &vk[0]);\n    dir_set(&d, cx.A[1], 0.0, 0.0, cx.A[0]);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;", "    con_build(&cx, d, &vk[0]);\n    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;")
 lp("lat-each-strip-minus-missing", "    dir_set(&d, cx.A[1], 0.0, 0.0, cx.A[0]);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;", "    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[1]);\n    int64_t jlo;")
 lp("lat-each-strip-normal-not-rotated", "    dir_set(&d, 0.0, cx.A[1], cx.A[0], 0.0);\n    con_build(&cx, d, &vk[0]);", "    dir_set(&d, 0.0, cx.A[0], cx.A[1], 0.0);\n    con_build(&cx, d, &vk[0]);")
-lp("lat-each-strip-one-constraint", "    if (interval(vk, 2, 1, 0, &jlo, &jhi)) {", "    if (interval(vk, 1, 1, 0, &jlo, &jhi)) {")
-lp("lat-each-strip-solves-for-i", "    if (interval(vk, 2, 1, 0, &jlo, &jhi)) {", "    if (interval(vk, 2, 0, 0, &jlo, &jhi)) {")
+lp("lat-each-strip-one-constraint", "    if (interval(vk, 2, 1, 0, &jlo, &jhi, work)) {", "    if (interval(vk, 1, 1, 0, &jlo, &jhi, work)) {")
+lp("lat-each-strip-solves-for-i", "    if (interval(vk, 2, 1, 0, &jlo, &jhi, work)) {", "    if (interval(vk, 2, 0, 0, &jlo, &jhi, work)) {")
 lp("lat-each-rows-skip-first", "      for (int64_t j = jlo; j <= jhi; j++) {", "      for (int64_t j = jlo + 1; j <= jhi; j++) {")
 lp("lat-each-rows-skip-last", "      for (int64_t j = jlo; j <= jhi; j++) {", "      for (int64_t j = jlo; j < jhi; j++) {")
-lp("lat-each-row-uses-subset-of-constraints", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          continue;\n        }", "        if (!interval(ks, nk > 4 ? nk - 2 : nk, 0, j, &lo, &hi)) {\n          continue;\n        }")
-lp("lat-each-row-wrong-fixed-index", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          continue;\n        }", "        if (!interval(ks, nk, 0, 0, &lo, &hi)) {\n          continue;\n        }")
-lp("lat-each-row-empty-ends-the-scan", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          continue;\n        }", "        if (!interval(ks, nk, 0, j, &lo, &hi)) {\n          break;\n        }")
+lp("lat-each-row-uses-subset-of-constraints", "        if (!interval(ks, nk, 0, j, &lo, &hi, work)) {\n          continue;\n        }", "        if (!interval(ks, nk > 4 ? nk - 2 : nk, 0, j, &lo, &hi, work)) {\n          continue;\n        }")
+lp("lat-each-row-wrong-fixed-index", "        if (!interval(ks, nk, 0, j, &lo, &hi, work)) {\n          continue;\n        }", "        if (!interval(ks, nk, 0, 0, &lo, &hi, work)) {\n          continue;\n        }")
+lp("lat-each-row-empty-ends-the-scan", "        if (!interval(ks, nk, 0, j, &lo, &hi, work)) {\n          continue;\n        }", "        if (!interval(ks, nk, 0, j, &lo, &hi, work)) {\n          break;\n        }")
 lp("lat-each-row-budget-is-count", "      const uint64_t budget = 2u * max_count + GSHGEOM_LATTICE_ROW_WORK;", "      const uint64_t budget = max_count;")
 lp("lat-each-row-budget-no-work-term", "      const uint64_t budget = 2u * max_count + GSHGEOM_LATTICE_ROW_WORK;", "      const uint64_t budget = 2u * max_count;")
 lp("lat-each-row-budget-inclusive", "        if (++visited > budget) {", "        if (++visited >= budget) {")
@@ -3356,7 +3343,7 @@ LAT_PLANTS = [p for p in LAT_PLANTS if p is not None]
 #                                          the sum of the three terms refuses every product between 2^40 and the 64-bit range, so the two
 #                                          mutants differ from the code only where `i * a` itself overflows (an index past 2^33 with a
 #                                          component past 2^30), and no test can name the value an overflow takes
-LAT_UNSEEN = {"lat-search-estimate-sign", "lat-search-estimate-ignores-other", "lat-search-estimate-zero", "lat-search-estimate-wrong-direction",
+LAT_UNSEEN = {"lat-search-empty-not-detected-early", "lat-search-estimate-sign", "lat-search-estimate-ignores-other", "lat-search-estimate-zero", "lat-search-estimate-wrong-direction",
               "lat-search-var-i-uses-e", "lat-search-var-j-uses-c", "lat-index-clamp-high", "lat-index-clamp-low", "lat-index-floor-of-negative",
               "lat-index-trunc-fraction-bit", "lat-index-trunc-sign", "lat-index-trunc-below-one", "lat-index-nan-estimate",
               "lat-search-gallop-up-never-doubles", "lat-search-gallop-up-clamp", "lat-search-gallop-down-clamp",
