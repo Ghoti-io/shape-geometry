@@ -549,10 +549,11 @@ void gshgeom_flat_path_close_last(GSHGEOM_Flat_Path * path) {
 GSHGEOM_Result gshgeom_flat_path_from_points(const GSHGEOM_Device_Point * points, size_t point_count,
     const GSHGEOM_Flat_Subpath * subpaths, size_t subpath_count, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out) {
-  if (!out || (point_count && !points) || (subpath_count && !subpaths) || (point_count == 0) != (subpath_count == 0)) {
+  if (!out || (point_count && !points) || (subpath_count && !subpaths)) {
     return GSHGEOM_ERR_INVALID;
   }
-  /* The subpaths must tile the points in order, each with at least one point and a flag of 0 or 1. */
+  /* The subpaths must tile the points in order, each with at least one point and a flag of 0 or 1: points without a subpath leave `next`
+   * short of the count, and a subpath without a point has a count past the points that are left. */
   size_t next = 0;
   for (size_t s = 0; s < subpath_count; s++) {
     if (subpaths[s].first != next || subpaths[s].count == 0 || subpaths[s].count > point_count - next ||

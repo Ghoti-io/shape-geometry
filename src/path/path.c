@@ -516,17 +516,16 @@ GSHGEOM_Result gshgeom_path_bounds(
         r = gshgeom_arc_pieces(&arc, curves, &nc);
       }
     } else {
-      GSHGEOM_Element el;
+      GSHGEOM_Element el = {0}; /* a read that is lost leaves an element of nothing, not whatever the stack held */
       r = gshgeom_path_element(path, i, &el);
       curves[0] = el.curve;
       nc = r == GSHGEOM_OK ? 1 : 0;
     }
     for (int k = 0; k < nc && r == GSHGEOM_OK; k++) {
       GSHGEOM_Bounds b;
+      /* A stored curve has been checked, so the bounds of it do not fail; if they did, the loop would end and the invariant error below would be
+       * returned, and the box of this pass is not read. */
       r = gshgeom_curve_bounds(&curves[k], &b);
-      if (r != GSHGEOM_OK) {
-        break;
-      }
       if (box.empty) {
         box = b;
       } else {

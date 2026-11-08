@@ -263,7 +263,7 @@ GSHGEOM_Result gshgeom_stroke_curves_lower_cubic(const GSHGEOM_Path * in, double
       }
       continue;
     }
-    GSHGEOM_Element el;
+    GSHGEOM_Element el = {0};
     if (r == GSHGEOM_OK) {
       r = gshgeom_path_element(in, i, &el);
     }

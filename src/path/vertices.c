@@ -94,7 +94,7 @@ static GSHGEOM_Result element(const GSHGEOM_Path * path, size_t i, Elem * e) {
     }
     return GSHGEOM_OK;
   }
-  GSHGEOM_Element el;
+  GSHGEOM_Element el = {0};
   r = gshgeom_path_element(path, i, &el);
   if (r != GSHGEOM_OK) {
     return GSHGEOM_ERR_INTERNAL;
