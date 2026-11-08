@@ -670,7 +670,7 @@ PLANTS += [
     ("sm-used-edge-walked-again", "src", SE, "    if (used[i]) {\n      continue;\n    }\n    GSHGEOM_Device_Point start", "    if (0) {\n      continue;\n    }\n    GSHGEOM_Device_Point start", SET),
     ("sm-lower-bound-past-equal", "src", SE, "    if (before(arcs[mid].x0, arcs[mid].y0, x, y)) {", "    if (!before(x, y, arcs[mid].x0, arcs[mid].y0)) {", SET),
     ("sm-closing-edge-missing", "src", SE, "points[sub.first + (k + 1 == sub.count ? 0 : k + 1)];", "points[sub.first + (k + 1 == sub.count ? k : k + 1)];", SET),
-    ("sm-walk-takes-used-edge", "src", SE, "      while (j < m && arcs[j].x0 == hx && arcs[j].y0 == hy && used[j]) {", "      while (j < m && arcs[j].x0 == hx && arcs[j].y0 == hy && 0) {", SET),
+    ("sm-walk-takes-used-edge", "src", SE, "      size_t j = first_unused(skip, lower_bound(arcs, m, hx, hy));", "      size_t j = lower_bound(arcs, m, hx, hy);", SET),
     ("sm-no-arguments-check", "src", SE, "  if (!path || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  if (!alloc) {", "  if (!alloc) {", SET),
     ("sr-reduce-again", "src", SOU, "  if (o->reduced_done) {\n    return GSHGEOM_OK;\n  }\n", "", SET),
     ("sr-reduced-leaked", "src", SOU, "  for (int i = 0; i < 3; i++) {\n    gshgeom_flat_path_destroy(o->reduced[i]);\n  }\n", "", SET),

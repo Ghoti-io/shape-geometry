@@ -16,6 +16,7 @@
 
 #include "../alloc_tracker.h"
 
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <tuple>
@@ -409,6 +410,82 @@ TEST(StrokeOutlineReduced, AnAllocationFailureLeavesTheOutlineWithoutAReducedFor
     }
     gshgeom_path_destroy(mp);
   }
+}
+
+namespace {
+
+/** @p k triangles that each pass through the origin (their other corners are all different, so no edge is shared). */
+GSHGEOM_Flat_Path * loops_through_one_vertex(size_t k) {
+  std::vector<Dp> pts;
+  std::vector<GSHGEOM_Flat_Subpath> subs;
+  for (size_t i = 0; i < k; i++) {
+    // the corner before the origin is the leftmost of its triangle, so the walk of each loop reaches the origin from outside
+    pts.push_back(Dp{int32_t(-64 - int32_t(i)), int32_t(i % 97) * 64 + 64});
+    pts.push_back(Dp{0, 0});
+    pts.push_back(Dp{int32_t(64 + 2 * int32_t(i)), int32_t(i % 97) * 64 + 200});
+    subs.push_back(GSHGEOM_Flat_Subpath{3 * i, 3, 1});
+  }
+  GSHGEOM_Flat_Path * fp = nullptr;
+  EXPECT_EQ(gshgeom_flat_path_from_points(pts.data(), pts.size(), subs.data(), subs.size(), nullptr, nullptr, &fp), GSHGEOM_OK);
+  return fp;
+}
+
+}  // namespace
+
+// Many closed subpaths through one point: each walk past the point looked for an unused arc leaving it past every used one, which was
+// the square of the number of subpaths (160 000 of them took 7 seconds, for an outline of half a million points).  The walk is
+// linear now and its answer is the old one's: the walk takes the first unused arc leaving a point, so the loops through the
+// vertex come back joined into one closed polyline of all their points, and its hash is the one the quadratic walk gave.
+TEST(FlatSeams, ManyLoopsThroughOneVertexAreWalkedInLinearTimeAndGiveTheAnswerOfTheQuadraticWalk) {
+  const struct {
+    size_t k;
+    uint64_t hash;
+  } pinned[] = {{3, UINT64_C(0x2cbb33696175f33c)}, {500, UINT64_C(0x589f079c6ffb102c)}, {5000, UINT64_C(0x901ee5e6c86d53ae)},
+      {20000, UINT64_C(0x126a2f8f0ceb5262)}};
+  for (const auto & c : pinned) {
+    GSHGEOM_Flat_Path * fp = loops_through_one_vertex(c.k);
+    GSHGEOM_Flat_Path * out = nullptr;
+    ASSERT_EQ(gshgeom_flat_path_cancel_seams(fp, nullptr, nullptr, &out), GSHGEOM_OK) << c.k;
+    EXPECT_EQ(gshgeom_flat_path_subpath_count(out), 1u) << c.k;
+    EXPECT_EQ(gshgeom_flat_path_point_count(out), 3 * c.k);
+    EXPECT_EQ(gshgeom_flat_path_hash(out), c.hash) << c.k;
+    gshgeom_flat_path_destroy(out);
+    gshgeom_flat_path_destroy(fp);
+  }
+  GSHGEOM_Flat_Path * fp = loops_through_one_vertex(160000);
+  GSHGEOM_Flat_Path * out = nullptr;
+  const auto t0 = std::chrono::steady_clock::now();
+  ASSERT_EQ(gshgeom_flat_path_cancel_seams(fp, nullptr, nullptr, &out), GSHGEOM_OK);
+  const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  EXPECT_EQ(gshgeom_flat_path_subpath_count(out), 1u);
+  EXPECT_EQ(gshgeom_flat_path_point_count(out), 480000u);
+  // a guard, not the requirement: 7 seconds before, a tenth of a second now; a sanitizer is several times slower
+  if (!under_valgrind()) {
+    EXPECT_LT(seconds, 4.0);
+  }
+  gshgeom_flat_path_destroy(out);
+  gshgeom_flat_path_destroy(fp);
+}
+
+// A failed allocation anywhere in the walk (the skip links are one) is an error and leaks nothing.
+TEST(FlatSeams, AFailedAllocationInTheWalkOfLoopsThroughOneVertexLeaksNothing) {
+  GSHGEOM_Flat_Path * fp = loops_through_one_vertex(40);
+  for (long fail = 0; fail < 40; fail++) {
+    tracker::Tracker t;
+    t.fail_from = fail;
+    const GSHGEOM_Allocator alloc = tracker::allocator_for(&t);
+    GSHGEOM_Flat_Path * out = nullptr;
+    const GSHGEOM_Result r = gshgeom_flat_path_cancel_seams(fp, &alloc, nullptr, &out);
+    if (t.failed) {
+      EXPECT_EQ(r, GSHGEOM_ERR_OOM) << fail;
+      EXPECT_EQ(out, nullptr);
+    } else {
+      EXPECT_EQ(r, GSHGEOM_OK) << fail;
+      gshgeom_flat_path_destroy(out);
+    }
+    EXPECT_TRUE(t.live.empty()) << fail;
+  }
+  gshgeom_flat_path_destroy(fp);
 }
 
 int main(int argc, char ** argv) {

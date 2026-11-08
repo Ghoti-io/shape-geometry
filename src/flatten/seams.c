@@ -103,6 +103,19 @@ static int before(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
   return x0 < x1 || (x0 == x1 && y0 < y1);
 }
 
+/**
+ * The least index at or past @p j whose arc is not used, by the links of @p skip (each used arc links to the next index; a link
+ * is shortened when it is followed).  The scan past the used arcs at one point is what made a point that many closed subpaths pass
+ * through cost the square of their number: 160 000 loops through one vertex took 7 seconds.
+ */
+static size_t first_unused(size_t * skip, size_t j) {
+  while (skip[j] != j) {
+    skip[j] = skip[skip[j]];
+    j = skip[j];
+  }
+  return j;
+}
+
 /** The index of the first arc whose tail is not before (x, y). */
 static size_t lower_bound(const Arc * arcs, size_t n, int32_t x, int32_t y) {
   size_t lo = 0;
@@ -135,6 +148,7 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
   Pair * pairs = gcu_allocator_malloc(alloc, (edges ? edges : 1) * sizeof *pairs);
   Arc * arcs = gcu_allocator_malloc(alloc, (edges ? edges : 1) * sizeof *arcs);
   unsigned char * used = gcu_allocator_calloc(alloc, edges ? edges : 1, 1);
+  size_t * skip = NULL;
   GSHGEOM_Flat_Path * result = NULL;
   GSHGEOM_Result status = GSHGEOM_OK;
   if (!pairs || !arcs || !used) {
@@ -182,6 +196,14 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
     i = j;
   }
   qsort(arcs, m, sizeof *arcs, cmp_arc);
+  skip = gcu_allocator_malloc(alloc, (m + 1) * sizeof *skip);
+  if (!skip) {
+    status = GSHGEOM_ERR_OOM;
+    goto done;
+  }
+  for (size_t i = 0; i <= m; i++) {
+    skip[i] = i;
+  }
   status = gshgeom_flat_path_new(alloc, limits, &result);
   if (status != GSHGEOM_OK) {
     goto done;
@@ -196,6 +218,7 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
       goto done;
     }
     used[i] = 1;
+    skip[i] = i + 1;
     int32_t hx = arcs[i].x1;
     int32_t hy = arcs[i].y1;
     while (hx != start.x || hy != start.y) {
@@ -204,15 +227,13 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
       if (status != GSHGEOM_OK) {
         goto done;
       }
-      size_t j = lower_bound(arcs, m, hx, hy);
-      while (j < m && arcs[j].x0 == hx && arcs[j].y0 == hy && used[j]) {
-        j++;
-      }
+      size_t j = first_unused(skip, lower_bound(arcs, m, hx, hy));
       if (j >= m || arcs[j].x0 != hx || arcs[j].y0 != hy) {
         status = GSHGEOM_ERR_INTERNAL; /* a point with more edges entering than leaving: not a union of closed subpaths */
         goto done;
       }
       used[j] = 1;
+      skip[j] = j + 1;
       hx = arcs[j].x1;
       hy = arcs[j].y1;
     }
@@ -222,6 +243,7 @@ done:
   gcu_allocator_free(alloc, pairs);
   gcu_allocator_free(alloc, arcs);
   gcu_allocator_free(alloc, used);
+  gcu_allocator_free(alloc, skip);
   if (status != GSHGEOM_OK) {
     gshgeom_flat_path_destroy(result);
     return status;
