@@ -798,7 +798,6 @@ void gshgeom_sk_dash_end(GSHGEOM_SK_Ctx * c) {
   gshgeom_path_destroy(D->bpath);
   gcu_allocator_free(&c->alloc, D->origin);
   D->origin = NULL;
-  D->origin_n = D->origin_cap = 0;
   gcu_allocator_free(&c->alloc, D->dashes);
   D->m = NULL;
   D->bpath = NULL;

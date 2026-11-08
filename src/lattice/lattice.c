@@ -446,7 +446,7 @@ static int interval(const Con * ks, size_t n, int var, int64_t other, int64_t * 
   }
   *lo = l;
   *hi = h;
-  return l <= h;
+  return 1; /* the search above ends as soon as the interval is empty, so l <= h here */
 }
 
 /* --- the enumeration --------------------------------------------------------------------------------------------------- */
