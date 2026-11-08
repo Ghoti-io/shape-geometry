@@ -1357,6 +1357,16 @@ since 0 would be the default), while `gshgeom_hatch_pieces` followed by `gshgeom
 A consumer that caches an outline keyed by the stroke (the CPU renderer's cache) is unaffected for the same reason: whether a stroke
 is refused is a function of the stroke, the map, the tolerance and the limits alone, never of a damage or of what was drawn before.
 
+**What the bound is a bound on.** Native time: the default budget ends the four inputs that motivated it in 0.3 to 0.65 seconds of
+a 2026 x86-64 core, built with GCC 16 at `-O2` (the arc of the measure 0.63 s; the dot hatch 0.64 s; the two wide-cap hatches 0.42 and 0.31
+s; before the budget 66, 3.8, 1.5 and 1.6 s). That is the contract a caller can rely on, to within the factor of two or three the
+weights allow between operations. It is not a bound on the time of a sanitized or instrumented build: the exact-arithmetic loops of the
+hulls run about 30 times slower under libFuzzer's coverage instrumentation with AddressSanitizer and UndefinedBehaviorSanitizer (the dot
+hatch is 20 seconds there, the arc 4 to 6, and 77 and over 300 before the budget), so nobody should read those figures as the bound,
+and `make fuzz FUZZ_ARGS=-report_slow_units=2` reports exactly those two seeds as slow. `make fuzz-replay` holds every input of
+the corpus to `REPLAY_MAX_SECONDS` of native time (2 seconds, three times the slowest seed), and the ASan replays to
+`ASAN_REPLAY_MAX_SECONDS` (15 seconds, five times the slowest of the ASan+UBSan replays of the four seeds, 0.8 to 3.1 seconds).
+
 **How it composes with the counts.** Independent caps: a call is refused by whichever is met first, and every refusal is
 `ERR_LIMIT`. The row limit still bounds the measured table's size and `max_points` a stroke's parts. What changed is that a caller
 who sets the counts to what it can hold no longer also needs them to protect its time, and a caller who wants less time than the default

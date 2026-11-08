@@ -435,9 +435,11 @@ $(APP_DIR)/fuzz/replay_%_planted$(EXE_EXTENSION): tests/fuzz/fuzz_%.c tests/fuzz
 	$(CC) $(CFLAGS) -DGSHGEOM_FUZZ_PLANT $(INCLUDE) -o $@ tests/fuzz/fuzz_$*.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 # No input of the corpus may take longer than this to replay (the slow units pass B found took 1.5 to 66 seconds before the work budget
-# ended them, and a few tenths of a second after); a sanitizer build is several times slower than this build and has its own bound.
-REPLAY_MAX_SECONDS ?= 10
-ASAN_REPLAY_MAX_SECONDS ?= 40
+# ended them, and 0.3 to 0.65 seconds after: the bound is native time, three times the slowest seed). The ASan+UBSan replays measure 0.8 to
+# 3.1 seconds for the same four seeds, and are held to 15; libFuzzer's instrumented binary takes 4 to 20 (about 30 times native on the
+# exact-arithmetic loops), which is why `make fuzz` reports those seeds under -report_slow_units and this gate does not use that figure.
+REPLAY_MAX_SECONDS ?= 2
+ASAN_REPLAY_MAX_SECONDS ?= 15
 
 fuzz-replay: $(REPLAYS) $(REPLAYS_PLANTED) ## Feed every corpus file once through each fuzz entry point
 	@for f in $(FUZZ_TARGETS); do \
