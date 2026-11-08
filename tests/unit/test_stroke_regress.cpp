@@ -83,6 +83,65 @@ TEST(StrokeRegress, AnArcsJoinBesideACubicThatDoublesBackUnderAShear) {
   gshgeom_path_destroy(p);
 }
 
+TEST(StrokeRegress, TheClipOfAnOffCenterStrokeFlattensConicsAtTheTolerance) {
+  // a closed contour of four rational quadratics (a circle of radius 20) stroked inside and outside: the clip region F is the centerline
+  // converted to the device at the tolerance asked for, so its points (and the outline's hash) follow the tolerance; the hashes are
+  // those of the library as it stands, for the default tolerance and for 2, 8 and 64
+  GSHGEOM_Path * p = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &p), GSHGEOM_OK);
+  gshgeom_path_move_to(p, P(20, 0));
+  const double w[3] = {1.0, 0.7071067811865476, 1.0};
+  gshgeom_path_rational_quadratic_to(p, P(20, 20), P(0, 20), w);
+  gshgeom_path_rational_quadratic_to(p, P(-20, 20), P(-20, 0), w);
+  gshgeom_path_rational_quadratic_to(p, P(-20, -20), P(0, -20), w);
+  gshgeom_path_rational_quadratic_to(p, P(20, -20), P(20, 0), w);
+  gshgeom_path_close(p);
+  GSHGEOM_Map m;
+  ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
+  const int tols[4] = {0, 2, 8, 64};
+  const uint64_t want[2][4] = {{UINT64_C(0xfe5b8d1309ac86b8), UINT64_C(0xbb9690f4df9129b1), UINT64_C(0x605341d33afae7ab), UINT64_C(0xda93f5ada516b717)},
+      {UINT64_C(0x29ce73b75d95874e), UINT64_C(0xa754e57d942dabe3), UINT64_C(0x8e166163ed2a6c4d), UINT64_C(0xa7cdde8bc1d1a815)}};
+  const size_t points[4] = {105, 129, 65, 17};
+  for (int al = 1; al <= 2; al++) {
+    for (int t = 0; t < 4; t++) {
+      GSHGEOM_Stroke st;
+      gshgeom_stroke_init(&st);
+      st.width = 2.0;
+      st.alignment = (uint32_t)al;
+      GSHGEOM_Stroke_Outline * o = nullptr;
+      const GSHGEOM_Result r = tols[t] == 0 ? gshgeom_stroke_expand(p, &st, &m, nullptr, nullptr, &o)
+                                            : gshgeom_stroke_expand_with_tolerance(p, &st, &m, tols[t], nullptr, nullptr, &o);
+      ASSERT_EQ(r, GSHGEOM_OK);
+      EXPECT_EQ(gshgeom_stroke_outline_hash(o), want[al - 1][t]) << al << " " << tols[t];
+      EXPECT_EQ(gshgeom_flat_path_point_count(gshgeom_stroke_outline_clip(o)), points[t]) << al << " " << tols[t];
+      gshgeom_stroke_outline_destroy(o);
+    }
+  }
+  gshgeom_path_destroy(p);
+}
+
+TEST(StrokeRegress, ATurnTheMapMakesInvisibleIsNotAJoin) {
+  // a turn of 1e-300 at the second vertex, under a map that shrinks by 1e-30: the mapped points are exactly collinear and in line
+  // (sigma 0, the turn's dot positive), so no join is made; a join taken for a reversal would add a round cap's worth of outline
+  GSHGEOM_Path * p = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &p), GSHGEOM_OK);
+  gshgeom_path_move_to(p, P(0, 0));
+  gshgeom_path_line_to(p, P(0x1.8p+1, 0));
+  gshgeom_path_line_to(p, P(0x1p+2, -0x1.56e1fc2f8f359p-997));
+  GSHGEOM_Stroke st;
+  gshgeom_stroke_init(&st);
+  st.width = 1.5;
+  st.width_space = GSHGEOM_STROKE_WIDTH_DEVICE;
+  st.join = GSHGEOM_STROKE_JOIN_MITER_CLIP;
+  st.miter_limit = 9.0;
+  st.cap = GSHGEOM_STROKE_CAP_ROUND;
+  st.degenerate = GSHGEOM_STROKE_DEGENERATE_DRAW;
+  GSHGEOM_Map m;
+  ASSERT_EQ(gshgeom_map_scale(2, 1e-30, 1e-30, 1.0, &m), GSHGEOM_OK);
+  EXPECT_EQ(outline_hash(p, st, m), UINT64_C(0xa788bfaf0b61f577));
+  gshgeom_path_destroy(p);
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
