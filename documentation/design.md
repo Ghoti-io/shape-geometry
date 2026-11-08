@@ -1327,3 +1327,30 @@ arcs have a family of plants for every rule above, and `make check-verb-walkers`
 shows the walker audit failing on its own planted violations.
 `suite/tools/xarch/shape.sh` (section 6) and `suite/tools/xwin/shape.sh` run
 the probe on every target.
+
+### Plants that no input can tell from the code
+
+A defect in `tools/argued-plants.json` is one that was built, run, and not caught, with the reason in the file.  The reasons come in
+four kinds, and each names the check that stands in for a failing test.
+
+- *The same object code*, or a mutant the compiler refuses.  `make check-planted PLANT_OBJ_EQUIV=1` proves the first.
+- *A mathematical identity* with a test that exercises the changed input: tying corners that have one dot product, a bisection whose
+  intervals are powers of two, the weights of the pieces of an arc (the end weights are 1 and the middle weight is one value, for every
+  piece, bit for bit).  The sign filter of the lattice is argued from its margin, with `tools/check-filter-margin.py` taking values at the
+  edges of the bound and comparing every decision with exact rational arithmetic (and a control that must be seen to decide wrongly).
+- *Work and route, not the result.*  A guard that only saves work (an interval already empty, a side of zero length, an arc that is
+  refused before its trigonometry) is told from its absence by a count through an internal seam that no public header includes:
+  `gshgeom_lattice_each_counted`, `gshgeom_arc_pieces_counted` and the clip's `cuts`, with the counts pinned in
+  `tests/unit/test_work_counts.cpp`.  Two guards have no seam: the hatch's skip of the intervals before a dash (a counter in a scratch
+  copy shows 627 iterations of the dash loops with it and 843 without it, for identical output on the committed corpus) and the stroke's
+  flag that the first control point of a piece equals the second (set on about a twelfth of the pieces of random strokes, with the same
+  outline either way: it changes whether a piece is certified or subdivided).
+- *A defensive check that nothing reaches*, kept: the dash's checks of the origin table and of its search.  One certification test of the
+  stroke body (the rejection when the control hulls of a piece's two rails are not apart on any axis) is not reached by about 1.2 million
+  pieces of generated strokes in six modes and has no argued input; it stays listed as not closed.
+
+A guard that is taken out must leave the result of the public interface unchanged and its cost within a fifth: the check is a
+differential of the tree before against the tree after through the interface (the fuzz corpora with every returned value logged, seeded
+random trials of the arcs, the clip, the lattice and the path with NaN, infinite, subnormal, huge and boundary values, the grids under
+several salts, interleaved timings).  It showed two deletions to be wrong when the plants and the tests did not: a return that carried
+the limit of quarter turns, and a test that saved a search three times its cost.
