@@ -341,6 +341,9 @@ ATTACK_CATCHERS = {
     "lat-can-mul-bound-dropped": ["testLattice_oracle"],
     "lat-sign-filter-always-on": ["testLattice_oracle"],
     "lat-search-empty-not-detected-early": ["testWork_counts"],
+    "arw-stroke-clip-device-tolerance-default": ["testStroke_regress"],
+    "cvx-arc-device-pieces-error-lost": ["testArc_walker_edges"],
+    "arw-measure-arc-pieces-error-lost": ["testArc_walker_edges"],
     "sh-rr-limit-centres-skipped": ["testArc_walker_edges"],
     "sh-ell-limit-skipped": ["testArc_walker_edges"],
     "sh-rr-radii-limit-via-arc-dropped": ["testArc_walker_edges"],
@@ -1642,7 +1645,7 @@ STROKE_PLANTS = [
     ("sk-magnitude-rule-removed", "src", SKE, "  if (r == GSHGEOM_OK && !magnitudes_ok(&c, &rd,", "  if (r == GSHGEOM_OK && 0 && !magnitudes_ok(&c, &rd,", STK),
     # SG8, SG9: joins
     ("sk-turn-side-inverted", "src", SKJ, "  int outer_left = sigma > 0;", "  int outer_left = sigma < 0;", STM),
-    ("sk-smooth-gets-a-join", "src", SKJ, "  if (sigma == 0 && ds > 0) {\n    return GSHGEOM_OK; /* a smooth vertex: no join */\n  }", "  (void)ds;", STM),
+    ("sk-smooth-gets-a-join", "src", SKJ, "  if (sigma == 0 && ds > 0) {\n    return GSHGEOM_OK; /* a smooth vertex: no join */\n  }", "  (void)ds;", STM + ["testStroke_regress"]),
     ("sk-conic-weight-clamp-lost", "src", "src/stroke_curves/contour.c", "  return w > 1.0 ? 1.0 : w;\n", "  return w;\n", ["testStroke_curves"]),
     ("sk-miter-clip-tip-direction-noisy", "src", SKJ, "gshgeom_sk_dot(sum, sum) < 0x1p-26 ? gshgeom_sk_sub(ah, bh) : sum", "sum", STK),
     # Removed, sk-miter-clip-tip-direction-always-difference: the difference of the unit tangents IS the direction of the sum of the outer normals
