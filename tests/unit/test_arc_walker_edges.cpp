@@ -240,23 +240,45 @@ TEST(ArcWalkerEdges, ADumpReportsAWriteThatFailsWhereverItFails) {
     cookie_io_functions_t io = {nullptr, spoil_write, nullptr, nullptr};
     FILE * f = fopencookie(&s, "w", io);
     ASSERT_NE(f, nullptr);
-    setvbuf(f, nullptr, _IONBF, 0);
+    char buf[16];
+    setvbuf(f, buf, _IOFBF, sizeof buf);  // a buffer of 16 bytes: a write that fails surfaces in the fprintf that overflowed it
     ASSERT_EQ(gshgeom_path_dump(g, f), GSHGEOM_OK);
     fclose(f);
     total = s.writes;
   }
-  ASSERT_GT(total, 20);
+  ASSERT_GT(total, 10);
   for (long k = 0; k < total; k++) {
     Spoil s;
     s.fail_at = k;
     cookie_io_functions_t io = {nullptr, spoil_write, nullptr, nullptr};
     FILE * f = fopencookie(&s, "w", io);
     ASSERT_NE(f, nullptr);
-    setvbuf(f, nullptr, _IONBF, 0);
+    char buf[16];
+    setvbuf(f, buf, _IOFBF, sizeof buf);  // a buffer of 16 bytes: a write that fails surfaces in the fprintf that overflowed it
     EXPECT_EQ(gshgeom_path_dump(g, f), GSHGEOM_ERR_IO) << "the write that fails is number " << k << " of " << total;
     fclose(f);
   }
   gshgeom_path_destroy(g);
+}
+
+TEST(ArcWalkerEdges, AShapeWithAnyPointPastTheLimitIsRefusedBeforeAnythingIsAllocated) {
+  // the refusal is made from the numbers alone: the allocator is not called (a move appended and rolled back would call it)
+  tracker::Tracker t;
+  GSHGEOM_Allocator al = tracker::allocator_for(&t);
+  GSHGEOM_Path * p = nullptr;
+  ASSERT_EQ(gshgeom_path_create(&al, nullptr, 2, &p), GSHGEOM_OK);
+  const long before = t.calls;
+  const double big = 0x1p101, half = 0x1p50;
+  const GSHGEOM_Corner round1[4] = {{0.25, 0.25}, {0.25, 0.25}, {0.25, 0.25}, {0.25, 0.25}};
+  EXPECT_EQ(gshgeom_path_add_ellipse(p, 0, 0, 1, big, 0, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_path_add_ellipse(p, -0x1p100, 0, half, 1, 0, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_path_add_ellipse(p, 0, 0x1p100, 1, half, 0, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(p, 0, 0, big, 1, round1, 0, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(p, 0x1p100, 0, 0x1p49, 1, round1, 0, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(gshgeom_path_add_rounded_rect(p, 0, -0x1p100 - 0x1p49, 1, 0x1p50, round1, 0, 0), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(t.calls, before);
+  gshgeom_path_destroy(p);
+  EXPECT_TRUE(t.live.empty());
 }
 
 TEST(ArcWalkerEdges, AShapeWithAnyPointPastTheLimitIsRefusedBeforeAnythingIsAppended) {
