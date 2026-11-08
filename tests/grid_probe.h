@@ -1461,7 +1461,7 @@ static inline uint64_t grid_shapes_hash(uint64_t * words) {
   for (i = 0; i < 4; i++) {
     for (j = 0; j < 4; j++) {
       GSHGEOM_Device_Point pts[4];
-      GSHGEOM_Flat_Subpath subs[2];
+      GSHGEOM_Flat_Subpath subs[3];
       GSHGEOM_Flat_Path * fp = NULL;
       GSHGEOM_Limits lim;
       size_t np = (size_t)i;
@@ -1476,6 +1476,11 @@ static inline uint64_t grid_shapes_hash(uint64_t * words) {
       subs[1].first = subs[0].count;
       subs[1].count = (size_t)(i > 2 ? i - 2 : 1);
       subs[1].closed = 1;
+      /* the count j reaches 3: the third entry is read when the first two tile, and is one that never tiles (its first is past every
+       * count here), so the answer is invalid, as it was when this entry was whatever the stack held */
+      subs[2].first = SIZE_MAX;
+      subs[2].count = 1;
+      subs[2].closed = 0;
       gshgeom_limits_default(&lim);
       lim.max_points = (size_t)(1 + (i + j) % 3);
       grid_word(&f, (uint64_t)gshgeom_flat_path_from_points(np ? pts : NULL, np, ns ? subs : NULL, ns, NULL, NULL, &fp));
