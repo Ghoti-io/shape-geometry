@@ -91,33 +91,38 @@ TEST(ArcWalkerEdges, EveryWalkerReportsARecordThatCannotBeRead) {
   // The code each walker reports for each corrupt path (the walkers read a stored element and every failure of that read is the
   // walker's own: an arc that cannot be decomposed, a curve that cannot be bounded or measured, an element that cannot be read).  A
   // walker that lost one of these errors would report success, or a different code.
-  enum { BOUNDS, MEASURE, LOWER, STROKE, DASH, DASH_SCALED, DASH_DEVICE, VERTEX_COUNT, VERTICES, COLUMNS };
+  enum { BOUNDS, MEASURE, LOWER, STROKE, DASH, DASH_SCALED, DASH_DEVICE, VERTEX_COUNT, VERTICES, DEVICE, COLUMNS };
+  const GSHGEOM_Result I = GSHGEOM_ERR_INTERNAL, V = GSHGEOM_ERR_INVALID, L = GSHGEOM_ERR_LIMIT, K = GSHGEOM_OK;
   const GSHGEOM_Result want[4][COLUMNS] = {
-      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL,
-          GSHGEOM_ERR_INTERNAL, GSHGEOM_OK, GSHGEOM_ERR_INTERNAL},
-      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_INTERNAL,
-          GSHGEOM_ERR_INTERNAL, GSHGEOM_OK, GSHGEOM_ERR_INTERNAL},
-      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT,
-          GSHGEOM_ERR_INVALID, GSHGEOM_OK, GSHGEOM_OK},
-      {GSHGEOM_ERR_INTERNAL, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_INVALID, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT, GSHGEOM_ERR_LIMIT,
-          GSHGEOM_ERR_INVALID, GSHGEOM_OK, GSHGEOM_OK},
+      // bounds measure lower stroke dash dash-scaled dash-device vertex-count vertices device
+      {I, V, V, I, I, I, I, K, I, V},
+      {I, V, V, I, I, I, I, K, I, V},
+      {I, K, V, L, L, L, V, K, K, V},
+      {I, L, V, L, L, L, V, K, K, V},
   };
   for (int which = 0; which < 4; which++) {
     GSHGEOM_Path * p = corrupt_path(which);
     GSHGEOM_Result got[COLUMNS];
+    GSHGEOM_Map map, scaled, map0;
+    ASSERT_EQ(gshgeom_map_identity(2, &map), GSHGEOM_OK);
+    ASSERT_EQ(gshgeom_map_identity(2, &map0), GSHGEOM_OK);
     GSHGEOM_Bounds b;
     got[BOUNDS] = gshgeom_path_bounds(p, &b);
     GSHGEOM_Measured * m = nullptr;
-    got[MEASURE] = gshgeom_measured_create(nullptr, nullptr, p, 0.25, &m);
-    EXPECT_EQ(m, nullptr);
+    got[MEASURE] = gshgeom_measured_create(nullptr, nullptr, p, 0.0, &m);  // the default tolerance: one outside the range is a limit of its own
+    if (got[MEASURE] != GSHGEOM_OK) {
+      EXPECT_EQ(m, nullptr);
+    }
+    gshgeom_measured_destroy(m);
+    GSHGEOM_Device_Path * dev = nullptr;
+    got[DEVICE] = gshgeom_device_path_from_model(p, &map0, nullptr, nullptr, &dev);
+    gshgeom_device_path_destroy(dev);
     GSHGEOM_Path * lowered = nullptr;
     got[LOWER] = gshgeom_stroke_curves_lower_cubic(p, 0.25, nullptr, nullptr, &lowered);
     EXPECT_EQ(lowered, nullptr);
     GSHGEOM_Stroke s;
     gshgeom_stroke_init(&s);
     s.width = 2.0;
-    GSHGEOM_Map map, scaled;
-    ASSERT_EQ(gshgeom_map_identity(2, &map), GSHGEOM_OK);
     ASSERT_EQ(gshgeom_map_scale(2, 2.0, 3.0, 1.0, &scaled), GSHGEOM_OK);
     GSHGEOM_Stroke_Outline * o = nullptr;
     got[STROKE] = gshgeom_stroke_expand(p, &s, &map, nullptr, nullptr, &o);

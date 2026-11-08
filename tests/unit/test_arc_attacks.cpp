@@ -194,6 +194,47 @@ TEST(ArcAttack, ALoweringReportsAnArcThatCannotBeDecomposed) {
   gshgeom_path_destroy(p);
 }
 
+TEST(ArcAttack, EveryPieceOfAnArcHasTheWeightsOneWOneAndTheSameW) {
+  // The pieces of an arc are equal in sweep, so their middle weights are one value, and their end weights are 1 exactly: a consumer that
+  // takes the weights of the first piece, or the middle weight without dividing by the root of the end weights, reads the same numbers.
+  // A map does not change the weights.
+  uint64_t seed = 88172645463325252ull;
+  auto next = [&]() {
+    seed ^= seed << 13;
+    seed ^= seed >> 7;
+    seed ^= seed << 17;
+    return seed;
+  };
+  GSHGEOM_Map m = identity();
+  m.m[0][0] = 3.0;
+  m.m[0][1] = 0.5;
+  m.m[1][1] = -2.0;
+  m.t[0] = 5.0;
+  for (int i = 0; i < 20000; i++) {
+    GSHGEOM_Arc a = unit_arc();
+    a.unit = (GSHGEOM_Angle_Unit)(next() % GSHGEOM_ANGLE_UNIT_COUNT);
+    const double turn = a.unit == GSHGEOM_ANGLE_DEGREES ? 360.0 : (a.unit == GSHGEOM_ANGLE_GRADIANS ? 400.0 : (a.unit == GSHGEOM_ANGLE_TURNS ? 1.0 : 6.283185307179586));
+    a.sweep = turn * ((double)(next() >> 11) / 9007199254740992.0) * ((next() & 1) ? 1.0 : -1.0);
+    if (a.sweep == 0.0) {
+      continue;
+    }
+    a.t0 = turn * ((double)(next() >> 11) / 9007199254740992.0);
+    GSHGEOM_Curve c[GSHGEOM_ARC_MAX_PIECES];
+    int n = 0;
+    ASSERT_EQ(gshgeom_arc_pieces(&a, c, &n), GSHGEOM_OK);
+    for (int k = 0; k < n; k++) {
+      ASSERT_EQ(bits(c[k].w[0]), bits(1.0));
+      ASSERT_EQ(bits(c[k].w[2]), bits(1.0));
+      ASSERT_EQ(bits(c[k].w[1]), bits(c[0].w[1])) << i << " " << k;
+      GSHGEOM_Curve mapped;
+      ASSERT_EQ(gshgeom_map_apply_curve(&m, &c[k], &mapped), GSHGEOM_OK);
+      for (int j = 0; j < 3; j++) {
+        ASSERT_EQ(bits(mapped.w[j]), bits(c[k].w[j]));
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // gshgeom_arc_map
 // ---------------------------------------------------------------------------
