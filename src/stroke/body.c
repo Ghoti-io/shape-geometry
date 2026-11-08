@@ -939,6 +939,12 @@ static GSHGEOM_Result piece(const Seg * sg, const Piece * p, int depth) {
   if (++sg->c->work > sg->c->work_cap) {
     return GSHGEOM_ERR_LIMIT;
   }
+  {
+    GSHGEOM_Result charged = gshgeom_sk_charge(sg->c, GSHGEOM_SK_W_PIECE);
+    if (charged != GSHGEOM_OK) {
+      return charged;
+    }
+  }
   Know k;
   know(p, sg->n, &k);
   GSHGEOM_Result r = GSHGEOM_OK;

@@ -434,6 +434,11 @@ $(APP_DIR)/fuzz/replay_%_planted$(EXE_EXTENSION): tests/fuzz/fuzz_%.c tests/fuzz
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DGSHGEOM_FUZZ_PLANT $(INCLUDE) -o $@ tests/fuzz/fuzz_$*.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
+# No input of the corpus may take longer than this to replay (the slow units pass B found took 1.5 to 66 seconds before the work budget
+# ended them, and a few tenths of a second after); a sanitizer build is several times slower than this build and has its own bound.
+REPLAY_MAX_SECONDS ?= 10
+ASAN_REPLAY_MAX_SECONDS ?= 40
+
 fuzz-replay: $(REPLAYS) $(REPLAYS_PLANTED) ## Feed every corpus file once through each fuzz entry point
 	@for f in $(FUZZ_TARGETS); do \
 		case $$f in path) inputs="$(FUZZ_INPUTS_path)";; stroke) inputs="$(FUZZ_INPUTS_stroke)";; clip) inputs="$(FUZZ_INPUTS_clip)";; hatch) inputs="$(FUZZ_INPUTS_hatch)";; esac; \
@@ -446,7 +451,7 @@ fuzz-replay: $(REPLAYS) $(REPLAYS_PLANTED) ## Feed every corpus file once throug
 			printf 'fuzz-replay: FAIL: one %s input reached every outcome; the outcome check checks nothing\n' "$$f" >&2; exit 1; fi; \
 		grep -q 'never reached' $(BUILD_DIR)/fuzz-$$f-one.out || { printf 'fuzz-replay: FAIL: one %s input failed for another reason\n' "$$f" >&2; cat $(BUILD_DIR)/fuzz-$$f-one.out >&2; exit 1; }; \
 		printf 'fuzz-replay: %s: the planted replay aborted and one input left outcomes unreached, as they must\n' "$$f"; \
-		LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(APP_DIR)/fuzz/replay_$$f$(EXE_EXTENSION) $$inputs || exit 1; \
+		GSHGEOM_REPLAY_MAX_SECONDS=$(REPLAY_MAX_SECONDS) LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(APP_DIR)/fuzz/replay_$$f$(EXE_EXTENSION) $$inputs || exit 1; \
 	done
 
 # Every example is run, not only compiled (story 16): one that is only compiled rots unseen, its calls still linking
@@ -779,13 +784,16 @@ test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAYS) ## Build with ASan+UBSan and
 	@printf '\n### ASan+UBSan fuzz replays ###\n\n'
 	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
-			$(ASAN_APP_DIR)/fuzz/replay_path$(EXE_EXTENSION) $(FUZZ_INPUTS_path)
+			GSHGEOM_REPLAY_MAX_SECONDS=$(ASAN_REPLAY_MAX_SECONDS) $(ASAN_APP_DIR)/fuzz/replay_path$(EXE_EXTENSION) $(FUZZ_INPUTS_path)
 	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
 			$(ASAN_APP_DIR)/fuzz/replay_stroke$(EXE_EXTENSION) $(FUZZ_INPUTS_stroke)
 	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
 			$(ASAN_APP_DIR)/fuzz/replay_clip$(EXE_EXTENSION) $(FUZZ_INPUTS_clip)
+	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
+		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
+			GSHGEOM_REPLAY_MAX_SECONDS=$(ASAN_REPLAY_MAX_SECONDS) $(ASAN_APP_DIR)/fuzz/replay_hatch$(EXE_EXTENSION) $(FUZZ_INPUTS_hatch)
 	@printf '\nASan+UBSan suite clean.\n'
 
 ####################################################################
@@ -797,6 +805,8 @@ test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAYS) ## Build with ASan+UBSan and
 # FUZZ_ONLY=stroke runs one target.
 FUZZ_CC ?= clang
 FUZZ_TIME ?= 60
+# More libFuzzer options for every target (for example FUZZ_ARGS=-report_slow_units=2, which names any input that takes longer than that).
+FUZZ_ARGS ?=
 FUZZ_CFLAGS := -std=c17 -O1 -g -ffp-contract=off $(ARCH_FP_FLAGS) -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -DGSHGEOM_BUILD
 
 fuzz: | $(LIBVER_GEN) ## Build the libFuzzer targets and run each for FUZZ_TIME seconds from its committed corpus
@@ -806,7 +816,7 @@ fuzz: | $(LIBVER_GEN) ## Build the libFuzzer targets and run each for FUZZ_TIME 
 	@for f in $(or $(FUZZ_ONLY),$(FUZZ_TARGETS)); do \
 		mkdir -p $(BUILD_DIR)/fuzz $(BUILD_DIR)/fuzz-corpus-$$f || exit 1; \
 		$(FUZZ_CC) $(FUZZ_CFLAGS) $(INCLUDE) -o $(BUILD_DIR)/fuzz/fuzz_$$f tests/fuzz/fuzz_$$f.c $(SOURCES) $(LDFLAGS) $(DEP_LIBS) || exit 1; \
-		LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(BUILD_DIR)/fuzz/fuzz_$$f -max_total_time=$(FUZZ_TIME) $(BUILD_DIR)/fuzz-corpus-$$f tests/fuzz/corpus/$$f || exit 1; \
+		LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(BUILD_DIR)/fuzz/fuzz_$$f -max_total_time=$(FUZZ_TIME) $(FUZZ_ARGS) $(BUILD_DIR)/fuzz-corpus-$$f tests/fuzz/corpus/$$f || exit 1; \
 	done
 
 fuzz-clean: ## Remove the fuzz build

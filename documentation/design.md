@@ -300,7 +300,7 @@ end) the tangent is the direction of the first nonzero derivative of
 right-hand limit, and at `t = 1` the left-hand limit. The normal is
 `gshgeom_normal_left(tangent)` in 2D (the rule of `orient.h`, so on a positively
 wound circle it points out) and absent in 3D, where left has no meaning. The rows
-are bounded by `max_points` of the limits.
+are bounded by `max_points` of the limits, and the work of the refinement by `max_work` ("The work budget").
 
 Everything is `+ - * /`, `gmath_hypot` and a fixed order of operations, so the
 table, every query, the hash and the dump are the same bits on every target; the
@@ -1317,6 +1317,74 @@ rule and branch.
 
 `GSHGEOM_HATCH_REVISION` is 1 and is in no hash.  A change to HX4 to HX7 is a new revision; before the library's first
 release exactly one is live and none selectable.
+
+## The work budget
+
+The counts of `GSHGEOM_Limits` (`max_elements`, `max_points`, `max_dash_steps`, a hatch's `max_lines`) bound what a call outputs. They
+do not bound what it costs to reach the count, and a library that promises "a refusal, never a hang" has to promise that too. A
+fuzzer found four inputs that each took seconds to be refused by a count, with a correct answer at the end: an arc half a turn about a
+centre 10^30 away, measured at the tightest tolerance, whose quadrature estimates never agree (doubles cannot tell its points
+apart), so the refinement emitted panels, 17 microseconds each, until the row limit of 4 Mi (66 seconds); and three hatches of tiny
+spacing or very wide round caps whose lines made 10^5 to 10^6 dots or caps, each through the stroke's ring of 17 to 1000 vertices
+with exact orientations in two hulls (1.5 to 4 seconds natively, 77 under a sanitizer). `GSHGEOM_Limits.max_work` is the cap on that
+cost.
+
+**The unit and the default.** A unit is nominally a tenth of a microsecond of the library's work; the table below says what each
+operation charges, and the measured microseconds a unit stood for when the weights were set (a 2026 x86-64 core, GCC 16 at `-O2`;
+the figure is the order of the cost and not a promise, and a factor of two or three between operations is what the weights allow).
+The default is `GSHGEOM_LIMITS_DEFAULT_MAX_WORK`, 2^22 (4 194 304) units, which is a third to a half of a second of work at
+those rates. `0` is the default and not "unlimited" (`UINT64_MAX` is as near to that as there is), as for every field of the
+structure; `gshgeom_limits_default` fills it in, as it does the counts.
+
+| Operation | What it charges | Measured |
+|---|---|---|
+| `gshgeom_measured_create`, `gshgeom_measured_curve_length` | 256 for each subdivision of a quadrature panel beyond the first rule of its curve, charged before the two halves are evaluated (64 evaluations of the speed, each 0.3 to 0.5 microsecond for a rational curve: 4 units each) | 0.1 to 0.12 microsecond a unit |
+| `gshgeom_stroke_expand` and the variants (`_with_tolerance`, the curve outlines of `stroke_curves.h`), and so the stroke of a hatch | 1 for each point of an arc ring (`gshgeom_sk_arc`); 4 for each core vertex and 1 for each candidate vertex of an inflated piece (`gshgeom_sk_emit`: the sort, the monotone chain with exact orientations, the eight octagon candidates about each hull vertex and their hull); 4 for each core vertex of a conforming piece (`gshgeom_sk_emit_conform`: the hull and the snap of each vertex to the lattice); 8 for each curve piece visited in the split of a curve | 0.06 to 0.08 microsecond a unit on rings, 0.06 on curve pieces |
+| `gshgeom_hatch_pieces` and the variants | for each line, one unit for each 16 points of the flattened region, after the first 256 units, and 3 for each step of its dash walk (estimated from the lengths: `n` entries a period over the span of the line), after the first 256 units | 0.1 microsecond a unit |
+
+The charge is made **before** the work it pays for, so a call never waits for more than the budget; and **exactly**: a call that
+spends W units succeeds under a budget of W and is `ERR_LIMIT` under W - 1 (tests/unit/test_work_budget.cpp finds W for fixed inputs
+through the internal seams `gshgeom_measured_create_counted`, `gshgeom_stroke_expand_counted` and `gshgeom_hatch_pieces_work`, pins
+it, and checks both sides of the boundary, and that the outline or table at W is the one without a budget).
+
+**What it is a function of.** The units are counted from decisions the library makes in integers and in doubles that are the same
+bits on every target (the quadrature's accept test, the number of points of a ring, the hull), so an input is refused on every target
+or on none. It is a function of the call alone: nothing is kept between calls, a refused call leaves nothing, and a call made after a
+refusal or beside another spends what it would have spent alone. A stroke that is drawn twice (the first, conforming pass found an
+inflated piece, which every round cap is) spends one budget over both passes; the combined hatch entries (`gshgeom_hatch_expand` and
+its variants) spend one budget over the pieces and their stroke (the second stage is handed what the first left, and at least one unit,
+since 0 would be the default), while `gshgeom_hatch_pieces` followed by `gshgeom_hatch_expand_pieces` is two calls and has two budgets.
+A consumer that caches an outline keyed by the stroke (the CPU renderer's cache) is unaffected for the same reason: whether a stroke
+is refused is a function of the stroke, the map, the tolerance and the limits alone, never of a damage or of what was drawn before.
+
+**How it composes with the counts.** Independent caps: a call is refused by whichever is met first, and every refusal is
+`ERR_LIMIT`. The row limit still bounds the measured table's size and `max_points` a stroke's parts. What changed is that a caller
+who sets the counts to what it can hold no longer also needs them to protect its time, and a caller who wants less time than the default
+lowers `max_work` and not the counts (which would refuse inputs of a size it can hold). The input-paid work is deliberately not
+charged in the operations that have such work, because charging it would refuse a long path for its length: a curve's first rule and
+the rules of its halves (48 evaluations a curve), and a stroke's segment, join and cap geometry (about 20 microseconds a miter-joined
+segment, dominated by the exact decision of the join, with the stroke's rings charged as above). That work is linear in the number of
+elements and `max_elements` (4 Mi by default) bounds it; a caller who wants a time bound on a very long path states a lower
+`max_elements` or splits the path. This is the one place the budget is not the whole story, and it is stated here and not hidden.
+
+**The loops of the library, and what bounds each** (the audit that made the budget; `GSHGEOM_Limits` fields in brackets):
+
+| Loop | Bounded by |
+|---|---|
+| `along.c` `refine` (adaptive Gauss-Legendre) | `max_work` since this budget (it was bounded by `max_points` rows only: 66 s); the depth is at most `GSHGEOM_MEASURE_MAX_DEPTH` (52) |
+| `along.c` `solve` (Newton on a row), `tangent` (derivatives) | a constant: 64 iterations of one row, 5 derivatives |
+| `hatch.c` the lines of a region (`pieces_core`) | `max_lines` for the count, and `max_work` for their cost: each line reads every point of the region (4 to 8 nanoseconds a point) so lines times points was unbounded in time (64 Ki lines times 4 Mi points); charged since this budget |
+| `hatch.c` the dash walk of a line | `max_dash_steps` for each line (16.8 Mi steps, about 5 seconds, at the default) and, over all the lines, `max_work` since this budget (3 units a step) |
+| `hatch.c` the pieces of a hatch | `max_elements / 2` pieces, each pushed in constant time |
+| `stroke/expand.c`, `body.c`, `join.c`, `arc.c`, `emit.c` rings, hulls, pieces | `max_work` since this budget (the unit table above); `max_points` for the size of a part; `work_cap` (`4 max_points + 4096`) for the pieces visited, which the budget now ends sooner |
+| `stroke/dash.c` the walk of a dash pattern | `max_dash_steps` (the stroke's own work cap, default 16.8 Mi steps, about 5 seconds), decided before the walk where the lengths show it; the walk's pieces are emitted through the charged rings |
+| `stroke/arc.c` the arcs join (`BOUNDARY_EDGES`) | a constant bound on the boundary; its rings are charged as arcs |
+| `stroke_curves/lower.c` the lowering to cubics | `max_elements` for the output, constant work for each piece; measured: a circle of radius 10^5 at the smallest tolerance in 3 milliseconds |
+| `flatten/flatten.c` adaptive subdivision | `max_points`, a constant work for each point; measured: a cubic over the whole 26.6 range at the minimum tolerance in 1 millisecond (15 Ki points) |
+| `flatten/seams.c` `cancel_seams` | `max_points` edges, sorted once; the walk past the used arcs at one vertex was quadratic in the loops through it (160 000 loops through one vertex: 7 seconds, for 480 000 points) and is linear since the skip links of this change |
+| `lattice/lattice.c` the search for the copies | `max_count` and `GSHGEOM_LATTICE_ROW_WORK` (lattice.h, LT1): a search past `2 max_count + ROW_WORK` rows is `ERR_LIMIT` |
+| `clip/clip.c` the cut to a convex quadrilateral | linear in the points (four passes), `max_points` |
+| `exact/*`, `orient/*`, `curve/*`, `map/*`, `path/*`, `device/*` | constants, or linear in the elements of a path (`max_elements`); no loop whose count depends on the values and not on the sizes |
 
 ## Tests and gates
 

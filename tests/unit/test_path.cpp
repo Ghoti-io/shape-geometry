@@ -143,7 +143,9 @@ TEST(Core, LimitsDefaultsAndZeroMeansDefault) {
   EXPECT_EQ(l.max_points, GSHGEOM_LIMITS_DEFAULT_MAX_POINTS);
   EXPECT_EQ(GSHGEOM_LIMITS_DEFAULT_MAX_POINTS, (size_t)4194304);
   EXPECT_EQ(l.max_dash_steps, 0u) << "zero is the derived default, 4 max_points + 4096 (design.md, Dash steps)";
-  EXPECT_EQ(sizeof l, 2 * sizeof(size_t) + 8) << "the field took the reserved bytes' place: the structure keeps its size";
+  EXPECT_EQ(l.max_work, GSHGEOM_LIMITS_DEFAULT_MAX_WORK) << "the work budget is filled in, as the counts are (design.md, Work budget)";
+  EXPECT_EQ(GSHGEOM_LIMITS_DEFAULT_MAX_WORK, (uint64_t)1 << 22);
+  EXPECT_EQ(sizeof l, 2 * sizeof(size_t) + 16) << "max_dash_steps took the reserved bytes' place; max_work follows it";
   gshgeom_limits_default(nullptr);  // ignored
   EXPECT_EQ(gshgeom_allocator_default(), gcu_allocator_default());
 }

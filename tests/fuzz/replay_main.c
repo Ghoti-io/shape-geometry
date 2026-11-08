@@ -26,11 +26,17 @@
  * campaign to repeat.  It fails on no input at all, and on a corpus that never
  * reaches one of the outcomes the target lists: a replay over nothing reports
  * success over a population of zero.
+ *
+ * With GSHGEOM_REPLAY_MAX_SECONDS set to a positive number, it also fails on an input that takes longer than that to run: a slow unit
+ * a fuzzer once found (the work budget, GSHGEOM_Limits.max_work, ends them) is a failing test and not a timeout to rediscover.
  */
+
+#define _POSIX_C_SOURCE 200809L
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
 int gshgeom_fuzz_unreached(void);
@@ -41,6 +47,12 @@ int main(int argc, char * argv[]) {
     return 2;
   }
   size_t replayed = 0;
+  size_t slow = 0;
+  double max_seconds = 0.0;
+  const char * limit = getenv("GSHGEOM_REPLAY_MAX_SECONDS");
+  if (limit) {
+    max_seconds = atof(limit);
+  }
   for (int i = 1; i < argc; i++) {
     FILE * file = fopen(argv[i], "rb");
     if (!file) {
@@ -72,9 +84,21 @@ int main(int argc, char * argv[]) {
       fprintf(stderr, "replay: out of memory reading %s\n", argv[i]);
       return 2;
     }
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
     LLVMFuzzerTestOneInput(buffer, length);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    const double seconds = (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec);
+    if (max_seconds > 0.0 && seconds > max_seconds) {
+      fprintf(stderr, "replay: SLOW: %s took %.2f s, more than the %.2f s allowed\n", argv[i], seconds, max_seconds);
+      slow++;
+    }
     free(buffer);
     replayed++;
+  }
+  if (slow) {
+    fprintf(stderr, "replay: %zu slow input(s)\n", slow);
+    return 1;
   }
   if (replayed == 0) {
     fprintf(stderr, "replay: no inputs\n");

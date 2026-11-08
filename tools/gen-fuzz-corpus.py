@@ -250,6 +250,11 @@ def files():
     for i in range(PLAIN_FILES):
         out["plain-%03d.bin" % i] = plain(i + 1)
     out.update(scripted())
+    # Found by pass B's libFuzzer run: a measure of an arc half a turn about a centre 10^30 away, at the tightest tolerance.  At that
+    # magnitude the doubles cannot tell the curve's points apart, so the quadrature's estimates never agree and the table grew to the row
+    # limit (66 seconds, three such measures in the input).  The work budget (GSHGEOM_Limits.max_work) ends each in a fraction of a second.
+    out["regression-slow-measure-of-an-arc-at-a-huge-offset.bin"] = base64.b64decode(
+        "ADsPGP1PGPpQEAUYAkUYBOsY+ckY/ZYYAI0Y+FMYA48Y+o0BGPiuGPiECAYY/8AYAGQVDBgBYAAVGAVDGATpBxAY+iwYBdIY/a0NGPqCGPmKGAVxDRj7pRj9sBj9swwYBYwDGAPxBBj4BQATGPxlChgFjgwTGPsCDBj6mxj4FgEVGPvaERj60QERGAJXGAJXDwcY+I8Y+p0Y/IEYAAcY/TkKCRgFARgEzhj54RgHqQsMGARKGAKHGAHsGPt0GAF2GAXiGAFDGAcWBRgFHwMSGAVJGAZ+GAfvGP94GAYWEgsY+d0YBA4Y/aQY+L0Y+OIEGPoeGAFRGP4hGPlOGP2IGAPQFxQIGAPqExgEuhgH7Bj71AAYBakY/ycNGPmpGAQGCxgBxxgBlRj9OBgCKwgY+64YALETGPheGAYeGAFcCxgHQxj+RRj6ABgH4gwIGP2zGPjjGAdfAxgDzAUY+VcY/BQYB10YBUAYAfIY+Y8IExgCyxj77xj4HRgE4xj5TBgB5Bj9Dhj+xRQY/3AYAcAPGPl2GPqvGAKoChj6HAEY/XYNGAbCGPrCGP6WGPr6BBgE9woY+DcY/gcCGPlVGAMDGPyNGAKyGAL2BRj5swEYBhEY+/AY/YIYBrAYBjIY+c0Y/24DGPxRGAdFBxcSGAPeGPi8FhgB4Rj9pRgGTBj45BgFOhj65BgCcRj7BRgETxj+5Bj++hj97AsY/4gY+gcY+jIFBBj64hj/LwYYBWoOGPjnBRj4Dxj+ng8YAToY+T8Y/soYBGYY/8cYBlAY+ckY+B4YAdoYBUgNGPxxGAJqGAYZGAVoEBgA4wsWGAcLGACIGAZUABAY+iMY/K8Y/wAYBDYYA8AY+vAYBPYY+YMDDhgDwxgArhj9OBj9FRgBVhj6oxgH6Rj++BgDWxj9owIY+X4DGPisGAXHGP7hGP5EGAUFGAC6GAYeGAMxGAKRGP31BBgCfhgABhEWBhgDPhgFaBgFfRj//gsY+lMMGPm6FwUYBPYY+XYY+ucYB9QVGAZ3GP7BGAViGAdYDg4Y+A4OGAM+GAM8GAaLGAdFGPkCGPkxGACbGPgaCxj8QRj/vBgBqxj+gxgCTRj5ZBgA+wIYBFkY/3ICGPjuGP+dFQ4YAmMYBp8Y/wsYAF0Y/lYY/CoSGAPNFxgGEBEYAQsY/bMY+pAY+CkYAX8VGABiGP3ZGAdqGAbPGAC0CRj8vhj5thj5iBj+8xj+0hgCbBgFDhj6mhgFSREPDxj40RgAXBgD+Bj+3g4PGAJ/GAaGGPhoGADCGPjOBRj+ShgDZAMTGPocGAY1GPr/ARgDKxYXGP5DGAV/GAb3GP3xGAdBGPs6GPu4EhgEbxgHuxgCthQYB/ALDxj7ZhgCMAAY/kITExcY+wYYAIMDGP/hGPjEAxj9UhAYABAY/L8YAzsLGPufGPzUFxj/Fxj7kRgA7hj61xj+oBj6/xgFZBj/exQYBiYPGPrZGP0lFBgHkBgCPhj4YRj9UwAYBxwYBQEYBn8Y/J0Y/D0Y/u8YBtAUAxj64Q0Y+cUOGAdvGPp5GAGmGAFmERgGtxj8Zg8Q")
     return out
 
 
@@ -687,6 +692,13 @@ def hatch_files():
     # unsupported before the limit.
     out["regression-hatch-limit-and-an-unsupported-path.bin"] = base64.b64decode("SNUuHh4iivcY5ivpCsXaRiZ13smNAoaOhp7TUbnME2NO71Iw7BQ73FVEzFQvtaZyRNgaV3waMOr///8vDKfUJK8hJ3Ft9usv74gO+hrzL3SM04Bofvm9")
     out["regression-refused-hatch-and-a-region-past-the-limit.bin"] = base64.b64decode("AQAFAAEAAQAAAAAFAAICAAUACQk=")
+    # Found by pass B's libFuzzer run, slow units of 1.5 to 4 seconds (77 under a sanitizer): a hatch whose lines make hundreds of thousands
+    # of round dots or caps, each through a ring of the stroke's discs, until a count of points ended it.  The work budget
+    # (GSHGEOM_Limits.max_work) ends each in a fraction of a second, with ERR_LIMIT.
+    out["regression-slow-dots-hatch-at-one-and-a-half-spacing.bin"] = base64.b64decode("UAAAAAEAAQAAAAAEAgALAgAAAh4AAlge//oeACQAAAkJ")
+    out["regression-slow-dashed-hatch-stroked-very-wide.bin"] = base64.b64decode(
+        "EAAAAAEAAREfAAAAAAL/////fv///wFFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUUASNUuHh4iivcY5iuNAoaOho7TUbnME2NO71Iw7BQ76QrF2kYmBnXeyY0CBwdyRNgaV2waMF7q////////////Lwyn/////9QkryEBIG326QrF2kYmBnXeyY0CBweGjpae01G5zBNrTu9SzBNjTu9SMOwUO9xVRMxUL7Wm")
+    out["regression-slow-two-family-hatch-stroked-wide.bin"] = base64.b64decode("kAACAAEBAxEe//wCAAsAEQsCAAEAHgCIAAAAAAAgBwECAR7/6AAeUQMeACYkAB4ASAYeAEgeAEgBHgDHHv/oHgAsqQ==")
     for i in range(HATCH_RANDOM_FILES):
         out["random-%03d.bin" % i] = hatch_random(i + 1)
     for i in range(HATCH_PLAIN_FILES):

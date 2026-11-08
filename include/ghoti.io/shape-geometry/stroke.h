@@ -519,7 +519,9 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand(const GSHGEOM_Path * centerline
  * @param map        A 2D map from model space to device pixels.
  * @param tolerance  `tau`, in 26.6 units; at least ::GSHGEOM_FLATTEN_MIN_TOLERANCE.
  * @param alloc      The allocator; NULL for the default.
- * @param limits     `max_points` bounds each part; NULL for the defaults.
+ * @param limits     `max_points` bounds each part, and `max_work` the work of the expansion: a point of an arc, a vertex of each piece
+ *   that is hulled and rounded, and a piece of a curve below its first two levels are charged (documentation/design.md,
+ *   "Work budget"), over every pass of the call; NULL for the defaults.
  * @param out        Receives the outline, only on success; free it with
  *   ::gshgeom_stroke_outline_destroy.
  * @return ::GSHGEOM_OK (a not-invertible map and width 0 included);
@@ -529,7 +531,7 @@ GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand(const GSHGEOM_Path * centerline
  *   as SG2, for an outline vertex outside the 26.6 range, a part past
  *   `max_points`, a magnitude past the expansion's arithmetic bound
  *   (documentation/design.md, "The expansion's arithmetic"), a piece the
- *   depth cap would force, more dash steps than `max_dash_steps` (`4 max_points + 4096` where it is 0) or a cut position's error past SG26's gate; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.
+ *   depth cap would force, more dash steps than `max_dash_steps` (`4 max_points + 4096` where it is 0), more work than `max_work` or a cut position's error past SG26's gate; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_stroke_expand_with_tolerance(
     const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,

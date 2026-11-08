@@ -75,6 +75,12 @@ GSHGEOM_API const char * gshgeom_result_string(GSHGEOM_Result result);
 #define GSHGEOM_LIMITS_DEFAULT_MAX_POINTS ((size_t)1 << 22)
 
 /**
+ * Default ::GSHGEOM_Limits.max_work: 2^22 work units, about 0.3 to 0.5 seconds of a 2026 x86-64 core
+ * (documentation/design.md, "Work budget").
+ */
+#define GSHGEOM_LIMITS_DEFAULT_MAX_WORK ((uint64_t)1 << 22)
+
+/**
  * @brief Caps for the quantities a caller can make unbounded.
  *
  * A field of 0 means the default above.  NULL where a `const GSHGEOM_Limits *`
@@ -92,6 +98,19 @@ typedef struct GSHGEOM_Limits {
    * so the structure keeps its size (it took the place of the reserved bytes).
    */
   uint64_t max_dash_steps;
+  /**
+   * The most work units one call may spend, on top of what its other caps allow: a call that would spend more is
+   * ::GSHGEOM_ERR_LIMIT, decided as the work is done (the refusal is made before the work it would have paid for, so a caller never
+   * waits for more than the budget) and from the call alone (not from a call made or refused before it, or from what is drawn
+   * elsewhere).  A call that spends exactly the budget succeeds.  0 is ::GSHGEOM_LIMITS_DEFAULT_MAX_WORK, never unlimited;
+   * `UINT64_MAX` is as near to unlimited as there is.  The counts above bound what a call outputs and not what it costs to reach
+   * the count (a tiny quadrature tolerance, a hatch of a million dots and a wide round cap each cost seconds before any count is
+   * met), and this bounds the cost.  A unit is nominally a tenth of a microsecond; what each operation charges is stated
+   * where the operation is (::gshgeom_measured_create, ::gshgeom_stroke_expand, ::gshgeom_hatch_pieces and the table in
+   * documentation/design.md, "Work budget"), and what a size of input pays for in the operations that charge nothing for it
+   * (a segment of a stroke, a curve's first quadrature rule) is bounded by `max_elements`.  `uint64_t` whatever the target.
+   */
+  uint64_t max_work;
 } GSHGEOM_Limits;
 
 /**

@@ -62,6 +62,7 @@ void gshgeom_limits_default(GSHGEOM_Limits * limits) {
   *limits = (GSHGEOM_Limits){0};
   limits->max_elements = GSHGEOM_LIMITS_DEFAULT_MAX_ELEMENTS;
   limits->max_points = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;
+  limits->max_work = GSHGEOM_LIMITS_DEFAULT_MAX_WORK;
 }
 
 const char * gshgeom_version_string(void) {

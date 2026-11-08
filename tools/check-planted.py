@@ -1401,7 +1401,7 @@ PLANTS += [
     ("al-cl-null-out", "src", A, "  if (!curve || !out) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = gshgeom_curve_check(curve);", "  if (!curve) {\n    return GSHGEOM_ERR_INVALID;\n  }\n  GSHGEOM_Result r = gshgeom_curve_check(curve);", AT),
     ("al-cl-unchecked-curve", "src", A, "  GSHGEOM_Result r = gshgeom_curve_check(curve);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  double tol = 0.0;", "  GSHGEOM_Result r = GSHGEOM_OK;\n  double tol = 0.0;", AT),
     ("al-cl-unchecked-tolerance", "src", A, "  r = check_tolerance(tolerance, &tol);\n  if (r != GSHGEOM_OK) {\n    return r;\n  }\n  double poly = polygon_length(curve);", "  tol = tolerance == 0.0 ? GSHGEOM_MEASURE_TOLERANCE_DEFAULT : tolerance;\n  double poly = polygon_length(curve);", AT),
-    ("al-cl-max-rows", "src", A, "tab.max = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n  r = measure", "tab.max = 3;\n  r = measure", AT),
+    ("al-cl-max-rows", "src", A, "tab.max = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;\n  tab.work_cap", "tab.max = 3;\n  tab.work_cap", AT),
     ("al-cl-result", "src", A, "*out = tab.sum;\n  return GSHGEOM_OK;\n}\n\n/* ---", "*out = tab.sum * 1.000001;\n  return GSHGEOM_OK;\n}\n\n/* ---", AT),
     
     # --- building a measured path ----------------------------------------------------
@@ -3451,9 +3451,9 @@ hx("hx-merge-unsorted", "  qsort(w->iv, n, sizeof w->iv[0], iv_cmp);\n", "")
 hx("hx-band-mapping", "const double band_s = GSHGEOM_HATCH_BAND / gmath_sqrt(ww);", "const double band_s = GSHGEOM_HATCH_BAND;")
 # HX6: the dashes
 hx("hx-dash-window-not-extended-before", "e.base = t_first - period;", "e.base = t_first;")
-hx("hx-dash-window-not-extended-after", "(t_last - t_first) + 2.0 * period, dash_steps", "(t_last - t_first) + period, dash_steps")
-hx("hx-dash-offset-lost", "off + e.base, (t_last", "e.base, (t_last")
-hx("hx-dash-restart-per-interval", "        r = gshgeom_stroke_dash_each(dashes, nd, off + e.base, (t_last - t_first) + 2.0 * period, dash_steps, dash_cb, &e);", "        for (size_t qq = 0; qq < w.out_n && r == GSHGEOM_OK; qq++) {\n          e.base = w.out[qq].t0;\n          r = gshgeom_stroke_dash_each(dashes, nd, off, (w.out[qq].t1 - w.out[qq].t0) + 2.0 * period, dash_steps, dash_cb, &e);\n        }")
+hx("hx-dash-window-not-extended-after", "const double span = (t_last - t_first) + 2.0 * period;", "const double span = (t_last - t_first) + period;")
+hx("hx-dash-offset-lost", "off + e.base, span", "e.base, span")
+hx("hx-dash-restart-per-interval", "          r = gshgeom_stroke_dash_each(dashes, nd, off + e.base, span, dash_steps, dash_cb, &e);", "          for (size_t qq = 0; qq < w.out_n && r == GSHGEOM_OK; qq++) {\n            e.base = w.out[qq].t0;\n            r = gshgeom_stroke_dash_each(dashes, nd, off, (w.out[qq].t1 - w.out[qq].t0) + 2.0 * period, dash_steps, dash_cb, &e);\n          }")
 hx("hx-dash-scale-wrong", "dashes_from_dxf(f->dashes, f->dash_count, 1.0,", "dashes_from_dxf(f->dashes, f->dash_count, 2.0,")
 hx("hx-dash-period-wrong", "      for (size_t k = 0; k < nd; k++) {\n        period += dashes[k];\n      }", "      for (size_t k = 0; k + 1 < nd; k++) {\n        period += dashes[k];\n      }")
 hx("hx-dash-touch-kept", "    if (hi - lo > e->band) {", "    if (hi >= lo) {")
@@ -3512,6 +3512,66 @@ HX_UNSEEN_PLANTS = [p for p in HX_PLANTS if p[0] in HX_UNSEEN]
 PLANTS += [p for p in HX_PLANTS if p[0] not in HX_UNSEEN]
 if os.environ.get("PLANT_UNSEEN"):
     PLANTS += HX_UNSEEN_PLANTS
+
+
+# --- The work budget (GSHGEOM_Limits.max_work; documentation/design.md, "Work budget") ----------------------------------------------
+# The ids start with wb-.  The budget's own arithmetic (the charge, its boundary, where it is read, the pass that starts from the
+# first's spend), every place that charges (a subdivision of the measure, an arc point, a hull vertex of each kind, a curve piece, a
+# line's sweep, a dash walk's steps) and the combined hatch entry's shared budget.  The tests that see them are in
+# tests/unit/test_work_budget.cpp, which pins the work of fixed inputs and the exactness of the boundary, so a charge that is taken
+# out, moved or changed in size changes a number.  Not planted: the weights as constants (GSHGEOM_SK_W_*, SPLIT_WORK, HATCH_*), which
+# live in headers or macros that a plant of this harness cannot rebuild alone and which a changed value moves in the pinned table.
+WBT = ["testWork_budget"]
+WB_PLANTS = []
+
+
+def wb(pid, fname, old, new, tests=WBT, kind="src"):
+    WB_PLANTS.append((pid, kind, fname, old, new, tests))
+
+
+# the header's default and the core's filling of it
+wb("wb-default-halved", "include/ghoti.io/shape-geometry/core.h", "#define GSHGEOM_LIMITS_DEFAULT_MAX_WORK ((uint64_t)1 << 22)", "#define GSHGEOM_LIMITS_DEFAULT_MAX_WORK ((uint64_t)1 << 21)", ["testWork_budget", "testPath"], "hdr")
+wb("wb-default-not-filled", "src/core/core.c", "  limits->max_work = GSHGEOM_LIMITS_DEFAULT_MAX_WORK;\n", "", ["testWork_budget", "testPath"])
+# the measured path
+wb("wb-al-split-uncharged", AL, "  tab->work_left -= SPLIT_WORK;\n", "")
+wb("wb-al-split-charge-halved", AL, "  tab->work_left -= SPLIT_WORK;\n", "  tab->work_left -= SPLIT_WORK / 2;\n")
+wb("wb-al-boundary-refuses-the-exact-budget", AL, "  if (tab->work_left < SPLIT_WORK) {", "  if (tab->work_left <= SPLIT_WORK) {")
+wb("wb-al-boundary-allows-one-more", AL, "  if (tab->work_left < SPLIT_WORK) {", "  if (tab->work_left + SPLIT_WORK < SPLIT_WORK + SPLIT_WORK) {")
+wb("wb-al-limit-not-read", AL, "(limits && limits->max_work) ? limits->max_work : GSHGEOM_LIMITS_DEFAULT_MAX_WORK;", "GSHGEOM_LIMITS_DEFAULT_MAX_WORK;")
+wb("wb-al-zero-is-unlimited", AL, "(limits && limits->max_work) ? limits->max_work : GSHGEOM_LIMITS_DEFAULT_MAX_WORK;", "(limits && limits->max_work) ? limits->max_work : UINT64_MAX;")
+wb("wb-al-work-not-reported", AL, "    *work = m->tab.work_cap - m->tab.work_left;", "    *work = 0;")
+wb("wb-al-curve-length-has-no-budget", AL, "  tab.work_cap = tab.work_left = GSHGEOM_LIMITS_DEFAULT_MAX_WORK;", "  tab.work_cap = tab.work_left = 0;")
+wb("wb-al-budget-restarts-each-curve", AL, "  m->seg_n++;\n  return measure(curve, poly, tolerance, &m->tab);", "  m->seg_n++;\n  m->tab.work_left = m->tab.work_cap;\n  return measure(curve, poly, tolerance, &m->tab);")
+# the stroke: the charge and its reading
+wb("wb-sk-charge-refuses-the-exact-budget", "src/stroke/emit.c", "  if (units > c->effort_cap - c->effort) {", "  if (units >= c->effort_cap - c->effort) {")
+wb("wb-sk-charge-allows-one-more", "src/stroke/emit.c", "  if (units > c->effort_cap - c->effort) {", "  if (units > c->effort_cap - c->effort + 1) {")
+wb("wb-sk-charge-not-added", "src/stroke/emit.c", "  c->effort += units;\n  return GSHGEOM_OK;", "  return GSHGEOM_OK;")
+wb("wb-sk-limit-not-read", SKX, "    if (limits->max_work) {\n      c.limits.max_work = limits->max_work;\n    }\n", "")
+wb("wb-sk-cap-unlimited", SKX, "  c.effort_cap = c.limits.max_work;", "  c.effort_cap = UINT64_MAX;")
+wb("wb-sk-second-pass-restarts", SKX, "  c.effort = work ? work->spent : 0;", "  c.effort = 0;")
+wb("wb-sk-spent-not-reported", SKX, "    work->spent = c.effort;", "    work->spent = 0;")
+wb("wb-sk-dots-spent-not-reset", SKX, "  GSHGEOM_Stroke_Work local = {0};\n  GSHGEOM_Stroke_Work * w = work ? work : &local;\n  w->spent = 0;\n  int redo = 0;\n  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH", "  GSHGEOM_Stroke_Work local = {0};\n  GSHGEOM_Stroke_Work * w = work ? work : &local;\n  int redo = 0;\n  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH")
+# the stroke: each charge
+wb("wb-sk-arc-point-uncharged", "src/stroke/arc.c", "  GSHGEOM_Result r = gshgeom_sk_charge(c, GSHGEOM_SK_W_ARC);", "  GSHGEOM_Result r = GSHGEOM_OK;")
+wb("wb-sk-piece-uncharged", "src/stroke/body.c", "    GSHGEOM_Result charged = gshgeom_sk_charge(sg->c, GSHGEOM_SK_W_PIECE);", "    GSHGEOM_Result charged = GSHGEOM_OK;")
+wb("wb-sk-core-uncharged", "src/stroke/emit.c", "  GSHGEOM_Result charged = gshgeom_sk_charge(c, n * GSHGEOM_SK_W_CORE);", "  GSHGEOM_Result charged = GSHGEOM_OK;")
+wb("wb-sk-candidates-uncharged", "src/stroke/emit.c", "  charged = gshgeom_sk_charge(c, m * GSHGEOM_SK_W_CAND);", "  charged = GSHGEOM_OK;")
+wb("wb-sk-conform-uncharged", "src/stroke/emit.c", "  GSHGEOM_Result r = gshgeom_sk_charge(c, n * GSHGEOM_SK_W_CONFORM);", "  GSHGEOM_Result r = GSHGEOM_OK;")
+wb("wb-sk-core-charged-once-not-per-vertex", "src/stroke/emit.c", "  GSHGEOM_Result charged = gshgeom_sk_charge(c, n * GSHGEOM_SK_W_CORE);", "  GSHGEOM_Result charged = gshgeom_sk_charge(c, GSHGEOM_SK_W_CORE);")
+# the hatch
+wb("wb-hx-limit-not-read", HX, "    if (limits_in->max_work) {\n      limits.max_work = limits_in->max_work;\n    }\n", "")
+wb("wb-hx-sweep-uncharged", HX, "      r = hatch_charge(&work_left, (uint64_t)np / HATCH_SWEEP_POINTS);\n      if (r != GSHGEOM_OK) {\n        break;\n      }\n", "")
+wb("wb-hx-sweep-points-per-unit", HX, "(uint64_t)np / HATCH_SWEEP_POINTS);", "(uint64_t)np / (HATCH_SWEEP_POINTS + 1u));")
+wb("wb-hx-steps-uncharged", HX, "        r = hatch_charge(&work_left, steps_units(((double)nd) * (span / period + 1.0)) * HATCH_STEP_UNITS);", "        r = GSHGEOM_OK;")
+wb("wb-hx-step-unit-lost", HX, "steps_units(((double)nd) * (span / period + 1.0)) * HATCH_STEP_UNITS);", "steps_units(((double)nd) * (span / period + 1.0)));")
+wb("wb-hx-free-units-too-many", HX, "  if (units <= HATCH_FREE_UNITS) {", "  if (units <= HATCH_FREE_UNITS + 1u) {")
+wb("wb-hx-free-units-not-taken-off", HX, "  units -= HATCH_FREE_UNITS;\n", "")
+wb("wb-hx-budget-not-consumed", HX, "  *left -= units;\n", "")
+wb("wb-hx-boundary-refuses-the-exact-budget", HX, "  if (units > *left) {", "  if (units >= *left) {")
+wb("wb-hx-work-not-kept-on-the-pieces", HX, "  P->work = limits.max_work - work_left;", "  P->work = 0;")
+wb("wb-hx-second-stage-has-the-whole-budget", HX, "  store->max_work = pieces->work < store->max_work ? store->max_work - pieces->work : 1;", "  store->max_work = pieces->work ? store->max_work : store->max_work;")
+wb("wb-hx-spent-budget-means-the-default", HX, "store->max_work - pieces->work : 1;", "store->max_work - pieces->work : 0;")
+PLANTS += WB_PLANTS
 
 
 def run(cmd, shell=False, env_extra=None, cwd=None):

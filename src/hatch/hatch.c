@@ -47,6 +47,7 @@
 
 #include "../exact/exact.h"
 #include "../stroke/stroke_internal.h"
+#include "hatch_internal.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -105,6 +106,7 @@ struct GSHGEOM_Hatch_Pieces {
   Piece * v;
   size_t n, cap;
   uint64_t lines;
+  uint64_t work;  /* the units of the limits' max_work that making the pieces spent */
   int h_singular; /* the hatch map's linear part is exactly singular: nothing is drawn (HX8) */
 };
 
@@ -122,6 +124,10 @@ size_t gshgeom_hatch_pieces_count(const GSHGEOM_Hatch_Pieces * p) {
 
 uint64_t gshgeom_hatch_pieces_lines(const GSHGEOM_Hatch_Pieces * p) {
   return p ? p->lines : 0;
+}
+
+uint64_t gshgeom_hatch_pieces_work(const GSHGEOM_Hatch_Pieces * p) {
+  return p ? p->work : 0;
 }
 
 GSHGEOM_Result gshgeom_hatch_pieces_get(const GSHGEOM_Hatch_Pieces * p, size_t index, double xy[4], int * dot) {
@@ -447,6 +453,36 @@ static void merge_intervals(Work * w, size_t n, double band_s) {
   w->out[w->out_n++] = cur;
 }
 
+/* --- the work budget ------------------------------------------------------------------------------------------------------ */
+
+/*
+ * The limits' `max_work`, spent by what the number of lines multiplies.  Each line reads every point of the region (a sign for
+ * each, about 6 ns) and walks its dash pattern across its length (a step is about 0.3 microsecond), so a region of a million
+ * points under tens of thousands of lines, or a short pattern over a long line, is work no count of lines or of pieces shows.
+ * What a line is charged is a unit for each HATCH_SWEEP_POINTS points of the region and HATCH_STEP_UNITS for each step of the
+ * pattern's walk, after the first HATCH_FREE_UNITS of each: what a line costs of the sizes of the inputs, which they pay for.
+ */
+#define HATCH_SWEEP_POINTS 16u
+#define HATCH_STEP_UNITS 3u
+#define HATCH_FREE_UNITS 256u
+
+static GSHGEOM_Result hatch_charge(uint64_t * left, uint64_t units) {
+  if (units <= HATCH_FREE_UNITS) {
+    return GSHGEOM_OK;
+  }
+  units -= HATCH_FREE_UNITS;
+  if (units > *left) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  *left -= units;
+  return GSHGEOM_OK;
+}
+
+/** The units of a count of steps given as a double: the floor, held below 2^50 (the budget cannot be told from that). */
+static uint64_t steps_units(double steps) {
+  return steps >= 0x1p50 ? (UINT64_C(1) << 50) : (uint64_t)d2i_floor(steps < 0.0 ? 0.0 : steps);
+}
+
 /* --- pieces -------------------------------------------------------------------------------------------------------------- */
 
 typedef struct Emit {
@@ -568,6 +604,9 @@ static GSHGEOM_Result pieces_core(const GSHGEOM_Flat_Path * flat, GSHGEOM_Fill_R
       limits.max_points = limits_in->max_points;
     }
     limits.max_dash_steps = limits_in->max_dash_steps;
+    if (limits_in->max_work) {
+      limits.max_work = limits_in->max_work;
+    }
   }
   if (max_lines == 0) {
     max_lines = GSHGEOM_HATCH_LINES_DEFAULT;
@@ -648,6 +687,7 @@ static GSHGEOM_Result pieces_core(const GSHGEOM_Flat_Path * flat, GSHGEOM_Fill_R
   const size_t max_pieces = limits.max_elements / 2 ? limits.max_elements / 2 : 1;
   const size_t dash_steps = limits.max_dash_steps && limits.max_dash_steps < (uint64_t)SIZE_MAX ? (size_t)limits.max_dash_steps
                                                                                                   : 4 * limits.max_points + 4096;
+  uint64_t work_left = limits.max_work;
   Emit e;
   memset(&e, 0, sizeof e);
   e.P = P;
@@ -770,6 +810,10 @@ static GSHGEOM_Result pieces_core(const GSHGEOM_Flat_Path * flat, GSHGEOM_Fill_R
         break;
       }
       P->lines++;
+      r = hatch_charge(&work_left, (uint64_t)np / HATCH_SWEEP_POINTS);
+      if (r != GSHGEOM_OK) {
+        break;
+      }
       for (size_t i = 0; i < np; i++) {
         double v;
         w.sg[i] = (int8_t)side_of(wx, wy, ak.x, ak.y, R.px[i], R.py[i], &v);
@@ -801,7 +845,12 @@ static GSHGEOM_Result pieces_core(const GSHGEOM_Flat_Path * flat, GSHGEOM_Fill_R
           const double sc = dabs(t_first) > dabs(t_last) ? dabs(t_first) : dabs(t_last);
           e.slack = 0x1p-46 * (period > sc ? period : (sc > 1.0 ? sc : 1.0));
         }
-        r = gshgeom_stroke_dash_each(dashes, nd, off + e.base, (t_last - t_first) + 2.0 * period, dash_steps, dash_cb, &e);
+        /* the steps of the walk, from the lengths as the stroke's check has them: n entries a period over the span */
+        const double span = (t_last - t_first) + 2.0 * period;
+        r = hatch_charge(&work_left, steps_units(((double)nd) * (span / period + 1.0)) * HATCH_STEP_UNITS);
+        if (r == GSHGEOM_OK) {
+          r = gshgeom_stroke_dash_each(dashes, nd, off + e.base, span, dash_steps, dash_cb, &e);
+        }
       }
     }
   }
@@ -812,6 +861,7 @@ done:
     gshgeom_hatch_pieces_destroy(P);
     return r;
   }
+  P->work = limits.max_work - work_left;
   *out = P;
   return GSHGEOM_OK;
 }
@@ -931,6 +981,23 @@ GSHGEOM_Result gshgeom_hatch_expand_pieces(const GSHGEOM_Hatch_Pieces * pieces, 
   return r;
 }
 
+/**
+ * The limits for the second stage of an entry that makes the pieces and then expands them: the first stage's work is spent from
+ * the one budget of the call, so the pair costs what one call is allowed.  What is left is at least one unit, since 0 would be
+ * the default; a stage that needs more than the unit it is left is refused at its first charge, as it would be at none.
+ */
+static const GSHGEOM_Limits * rest_of_budget(const GSHGEOM_Limits * in, const GSHGEOM_Hatch_Pieces * pieces, GSHGEOM_Limits * store) {
+  gshgeom_limits_default(store);
+  if (in) {
+    *store = *in;
+    if (!store->max_work) {
+      store->max_work = GSHGEOM_LIMITS_DEFAULT_MAX_WORK;
+    }
+  }
+  store->max_work = pieces->work < store->max_work ? store->max_work - pieces->work : 1;
+  return store;
+}
+
 static GSHGEOM_Result expand_check(const GSHGEOM_Stroke * stroke) {
   if (!stroke) {
     return GSHGEOM_ERR_INVALID;
@@ -967,7 +1034,8 @@ GSHGEOM_Result gshgeom_hatch_expand_from_flat(const GSHGEOM_Flat_Path * region, 
       return r;
     }
   }
-  r = gshgeom_hatch_expand_pieces(pieces, stroke, chain, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, out);
+  GSHGEOM_Limits rest;
+  r = gshgeom_hatch_expand_pieces(pieces, stroke, chain, GSHGEOM_FLATTEN_TOLERANCE, alloc, rest_of_budget(limits, pieces, &rest), out);
   gshgeom_hatch_pieces_destroy(pieces);
   return r;
 }
@@ -996,7 +1064,8 @@ GSHGEOM_Result gshgeom_hatch_expand_with_tolerance(const GSHGEOM_Path * region, 
       return r;
     }
   }
-  r = gshgeom_hatch_expand_pieces(pieces, stroke, chain, tolerance, alloc, limits, out);
+  GSHGEOM_Limits rest;
+  r = gshgeom_hatch_expand_pieces(pieces, stroke, chain, tolerance, alloc, rest_of_budget(limits, pieces, &rest), out);
   gshgeom_hatch_pieces_destroy(pieces);
   return r;
 }

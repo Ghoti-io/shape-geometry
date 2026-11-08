@@ -44,6 +44,7 @@
 #include <ghoti.io/shape-geometry/arc.h>
 #include <ghoti.io/shape-geometry/hash.h>
 
+#include "along_internal.h"
 #include "../core/grow.h"
 
 #include <string.h>
@@ -228,6 +229,8 @@ typedef struct {
   int store;
   Row * row;
   size_t n, cap, max;
+  uint64_t work_cap;  /* the limits' max_work: the most units the refinement may spend */
+  uint64_t work_left; /* what is left of it */
   double sum; /* the cumulative length so far */
   size_t cur; /* the segment the rows belong to */
 } Table;
@@ -256,6 +259,12 @@ static GSHGEOM_Result emit(Table * tab, double t0, double t1, double len) {
   return GSHGEOM_OK;
 }
 
+/* The units of the work budget that one subdivision costs: the sixty-four evaluations of the integrand (sixteen for each rule of
+ * the two halves of each half), four units each, since an evaluation of a rational curve's speed is about four tenths of a
+ * microsecond.  A curve costs 16 evaluations for its whole rule and 32 for the rules of its halves whatever happens, which the budget
+ * does not count (the size of the path pays for them); each further subdivision is charged before it is made. */
+#define SPLIT_WORK 256u
+
 /* Accept [a, b] when its value differs from its two halves by at most
  * `scaled * (b - a)`, where `scaled` is the tolerance times the polygon length;
  * the halves are then the rows.  Otherwise refine each half. */
@@ -269,6 +278,10 @@ static GSHGEOM_Result refine(const Hom * h, Table * tab, double a, double b,
     GSHGEOM_Result r = emit(tab, a, m, left);
     return r != GSHGEOM_OK ? r : emit(tab, m, b, right);
   }
+  if (tab->work_left < SPLIT_WORK) {
+    return GSHGEOM_ERR_LIMIT; /* the budget is the call's, and it is spent before the work is */
+  }
+  tab->work_left -= SPLIT_WORK;
   GSHGEOM_Result r = refine(h, tab, a, m, left, scaled, depth + 1);
   return r != GSHGEOM_OK ? r : refine(h, tab, m, b, right, scaled, depth + 1);
 }
@@ -324,6 +337,7 @@ GSHGEOM_Result gshgeom_measured_curve_length(
   Table tab;
   memset(&tab, 0, sizeof tab);
   tab.max = GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;
+  tab.work_cap = tab.work_left = GSHGEOM_LIMITS_DEFAULT_MAX_WORK;
   r = measure(curve, poly, tol, &tab);
   if (r != GSHGEOM_OK) {
     return r;
@@ -404,6 +418,15 @@ static GSHGEOM_Result add_segment(GSHGEOM_Measured * m, size_t element, size_t p
 GSHGEOM_Result gshgeom_measured_create(const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, const GSHGEOM_Path * path, double tolerance,
     GSHGEOM_Measured ** out) {
+  return gshgeom_measured_create_counted(alloc, limits, path, tolerance, out, NULL);
+}
+
+GSHGEOM_Result gshgeom_measured_create_counted(const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, const GSHGEOM_Path * path, double tolerance,
+    GSHGEOM_Measured ** out, uint64_t * work) {
+  if (work) {
+    *work = 0;
+  }
   if (!path || !out) {
     return GSHGEOM_ERR_INVALID;
   }
@@ -425,6 +448,8 @@ GSHGEOM_Result gshgeom_measured_create(const GSHGEOM_Allocator * alloc,
   m->tab.store = 1;
   m->tab.max = (limits && limits->max_points) ? limits->max_points
                                                : GSHGEOM_LIMITS_DEFAULT_MAX_POINTS;
+  m->tab.work_cap = m->tab.work_left =
+      (limits && limits->max_work) ? limits->max_work : GSHGEOM_LIMITS_DEFAULT_MAX_WORK;
   int need_sub = 1;
   size_t count = gshgeom_path_element_count(path);
   for (size_t i = 0; i < count && r == GSHGEOM_OK; i++) {
@@ -487,6 +512,9 @@ GSHGEOM_Result gshgeom_measured_create(const GSHGEOM_Allocator * alloc,
       m->sub[m->sub_n - 1].closed = 1;
       need_sub = 1;
     }
+  }
+  if (work) {
+    *work = m->tab.work_cap - m->tab.work_left;
   }
   if (r != GSHGEOM_OK) {
     gshgeom_measured_destroy(m);

@@ -162,7 +162,12 @@ typedef struct GSHGEOM_Measured_Subpath {
  * @param alloc The allocator, or NULL for the default; copied.
  * @param limits The limits, or NULL for the defaults; `max_points` bounds the
  *   number of rows of the table, exactly (a path whose rows number `max_points`
- *   is accepted, one more is ::GSHGEOM_ERR_LIMIT).
+ *   is accepted, one more is ::GSHGEOM_ERR_LIMIT); `max_work` bounds the refinement: each subdivision of a quadrature panel beyond
+ *   the first rule of its curve costs 256 work units, charged before it is made, and a call that would spend more than `max_work`
+ *   in all (over every curve of the path) is ::GSHGEOM_ERR_LIMIT, the work done being the budget and no more.  The first rule of a
+ *   curve and the rules of its halves are charged nothing (the size of the path pays for them: 48 evaluations a curve), so a path
+ *   of curves that meet the tolerance at once is bounded by `max_elements` alone.  A curve whose speed never meets the tolerance
+ *   (a coordinate so large that the doubles cannot tell the curve's points apart) reaches the budget, and the row limit never.
  * @param path The path, 2D or 3D, any number of subpaths.
  * @param tolerance The relative tolerance of the arc lengths, or 0 for
  *   ::GSHGEOM_MEASURE_TOLERANCE_DEFAULT.
@@ -170,8 +175,8 @@ typedef struct GSHGEOM_Measured_Subpath {
  *   ::gshgeom_measured_destroy.
  * @return ::GSHGEOM_OK; ::GSHGEOM_ERR_INVALID (NULL, a tolerance that is
  *   negative, NaN or infinite); ::GSHGEOM_ERR_LIMIT (a tolerance outside
- *   [::GSHGEOM_MEASURE_TOLERANCE_MIN, ::GSHGEOM_MEASURE_TOLERANCE_MAX], or too
- *   many rows); ::GSHGEOM_ERR_OOM.
+ *   [::GSHGEOM_MEASURE_TOLERANCE_MIN, ::GSHGEOM_MEASURE_TOLERANCE_MAX], too
+ *   many rows, or more work than `max_work`); ::GSHGEOM_ERR_OOM.
  */
 GSHGEOM_API GSHGEOM_Result gshgeom_measured_create(
     const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,

@@ -102,7 +102,13 @@
  *
  * **HX12 Limits.**  The structural bounds (::gshgeom_hatch_check), `max_lines` (the lines of the use, over all families;
  * more is ::GSHGEOM_ERR_LIMIT, decided before a line past it is generated), the pieces (at most the limits' `max_elements` / 2)
- * and the dash steps (the limits' `max_dash_steps`, as the stroke's) and SG26's gate for a dash against its period.
+ * and the dash steps (the limits' `max_dash_steps`, as the stroke's) and SG26's gate for a dash against its period.  The limits'
+ * `max_work` bounds the work the count of lines multiplies: each line reads every point of the region (a unit for each 16
+ * points, after the first 256 units of the line) and walks its dash pattern across its length (3 units a step of the walk, after
+ * the first 256 units of the line), and the stroke of the pieces spends the stroke's (stroke.h).  A call that makes the pieces and
+ * strokes them (::gshgeom_hatch_expand and its variants) spends one budget over both stages; the pieces' and the stroke's entries
+ * called one after the other are two calls and have a budget each.  More is ::GSHGEOM_ERR_LIMIT (documentation/design.md,
+ * "Work budget").
  *
  * **HX16 Revision.**  ::GSHGEOM_HATCH_REVISION is 1 and is in no hash.
  *

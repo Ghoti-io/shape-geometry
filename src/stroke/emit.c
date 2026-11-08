@@ -279,6 +279,14 @@ static GSHGEOM_Result room_for(GSHGEOM_SK_Ctx * c, size_t need) {
   return r;
 }
 
+GSHGEOM_Result gshgeom_sk_charge(GSHGEOM_SK_Ctx * c, uint64_t units) {
+  if (units > c->effort_cap - c->effort) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  c->effort += units;
+  return GSHGEOM_OK;
+}
+
 GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const GSHGEOM_SK_Vec * d, size_t n,
     double d_in, double d_out) {
   if (n == 0) {
@@ -286,6 +294,10 @@ GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const 
   }
   if (!gshgeom_sk_fits(c, d_in, d_out)) {
     return GSHGEOM_ERR_INTERNAL;
+  }
+  GSHGEOM_Result charged = gshgeom_sk_charge(c, n * GSHGEOM_SK_W_CORE);
+  if (charged != GSHGEOM_OK) {
+    return charged;
   }
   if (c->conform && !c->cv) {
     c->inflated = 1; /* the pieces beside this one are conforming and do not overlap it: the pass is void */
@@ -332,6 +344,10 @@ GSHGEOM_Result gshgeom_sk_emit(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor, const 
         cand[m++] = gshgeom_sk_v(hull1[i].x + rc * o.x, hull1[i].y + rc * o.y);
       }
     }
+  }
+  charged = gshgeom_sk_charge(c, m * GSHGEOM_SK_W_CAND);
+  if (charged != GSHGEOM_OK) {
+    return charged;
   }
   GSHGEOM_SK_Vec * ctmp = cand + m;
   GSHGEOM_SK_Vec * hull = ctmp + m;
@@ -559,7 +575,11 @@ GSHGEOM_Result gshgeom_sk_emit_conform(GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec anchor
   if (n > SIZE_MAX / 32) {
     return GSHGEOM_ERR_OOM;
   }
-  GSHGEOM_Result r = room_for(c, 3 * n + 1);
+  GSHGEOM_Result r = gshgeom_sk_charge(c, n * GSHGEOM_SK_W_CONFORM);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  r = room_for(c, 3 * n + 1);
   if (r != GSHGEOM_OK) {
     return r;
   }

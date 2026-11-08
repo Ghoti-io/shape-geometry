@@ -188,6 +188,8 @@ typedef struct GSHGEOM_SK_Ctx {
   size_t work;                   ///< Curve pieces visited so far.
   size_t work_cap;               ///< The most curve pieces one expansion visits (ERR_LIMIT past it).
   size_t dash_cap;               ///< The most dash steps one expansion visits (ERR_LIMIT past it): the limits' max_dash_steps, else work_cap.
+  uint64_t effort;               ///< Work units spent so far, over every pass of the call (gshgeom_sk_charge).
+  uint64_t effort_cap;           ///< The most it may spend (ERR_LIMIT past it): the limits' max_work.
   int depth_cap;                 ///< How deep a curve may be split (::GSHGEOM_STROKE_MAX_DEPTH but in tests).
   GSHGEOM_SK_Dash dash;          ///< Dashes (dash.c).
   double mag_limit;              ///< The largest magnitude, in device units, the arithmetic bound is proved for.
@@ -243,9 +245,29 @@ GSHGEOM_Result gshgeom_stroke_expand_dots(const GSHGEOM_Path * centerline, const
     int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, const double * dirs, size_t dir_count,
     GSHGEOM_Stroke_Outline ** out);
 
+/** What an expansion spent of its work budget (the limits' `max_work`), reported by the counted seams. */
+typedef struct GSHGEOM_Stroke_Work {
+  uint64_t spent; /**< Work units spent, over every pass of the call; on a refusal for the budget, the units spent before the charge that was refused. */
+} GSHGEOM_Stroke_Work;
+
+/** ::gshgeom_stroke_expand_capped, also reporting the work spent in @p work (NULL to leave it): the test seam for the work budget. */
+GSHGEOM_Result gshgeom_stroke_expand_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    int depth_cap, GSHGEOM_Stroke_Outline ** out, GSHGEOM_Stroke_Work * work);
+
+/** ::gshgeom_stroke_expand_dots, also reporting the work spent in @p work (NULL to leave it). */
+GSHGEOM_Result gshgeom_stroke_expand_dots_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map,
+    int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, const double * dirs, size_t dir_count,
+    GSHGEOM_Stroke_Outline ** out, GSHGEOM_Stroke_Work * work);
+
 GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
     int depth_cap, GSHGEOM_Stroke_Outline ** out);
+
+/** ::gshgeom_stroke_curves_expand_capped, also reporting the work spent in @p work (NULL to leave it). */
+GSHGEOM_Result gshgeom_stroke_curves_expand_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out, GSHGEOM_Stroke_Work * work);
 
 /** ::gshgeom_stroke_curves_expand with the depth cap at @p depth_cap (1 to ::GSHGEOM_STROKE_MAX_DEPTH): the test seam. */
 GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
@@ -299,6 +321,29 @@ GSHGEOM_SK_Vec gshgeom_sk_lin(const GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec d);
 
 /** The device position of a build-space anchor (the map applied as to a fill's point, or the point itself). */
 GSHGEOM_Result gshgeom_sk_anchor(const GSHGEOM_SK_Ctx * c, GSHGEOM_SK_Vec o, GSHGEOM_SK_Vec * out);
+
+/*
+ * What the work budget (the limits' `max_work`) charges, in units of nominally a tenth of a microsecond.  The stroke's cost that
+ * the size of the path pays for, a segment and its join, is not charged (the element limit bounds it); what the tolerance and
+ * the pattern multiply is: the vertices of the rings that are hulled and rounded, and the pieces a curve is split into.
+ */
+/** A point of an arc ring, made by the unit-vector recurrence. */
+#define GSHGEOM_SK_W_ARC 1u
+/** A piece of a curve visited (its band and fan analysis, with exact predicates). */
+#define GSHGEOM_SK_W_PIECE 8u
+/** A core vertex of an inflated piece: the sort and the monotone chain with exact orientations. */
+#define GSHGEOM_SK_W_CORE 4u
+/** A candidate vertex of an inflated piece (the octagon about each hull vertex) in the second hull. */
+#define GSHGEOM_SK_W_CAND 1u
+/** A core vertex of a conforming piece: the same hull, and the snap of each hull vertex to the lattice. */
+#define GSHGEOM_SK_W_CONFORM 4u
+
+/**
+ * Spend @p units of the call's work budget (the limits' `max_work`).  The refusal is made before the work it pays for, so a
+ * caller never waits for more than the budget; a call that spends exactly the budget is not refused.  ::GSHGEOM_ERR_LIMIT when
+ * the budget would be passed.
+ */
+GSHGEOM_Result gshgeom_sk_charge(GSHGEOM_SK_Ctx * c, uint64_t units);
 
 /**
  * Whether a piece whose core polygon is within @p d_in of containing its region

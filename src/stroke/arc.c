@@ -107,8 +107,12 @@ static GSHGEOM_Result put(GSHGEOM_SK_Ctx * c, size_t * n, GSHGEOM_SK_Vec v) {
   if (*n >= most) {
     return GSHGEOM_ERR_LIMIT; /* the part could not hold the piece */
   }
+  GSHGEOM_Result r = gshgeom_sk_charge(c, GSHGEOM_SK_W_ARC);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
   void * g = c->arcbuf;
-  GSHGEOM_Result r = gshgeom_grow(&c->alloc, &g, &c->arcbuf_cap, *n + 1, sizeof *c->arcbuf);
+  r = gshgeom_grow(&c->alloc, &g, &c->arcbuf_cap, *n + 1, sizeof *c->arcbuf);
   if (r != GSHGEOM_OK) {
     return r;
   }

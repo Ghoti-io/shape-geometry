@@ -510,7 +510,7 @@ typedef struct CurveReq {
 static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const CurveReq * cr, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, int depth_cap, int conform, int * redo, const double * dirs, size_t dir_count,
-    GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc) {
+    GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc, GSHGEOM_Stroke_Work * work) {
   GSHGEOM_Result r = gshgeom_map_check(map);
   if (r != GSHGEOM_OK) {
     return r;
@@ -540,6 +540,9 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
       c.limits.max_points = limits->max_points;
     }
     c.limits.max_dash_steps = limits->max_dash_steps;
+    if (limits->max_work) {
+      c.limits.max_work = limits->max_work;
+    }
   }
   GSHGEOM_SK_Curves cvs;
   memset(&cvs, 0, sizeof cvs);
@@ -562,6 +565,8 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
   c.map = *map;
   c.local = c.st.width_space == GSHGEOM_STROKE_WIDTH_LOCAL;
   c.work_cap = 4 * c.limits.max_points + 4096;
+  c.effort_cap = c.limits.max_work;
+  c.effort = work ? work->spent : 0; /* a second pass spends from where the first stopped: the budget is the call's */
   c.dash_cap = c.limits.max_dash_steps && c.limits.max_dash_steps < (uint64_t)SIZE_MAX ? (size_t)c.limits.max_dash_steps : c.work_cap;
   c.depth_cap = depth_cap < 1 ? 1 : (depth_cap > GSHGEOM_STROKE_MAX_DEPTH ? GSHGEOM_STROKE_MAX_DEPTH : depth_cap);
   GSHGEOM_Stroke_Outline * o = NULL;
@@ -685,6 +690,9 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
     r = stroke_sub(&c, &rd, i);
   }
   gshgeom_sk_dash_end(&c);
+  if (work) {
+    work->spent = c.effort;
+  }
   gcu_allocator_free(&c.alloc, rd.subs);
   gcu_allocator_free(&c.alloc, rd.segs);
   gcu_allocator_free(&c.alloc, c.scratch);
@@ -720,16 +728,45 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
 #undef EXPAND_DONE
 }
 
-GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+GSHGEOM_Result gshgeom_stroke_expand_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
-    int depth_cap, GSHGEOM_Stroke_Outline ** out) {
+    int depth_cap, GSHGEOM_Stroke_Outline ** out, GSHGEOM_Stroke_Work * work) {
   if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE) {
     return GSHGEOM_ERR_INVALID;
   }
+  GSHGEOM_Stroke_Work local = {0};
+  GSHGEOM_Stroke_Work * w = work ? work : &local;
+  w->spent = 0;
   int redo = 0;
-  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, NULL, 0, out, NULL);
+  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, NULL, 0, out, NULL, w);
   if (r == GSHGEOM_OK && redo) {
-    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 0, &redo, NULL, 0, out, NULL);
+    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 0, &redo, NULL, 0, out, NULL, w);
+  }
+  return r;
+}
+
+GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
+    int depth_cap, GSHGEOM_Stroke_Outline ** out) {
+  return gshgeom_stroke_expand_counted(centerline, stroke, map, tolerance, alloc, limits, depth_cap, out, NULL);
+}
+
+GSHGEOM_Result gshgeom_stroke_expand_dots_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map,
+    int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, const double * dirs, size_t dir_count,
+    GSHGEOM_Stroke_Outline ** out, GSHGEOM_Stroke_Work * work) {
+  if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || (dir_count && !dirs)) {
+    return GSHGEOM_ERR_INVALID;
+  }
+  /* a non-NULL pointer even for no dots: the hatch's degenerate subpaths are all dots */
+  static const double none[2] = {0.0, 0.0};
+  const double * d = dirs ? dirs : none;
+  GSHGEOM_Stroke_Work local = {0};
+  GSHGEOM_Stroke_Work * w = work ? work : &local;
+  w->spent = 0;
+  int redo = 0;
+  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 1, &redo, d, dir_count, out, NULL, w);
+  if (r == GSHGEOM_OK && redo) {
+    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 0, &redo, d, dir_count, out, NULL, w);
   }
   return r;
 }
@@ -737,23 +774,15 @@ GSHGEOM_Result gshgeom_stroke_expand_capped(const GSHGEOM_Path * centerline, con
 GSHGEOM_Result gshgeom_stroke_expand_dots(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map,
     int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, const double * dirs, size_t dir_count,
     GSHGEOM_Stroke_Outline ** out) {
-  if (!centerline || !stroke || !map || !out || tolerance < GSHGEOM_FLATTEN_MIN_TOLERANCE || (dir_count && !dirs)) {
-    return GSHGEOM_ERR_INVALID;
-  }
-  /* a non-NULL pointer even for no dots: the hatch's degenerate subpaths are all dots */
-  static const double none[2] = {0.0, 0.0};
-  const double * d = dirs ? dirs : none;
-  int redo = 0;
-  GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 1, &redo, d, dir_count, out, NULL);
-  if (r == GSHGEOM_OK && redo) {
-    r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 0, &redo, d, dir_count, out, NULL);
-  }
-  return r;
+  return gshgeom_stroke_expand_dots_counted(centerline, stroke, map, tolerance, alloc, limits, dirs, dir_count, out, NULL);
 }
 
-GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+GSHGEOM_Result gshgeom_stroke_curves_expand_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
-    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out) {
+    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out, GSHGEOM_Stroke_Work * work) {
+  if (work) {
+    work->spent = 0;
+  }
   if (!centerline || !stroke || !map || !out) {
     return GSHGEOM_ERR_INVALID;
   }
@@ -763,7 +792,13 @@ GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerli
   }
   CurveReq cr = {tolerance, form};
   int redo = 0;
-  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, 0, &redo, NULL, 0, NULL, out);
+  return expand_core(centerline, stroke, map, GSHGEOM_FLATTEN_TOLERANCE, &cr, alloc, limits, depth_cap, 0, &redo, NULL, 0, NULL, out, work);
+}
+
+GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
+    const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out) {
+  return gshgeom_stroke_curves_expand_counted(centerline, stroke, map, tolerance, form, alloc, limits, depth_cap, out, NULL);
 }
 
 GSHGEOM_Result gshgeom_stroke_curves_expand(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
