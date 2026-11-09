@@ -37,6 +37,7 @@
 #include "../stroke_vectors.h"
 
 #include <chrono>
+#include <cmath>
 #include <random>
 #include <string>
 #include <vector>
@@ -296,6 +297,43 @@ TEST(StrokeCurvesOracle, TheExactVectorsThroughTheCurveOutline) {
     gshgeom_path_destroy(path);
   }
   EXPECT_GT(checked, (size_t)1000);
+}
+
+/*
+ * A band of the curve outline is accepted only when the control hulls of its two rails are apart (the certificate that the loop of the two
+ * rails and the end normals is simple).  For an arc of radius R stroked at half width h, the hull of the outer rail is the region between
+ * its chord and its arc, and the inner rail's midpoint lies at radius R - h on its axis: outside that hull only when the piece's angle is
+ * under 2 acos((R - h) / (R + h)), about 4 sqrt(h / R).  So a thin stroke of a long arc has at least that many bands, whatever the way they
+ * are fitted, and each band adds at least one element to the body.  (A body that took the whole arc as one band would be six elements.)
+ */
+TEST(StrokeCurvesOracle, AThinStrokeOfALongArcHasAsManyBandsAsItsRailsHullsLeaveApart) {
+  GSHGEOM_Map id = sc::map_of(1, 0, 0, 1, 0, 0);
+  size_t checked = 0;
+  for (double R : {100.0, 1000.0, 10000.0}) {
+    for (double h : {0.001, 0.01}) {
+      for (double th : {0.6, 1.4}) {
+        // the cubic of an arc of radius R turned by th, from (R, 0) heading up: k = 4 / 3 tan(th / 4)
+        const double k = 4.0 / 3.0 * std::tan(th / 4.0);
+        sc::Ops ops;
+        ops.push_back({'M', {R, 0.0}});
+        ops.push_back({'C', {R, R * k, R * (std::cos(th) + k * std::sin(th)), R * (std::sin(th) - k * std::cos(th)), R * std::cos(th), R * std::sin(th)}});
+        GSHGEOM_Path * path = sm::build(ops);
+        ASSERT_NE(path, nullptr);
+        GSHGEOM_Stroke st = sc::style(2.0 * h, 0, 4.0, 0);
+        GSHGEOM_Stroke_Curves * o = nullptr;
+        ASSERT_EQ(gshgeom_stroke_curves_expand(path, &st, &id, GSHGEOM_STROKE_CURVES_TOLERANCE, GSHGEOM_STROKE_CURVES_RATIONAL, nullptr, nullptr, &o),
+            GSHGEOM_OK);
+        const double widest = 2.0 * std::acos((R - h) / (R + h)); // the angle of the widest piece whose hulls can be apart
+        const double bands = std::ceil(th / widest);
+        const size_t elements = gshgeom_path_element_count(gshgeom_stroke_curves_body(o));
+        EXPECT_GE((double)elements, bands) << "R " << R << " h " << h << " turn " << th << ": at least " << bands << " bands";
+        checked++;
+        gshgeom_stroke_curves_destroy(o);
+        gshgeom_path_destroy(path);
+      }
+    }
+  }
+  EXPECT_EQ(checked, 12u);
 }
 
 TEST(StrokeCurvesOracle, EveryToleranceOfTheRange) {

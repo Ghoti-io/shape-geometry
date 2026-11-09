@@ -1423,9 +1423,7 @@ four kinds, and each names the check that stands in for a failing test.
   copy shows 627 iterations of the dash loops with it and 843 without it, for identical output on the committed corpus) and the stroke's
   flag that the first control point of a piece equals the second (set on about a twelfth of the pieces of random strokes, with the same
   outline either way: it changes whether a piece is certified or subdivided).
-- *A defensive check that nothing reaches*, kept: the dash's checks of the origin table and of its search.  One certification test of the
-  stroke body (the rejection when the control hulls of a piece's two rails are not apart on any axis) is not reached by about 1.2 million
-  pieces of generated strokes in six modes and has no argued input; it stays listed as not closed.
+- *A defensive check that nothing reaches*, kept: the dash's checks of the origin table and of its search.
 
 A guard that is taken out must leave the result of the public interface unchanged and its cost within a fifth: the check is a
 differential of the tree before against the tree after through the interface (the fuzz corpora with every returned value logged, seeded
