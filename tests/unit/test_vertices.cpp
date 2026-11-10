@@ -445,6 +445,19 @@ TEST(Vertices, RandomPathsAgreeWithTheDefinitionReadTheLongWay) {
           in[1] = g.e[1];
         }
       }
+      // A subpath that no move started (a drawing verb after a close) continues the path: what lies before it, back to the
+      // nearest move, is behind its vertices too.
+      for (size_t j = a; j-- > 0 && !found && els[a].verb != GSHGEOM_VERB_MOVE;) {
+        if (els[j].verb == GSHGEOM_VERB_MOVE) {
+          break;
+        }
+        RSeg g = seg_at(j);
+        if (g.extent) {
+          found = true;
+          in[0] = g.e[0];
+          in[1] = g.e[1];
+        }
+      }
       ref.has_in = found;
       if (found) {
         ref.in[0] = in[0];
@@ -545,6 +558,29 @@ TEST(Vertices, RandomPathsAgreeWithTheDefinitionReadTheLongWay) {
   EXPECT_GT(compared, 20000u);
   EXPECT_GT(bisected, 3000u);
   EXPECT_GT(reversals, 50u) << "the population holds reversals";
+}
+
+TEST(Vertices, AClosePastACloseTakesTheDirectionOfTheClosingLineBeforeIt) {
+  // M L L Z Z Z (resvg's orient=auto-on-M-L-L-Z-Z-Z): each close after the first begins a subpath of no extent at the start point.
+  // A segment without extent has no direction of its own and the vertex looks past it (SVG 2, path directionality), and what lies
+  // before it is the closing line, not nothing, so the markers at the second and third close point along it, as the first does.
+  auto v = vertices_of({op(M, 50, 160), op(L, 100, 50), op(L, 150, 160), op(Z), op(Z), op(Z)});
+  ASSERT_EQ(v.size(), 6u);
+  for (size_t i : {size_t{4}, size_t{5}}) {
+    EXPECT_TRUE(v[i].flags & kIn) << i;
+    EXPECT_FALSE(v[i].flags & kOut) << i;
+    expect_pt(v[i].in, -1, 0, "in", i);
+    expect_pt(v[i].direction, -1, 0, "direction", i);
+  }
+}
+
+TEST(Vertices, AMoveBreaksWhatACloseCarriesToTheNext) {
+  // After a close, a drawing verb continues the path and a move does not: the vertex of a move has no direction behind it.
+  auto v = vertices_of({op(M, 0, 0), op(L, 4, 0), op(L, 4, 4), op(Z), op(M, 9, 9), op(Z)});
+  ASSERT_EQ(v.size(), 6u);
+  EXPECT_FALSE(v[4].flags & kIn);
+  EXPECT_FALSE(v[5].flags & kIn);
+  expect_pt(v[5].direction, 1, 0, "direction", 5);
 }
 
 int main(int argc, char ** argv) {

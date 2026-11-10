@@ -130,12 +130,18 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
   const size_t n = gshgeom_path_element_count(path);
   size_t sa = 0; /* the first element of the subpath */
   size_t sub = 0;
+  Seg carry;     /* the last segment with extent before this subpath, while no move has started one (a close followed by a drawing verb) */
+  int have_carry = 0;
+  memset(&carry, 0, sizeof carry);
   while (sa < n) {
     /* The subpath: from sa to the element before the next move, or through the close that ends it. */
     Elem el;
     GSHGEOM_Result r = element(path, sa, &el);
     if (r != GSHGEOM_OK) {
       return r;
+    }
+    if (el.verb == GSHGEOM_VERB_MOVE) {
+      have_carry = 0; /* a move breaks the path: nothing before it is a direction after it */
     }
     size_t sb = sa + 1;
     int closed = el.verb == GSHGEOM_VERB_CLOSE;
@@ -216,7 +222,7 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
         }
       }
       const int have_next = nj < sb;
-      const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : NULL);
+      const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : (have_carry ? &carry : NULL));
       const Seg * out_seg = have_next ? &next : (have_first ? &first : NULL);
       GSHGEOM_Point in = {0.0, 0.0, 0.0}, out = {0.0, 0.0, 0.0};
       if (in_seg) {
@@ -257,6 +263,10 @@ GSHGEOM_Result gshgeom_path_vertices(const GSHGEOM_Path * path, GSHGEOM_Vertex_F
       if (r != GSHGEOM_OK) {
         return r;
       }
+    }
+    if (have_in) {
+      carry = cur_in;
+      have_carry = 1;
     }
     sa = sb;
     sub++;

@@ -1839,9 +1839,9 @@ VERTEX_PLANTS = [
     ('v-direction-both-takes-in', "src", SKV, "v.direction = bisector(in, out);", "v.direction = in;", VT),
     ('v-direction-in-only-takes-out', "src", SKV, "} else if (in_seg) {\n        v.direction = in;", "} else if (in_seg) {\n        v.direction = out;", VT),
     ('v-direction-neither-is-y', "src", SKV, "v.direction.x = 1.0;", "v.direction.y = 1.0;", VT),
-    ('v-in-not-round', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : NULL);", "const Seg * in_seg = have_in ? &cur_in : NULL;", VT),
+    ('v-in-not-round', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : (have_carry ? &carry : NULL));", "const Seg * in_seg = have_in ? &cur_in : (have_carry ? &carry : NULL);", VT),
     ('v-out-not-round', "src", SKV, "const Seg * out_seg = have_next ? &next : (have_first ? &first : NULL);", "const Seg * out_seg = have_next ? &next : NULL;", VT),
-    ('v-in-round-first', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : NULL);", "const Seg * in_seg = have_last ? &last : (have_in ? &cur_in : NULL);", VT),
+    ('v-in-round-first', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : (have_carry ? &carry : NULL));", "const Seg * in_seg = have_last ? &last : (have_in ? &cur_in : (have_carry ? &carry : NULL));", VT),
     ('v-out-round-first', "src", SKV, "const Seg * out_seg = have_next ? &next : (have_first ? &first : NULL);", "const Seg * out_seg = have_first ? &first : (have_next ? &next : NULL);", VT),
     ('v-in-from-start', "src", SKV, "in = to_point(gshgeom_sk_unit(in_seg->end));", "in = to_point(gshgeom_sk_unit(in_seg->start));", VT),
     ('v-out-from-end', "src", SKV, "out = to_point(gshgeom_sk_unit(out_seg->start));", "out = to_point(gshgeom_sk_unit(out_seg->end));", VT),
@@ -1860,9 +1860,33 @@ VERTEX_PLANTS = [
     ('v-walk-dimension-unchecked', "src", SKV, "if (!path || !fn || gshgeom_path_dimension(path) != 2) {", "if (!path || !fn) {", VT),
     ('v-count-dimension-unchecked', "src", SKV, "if (!path || !count || gshgeom_path_dimension(path) != 2) {", "if (!path || !count) {", VT),
     ('v-callback-result-dropped', "src", SKV, "      r = fn(&v, ctx);\n      if (r != GSHGEOM_OK) {\n        return r;\n      }\n", "      r = fn(&v, ctx);\n", VT),
+    ('v-carry-dropped', "src", SKV, "(have_last ? &last : (have_carry ? &carry : NULL));", "(have_last ? &last : NULL);", VT),
+    ('v-carry-before-the-subpath-round', "src", SKV, "const Seg * in_seg = have_in ? &cur_in : (have_last ? &last : (have_carry ? &carry : NULL));", "const Seg * in_seg = have_in ? &cur_in : (have_carry ? &carry : (have_last ? &last : NULL));", VT),
+    ('v-carry-survives-a-move', "src", SKV, "have_carry = 0; /* a move breaks", "/* a move breaks", VT),
+    ('v-carry-never-set', "src", SKV, "      carry = cur_in;\n      have_carry = 1;", "      carry = cur_in;", VT),
+    ('v-carry-is-first-segment', "src", SKV, "      carry = cur_in;\n", "      carry = first;\n", VT),
     ('v-count-off', "src", SKV, "*count = gshgeom_path_element_count(path);", "*count = gshgeom_path_element_count(path) + 1;", VT),
 ]
 STROKE_PLANTS += VERTEX_PLANTS
+
+# A quadratic or cubic that is a line in all but name strokes as the line between its ends (stroke.h, SG5; test_stroke_near_line.cpp).
+# Not planted: a control point behind the start or past the far end (the ends are the farthest apart, so one that projects beyond either is already outside the slop, and the order test starts from zero only to say so), and the clip builders' use of the same test (the region the alignment reads, which the tests of the body do
+# not depend on for an open curve).
+NLT = ["testStroke_near_line"]
+NEAR_LINE_PLANTS = [
+    ('nl-slop-too-wide', "src", SKE, "const double slop = m * m * 0.00001;", "const double slop = m * m * 0.01;", NLT),
+    ('nl-slop-zero', "src", SKE, "const double slop = m * m * 0.00001;", "const double slop = 0.0;", NLT),
+    ('nl-off-chord-unchecked', "src", SKE, "if (cross * cross > slop * len2) {", "if (0) {", NLT),
+    ('nl-order-unchecked', "src", SKE, "if (t < prev) {", "if (0) {", NLT),
+    ('nl-order-not-kept', "src", SKE, "    prev = t;\n", "    prev = 0.0;\n", NLT),
+    ('nl-ends-lose-a-tie', "src", SKE, "int a = 0, b = last;", "int a = -1, b = -1;", NLT),
+    ('nl-quadratic-not-reduced', "src", SKE, "cv->kind != GSHGEOM_CURVE_QUADRATIC && cv->kind != GSHGEOM_CURVE_CUBIC", "cv->kind != GSHGEOM_CURVE_CUBIC", NLT),
+    ('nl-cubic-not-reduced', "src", SKE, "cv->kind != GSHGEOM_CURVE_QUADRATIC && cv->kind != GSHGEOM_CURVE_CUBIC", "cv->kind != GSHGEOM_CURVE_QUADRATIC", NLT),
+    ('nl-not-used', "src", SKE, "      if (curve_is_line(&model[0])) {", "      if (0) {", NLT),
+    ('nl-line-to-the-first-control', "src", SKE, "model[0].p[1] = model[0].p[end];", "model[0].p[1] = model[0].p[1];", NLT),
+    ('nl-quadratic-ends-at-three', "src", SKE, "const int end = model[0].kind == GSHGEOM_CURVE_QUADRATIC ? 2 : 3;", "const int end = 3;", NLT),
+]
+STROKE_PLANTS += NEAR_LINE_PLANTS
 
 PLANTS += STROKE_PLANTS
 

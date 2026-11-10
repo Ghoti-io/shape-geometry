@@ -76,6 +76,15 @@
  * start), and a drawing verb after a close starts a subpath at the closed one's
  * start.  A segment **has extent** when some control point differs, exactly,
  * from its first; a segment without extent is dropped before anything else.  A
+ * quadratic or cubic that is a **line in all but name** is first replaced by the
+ * line between its ends: its ends are the farthest apart of its control points
+ * (by the larger coordinate difference `m`), every other control point is within
+ * `m sqrt(10^-5)` of the segment between them, and the control points run along
+ * it from the first end to the last.  The direction at an end of such a curve
+ * would otherwise be that of a control point a hair from it, so that a change of
+ * a millionth turns a cap or a join through any angle; the test is on the points
+ * of the path, before the map.  A curve that is off its chord by more than that,
+ * or that doubles back, is stroked as it is.  A
  * **vertex** is the point between two consecutive segments with extent, and, for
  * a closed subpath with extent, its start (between the last and the first).  The
  * **ends** are the first and last points of an open subpath with extent.  The

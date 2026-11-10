@@ -98,6 +98,60 @@ static GSHGEOM_SK_Seg make_seg(size_t i, size_t piece, const GSHGEOM_Curve * el,
   return s;
 }
 
+static double fabs_(double x);
+
+/**
+ * Whether the quadratic or cubic @p cv is a straight line in all but name (SG10): its ends are the farthest apart of its control points
+ * (by the larger of the two coordinate differences, `m`), every other control point is within `m * sqrt(1e-5)` of the segment between
+ * the ends, and the control points run along the chord from the first end to the last (a curve that doubles back is not a line).  The
+ * stroke of such a curve is the stroke of the line between its ends: the direction at an end of a curve whose control point is a hair
+ * off the end point is otherwise the direction of that hair, which turns the cap or the join through any angle for a change of a
+ * millionth, and the same path one `ulp` away from a line strokes as a different shape.  The measure is the one the other
+ * renderers of the web use (Skia's `cubic_in_line`, which resvg and the browsers share), taken on the points before the map.
+ */
+static int curve_is_line(const GSHGEOM_Curve * cv) {
+  if (cv->dim != 2 || (cv->kind != GSHGEOM_CURVE_QUADRATIC && cv->kind != GSHGEOM_CURVE_CUBIC)) {
+    return 0;
+  }
+  const int last = cv->kind == GSHGEOM_CURVE_QUADRATIC ? 2 : 3;
+  /* the ends first, so that a tie in the distance goes to them */
+  double m = fabs_(cv->p[0].x - cv->p[last].x);
+  const double my = fabs_(cv->p[0].y - cv->p[last].y);
+  m = m > my ? m : my;
+  int a = 0, b = last;
+  for (int i = 0; i < last; i++) {
+    for (int j = i + 1; j <= last; j++) {
+      double dx = fabs_(cv->p[i].x - cv->p[j].x), dy = fabs_(cv->p[i].y - cv->p[j].y);
+      double d = dx > dy ? dx : dy;
+      if (d > m) {
+        m = d;
+        a = i;
+        b = j;
+      }
+    }
+  }
+  if (a != 0 || b != last || !(m > 0.0)) {
+    return 0; /* the ends are not the farthest apart: it folds back, or it has no extent */
+  }
+  const double ux = cv->p[last].x - cv->p[0].x, uy = cv->p[last].y - cv->p[0].y;
+  const double len2 = ux * ux + uy * uy;
+  const double slop = m * m * 0.00001;
+  double prev = 0.0;
+  for (int k = 1; k < last; k++) {
+    const double vx = cv->p[k].x - cv->p[0].x, vy = cv->p[k].y - cv->p[0].y;
+    const double t = vx * ux + vy * uy; /* along the chord, in units of len2 */
+    if (t < prev) {
+      return 0;
+    }
+    prev = t;
+    const double cross = vx * uy - vy * ux;
+    if (cross * cross > slop * len2) {
+      return 0; /* the control point is farther from the chord than the slop */
+    }
+  }
+  return 1;
+}
+
 /** Read the centerline: subpaths and segments with extent, in build space (SG5, SG10). */
 static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, Reader * rd) {
   size_t n = gshgeom_path_element_count(path);
@@ -128,6 +182,11 @@ static GSHGEOM_Result read_centerline(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * p
         return GSHGEOM_ERR_INTERNAL;
       }
       model[0] = el.curve;
+      if (curve_is_line(&model[0])) {
+        const int end = model[0].kind == GSHGEOM_CURVE_QUADRATIC ? 2 : 3;
+        model[0].kind = GSHGEOM_CURVE_LINE;
+        model[0].p[1] = model[0].p[end];
+      }
       nc = 1;
     }
     if (verb == GSHGEOM_VERB_MOVE) {
@@ -308,6 +367,10 @@ static GSHGEOM_Result build_clip(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path * path, 
         break;
       }
       const GSHGEOM_Point * p = el.curve.p;
+      if (curve_is_line(&el.curve)) {
+        r = gshgeom_path_line_to(mp, el.curve.p[el.curve.kind == GSHGEOM_CURVE_QUADRATIC ? 2 : 3]);
+        continue;
+      }
       switch (el.verb) {
       case GSHGEOM_VERB_LINE:
         r = gshgeom_path_line_to(mp, p[1]);
@@ -376,6 +439,10 @@ static GSHGEOM_Result build_clip_curves(GSHGEOM_SK_Ctx * c, const GSHGEOM_Path *
         break;
       }
       const GSHGEOM_Point * p = cv.p;
+      if (curve_is_line(&el.curve)) {
+        r = gshgeom_path_line_to(mp, cv.p[cv.kind == GSHGEOM_CURVE_QUADRATIC ? 2 : 3]);
+        continue;
+      }
       switch (el.verb) {
       case GSHGEOM_VERB_LINE:
         r = gshgeom_path_line_to(mp, p[1]);

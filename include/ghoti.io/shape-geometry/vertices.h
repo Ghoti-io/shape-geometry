@@ -47,7 +47,11 @@
  * segment without extent has no direction of its own and the vertex looks past
  * it, to either side, so a run of zero-length segments is invisible to the
  * directions of every vertex around and inside it.  A vertex with no such
- * segment on a side has no direction on that side.
+ * segment on a side has no direction on that side.  A subpath that no move began (a drawing
+ * verb after a close, which continues the path from the closed subpath's start) has behind its first
+ * vertices the nearest segment with extent before it back to the last move, so that `M L L Z Z Z`
+ * marks each of its last two closes along the closing line, as the first is; a move breaks the path
+ * and nothing before it is behind the vertex of a move.
  *
  * In a *closed* subpath (one that ends in a close), the vertex that starts it and
  * the vertex of the close, which are the same point, each take the end

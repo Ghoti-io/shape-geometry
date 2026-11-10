@@ -55,7 +55,9 @@ TEST(StrokeRegress, AClosedContourWithAMiterClipJoinAndACubicThatTurnsBack) {
   st.alignment = GSHGEOM_STROKE_ALIGN_OUTSIDE;
   GSHGEOM_Map m;
   ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
-  EXPECT_EQ(outline_hash(p, st, m), UINT64_C(0x0841d210f837ce2b));
+  // The quadratic `Q (7, 1) (7, 1)` after the cubic is a line in all but name (its control points are collinear with its ends and in
+  // order: stroke.h, SG5), so it strokes as the line to (7, 1); the pin was taken before that rule, when the line was a curve piece.
+  EXPECT_EQ(outline_hash(p, st, m), UINT64_C(0xbb48de9ecbd1e038));
   gshgeom_path_destroy(p);
 }
 
