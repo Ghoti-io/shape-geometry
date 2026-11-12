@@ -39,8 +39,8 @@
  * alone and not of the order of the subpaths.  The walk can only end at its start (the balance), and an input for
  * which it does not is ::GSHGEOM_ERR_INTERNAL.
  *
- * **Cost.**  Two sorts and a binary search for each step of a walk: `O(E log E)` for `E` edges, and 16 bytes for each edge
- * twice over besides the result.
+ * **Cost.**  Two sorts and a binary search for each step of a walk: `O(E log E)` for `E` edges, and 49 bytes for each edge
+ * (the edges and the sorts' room, 24 bytes each, and a flag) besides the result and the walk's links.
  */
 
 #include <ghoti.io/shape-geometry/macros.h>
@@ -49,58 +49,77 @@
 
 #include "flatten_internal.h"
 
-#include <stdlib.h>
+#include <stdint.h>
 
-/** An edge between two points in the order of their coordinates (`lo` first), and whether the path goes that way. */
-typedef struct Pair {
-  int32_t x0, y0, x1, y1;
-  int32_t forward;
-} Pair;
+/*
+ * A point is one 64-bit key: x in the high half and y in the low, each with its sign bit flipped, so that the unsigned order of
+ * keys is the order of points by x and then y.  The sorts below compare keys inline; the C library's qsort, through a comparison
+ * function and a copy of each element by its size, was a fifth of a dashed stroke's whole render.  Two records the sort cannot
+ * tell apart are the same edge, so the order the sort leaves them in does not reach the result: any correct sort gives the
+ * same bytes.
+ */
+static uint64_t point_key(int32_t x, int32_t y) {
+  return ((uint64_t)((uint32_t)x ^ 0x80000000u) << 32) | (uint64_t)((uint32_t)y ^ 0x80000000u);
+}
 
-/** A directed edge. */
+static GSHGEOM_Device_Point key_point(uint64_t k) {
+  GSHGEOM_Device_Point p;
+  p.x = (int32_t)((uint32_t)(k >> 32) ^ 0x80000000u);
+  p.y = (int32_t)((uint32_t)k ^ 0x80000000u);
+  return p;
+}
+
+/** A directed edge, tail and head as keys.  The pass that cancels holds each edge with its ends in key order (`t <= h`)
+ * and the direction the path went in @c forward; the walk holds the edges that remain, tail first. */
 typedef struct Arc {
-  int32_t x0, y0, x1, y1;
+  uint64_t t, h;
+  uint64_t forward;
 } Arc;
 
-static int cmp_pair(const void * p, const void * q) {
-  const Pair * a = p;
-  const Pair * b = q;
-  if (a->x0 != b->x0) {
-    return a->x0 < b->x0 ? -1 : 1;
-  }
-  if (a->y0 != b->y0) {
-    return a->y0 < b->y0 ? -1 : 1;
-  }
-  if (a->x1 != b->x1) {
-    return a->x1 < b->x1 ? -1 : 1;
-  }
-  if (a->y1 != b->y1) {
-    return a->y1 < b->y1 ? -1 : 1;
-  }
-  return 0;
+static int arc_before(const Arc * a, const Arc * b) {
+  return a->t < b->t || (a->t == b->t && a->h < b->h);
 }
 
-static int cmp_arc(const void * p, const void * q) {
-  const Arc * a = p;
-  const Arc * b = q;
-  if (a->x0 != b->x0) {
-    return a->x0 < b->x0 ? -1 : 1;
+/**
+ * Sort @p a[0..n) by (t, h): runs of 16 by insertion, then merged in passes between @p a and @p tmp (room for n), so no pass
+ * copies back.  Returns the buffer that holds the result, @p a or @p tmp.
+ */
+static Arc * sort_arcs(Arc * a, Arc * tmp, size_t n) {
+  enum { RUN = 16 };
+  for (size_t lo = 0; lo < n; lo += RUN) {
+    size_t hi = n - lo < RUN ? n : lo + RUN;
+    for (size_t i = lo + 1; i < hi; i++) {
+      Arc v = a[i];
+      size_t j = i;
+      while (j > lo && arc_before(&v, &a[j - 1])) {
+        a[j] = a[j - 1];
+        j--;
+      }
+      a[j] = v;
+    }
   }
-  if (a->y0 != b->y0) {
-    return a->y0 < b->y0 ? -1 : 1;
+  Arc * src = a;
+  Arc * dst = tmp;
+  for (size_t width = RUN; width < n; width *= 2) {
+    for (size_t lo = 0; lo < n; lo += 2 * width) {
+      size_t mid = n - lo < width ? n : lo + width;
+      size_t hi = n - lo < 2 * width ? n : lo + 2 * width;
+      size_t i = lo, j = mid, k = lo;
+      while (i < mid && j < hi) {
+        dst[k++] = arc_before(&src[j], &src[i]) ? src[j++] : src[i++];
+      }
+      while (i < mid) {
+        dst[k++] = src[i++];
+      }
+      while (j < hi) {
+        dst[k++] = src[j++];
+      }
+    }
+    Arc * t = src;
+    src = dst;
+    dst = t;
   }
-  if (a->x1 != b->x1) {
-    return a->x1 < b->x1 ? -1 : 1;
-  }
-  if (a->y1 != b->y1) {
-    return a->y1 < b->y1 ? -1 : 1;
-  }
-  return 0;
-}
-
-/** Whether the point (x0, y0) comes before (x1, y1). */
-static int before(int32_t x0, int32_t y0, int32_t x1, int32_t y1) {
-  return x0 < x1 || (x0 == x1 && y0 < y1);
+  return src;
 }
 
 /**
@@ -116,13 +135,13 @@ static size_t first_unused(size_t * skip, size_t j) {
   return j;
 }
 
-/** The index of the first arc whose tail is not before (x, y). */
-static size_t lower_bound(const Arc * arcs, size_t n, int32_t x, int32_t y) {
+/** The index of the first arc whose tail is not before @p key. */
+static size_t lower_bound(const Arc * arcs, size_t n, uint64_t key) {
   size_t lo = 0;
   size_t hi = n;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
-    if (before(arcs[mid].x0, arcs[mid].y0, x, y)) {
+    if (arcs[mid].t < key) {
       lo = mid + 1;
     } else {
       hi = mid;
@@ -142,19 +161,20 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
   const GSHGEOM_Device_Point * points = gshgeom_flat_path_points(path);
   size_t subpaths = gshgeom_flat_path_subpath_count(path);
   size_t edges = gshgeom_flat_path_point_count(path); /* one edge for each point: the next, or the closing line */
-  if (edges > SIZE_MAX / sizeof(Pair)) {
+  if (edges > SIZE_MAX / (2 * sizeof(Arc))) {
     return GSHGEOM_ERR_OOM;
   }
-  Pair * pairs = gcu_allocator_malloc(alloc, (edges ? edges : 1) * sizeof *pairs);
-  Arc * arcs = gcu_allocator_malloc(alloc, (edges ? edges : 1) * sizeof *arcs);
+  Arc * buf = gcu_allocator_malloc(alloc, 2 * (edges ? edges : 1) * sizeof *buf); /* the edges, and the sorts' room */
   unsigned char * used = gcu_allocator_calloc(alloc, edges ? edges : 1, 1);
   size_t * skip = NULL;
   GSHGEOM_Flat_Path * result = NULL;
   GSHGEOM_Result status = GSHGEOM_OK;
-  if (!pairs || !arcs || !used) {
+  if (!buf || !used) {
     status = GSHGEOM_ERR_OOM;
     goto done;
   }
+  Arc * pairs = buf;
+  Arc * room = buf + (edges ? edges : 1);
   size_t n = 0;
   for (size_t s = 0; s < subpaths; s++) {
     GSHGEOM_Flat_Subpath sub;
@@ -165,37 +185,36 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
     for (size_t k = 0; k < sub.count; k++) {
       GSHGEOM_Device_Point a = points[sub.first + k];
       GSHGEOM_Device_Point b = points[sub.first + (k + 1 == sub.count ? 0 : k + 1)];
-      if (a.x == b.x && a.y == b.y) {
+      uint64_t ka = point_key(a.x, a.y), kb = point_key(b.x, b.y);
+      if (ka == kb) {
         continue;
       }
-      Pair * e = &pairs[n++];
-      e->forward = before(a.x, a.y, b.x, b.y);
-      e->x0 = e->forward ? a.x : b.x;
-      e->y0 = e->forward ? a.y : b.y;
-      e->x1 = e->forward ? b.x : a.x;
-      e->y1 = e->forward ? b.y : a.y;
+      Arc * e = &pairs[n++];
+      e->forward = ka < kb;
+      e->t = e->forward ? ka : kb;
+      e->h = e->forward ? kb : ka;
     }
   }
-  qsort(pairs, n, sizeof *pairs, cmp_pair);
+  pairs = sort_arcs(pairs, pairs == buf ? room : buf, n);
+  Arc * arcs = pairs == buf ? room : buf; /* the other half: the remaining edges are no more than the pairs */
   /* Each run of one edge between two points: as many go one way as the other cancel, and the rest stay as they were. */
   size_t m = 0;
   for (size_t i = 0; i < n;) {
     size_t j = i;
     long net = 0;
-    while (j < n && cmp_pair(&pairs[i], &pairs[j]) == 0) {
+    while (j < n && pairs[j].t == pairs[i].t && pairs[j].h == pairs[i].h) {
       net += pairs[j].forward ? 1 : -1;
       j++;
     }
     for (long r = net < 0 ? -net : net; r > 0; r--) {
       Arc * a = &arcs[m++];
-      a->x0 = net > 0 ? pairs[i].x0 : pairs[i].x1;
-      a->y0 = net > 0 ? pairs[i].y0 : pairs[i].y1;
-      a->x1 = net > 0 ? pairs[i].x1 : pairs[i].x0;
-      a->y1 = net > 0 ? pairs[i].y1 : pairs[i].y0;
+      a->t = net > 0 ? pairs[i].t : pairs[i].h;
+      a->h = net > 0 ? pairs[i].h : pairs[i].t;
+      a->forward = 1;
     }
     i = j;
   }
-  qsort(arcs, m, sizeof *arcs, cmp_arc);
+  arcs = sort_arcs(arcs, pairs, m);
   skip = gcu_allocator_malloc(alloc, (m + 1) * sizeof *skip);
   if (!skip) {
     status = GSHGEOM_ERR_OOM;
@@ -212,36 +231,32 @@ GSHGEOM_Result gshgeom_flat_path_cancel_seams(const GSHGEOM_Flat_Path * path, co
     if (used[i]) {
       continue;
     }
-    GSHGEOM_Device_Point start = {arcs[i].x0, arcs[i].y0};
-    status = gshgeom_flat_path_begin(result, start);
+    const uint64_t start = arcs[i].t;
+    status = gshgeom_flat_path_begin(result, key_point(start));
     if (status != GSHGEOM_OK) {
       goto done;
     }
     used[i] = 1;
     skip[i] = i + 1;
-    int32_t hx = arcs[i].x1;
-    int32_t hy = arcs[i].y1;
-    while (hx != start.x || hy != start.y) {
-      GSHGEOM_Device_Point at = {hx, hy};
-      status = gshgeom_flat_path_add(result, at);
+    uint64_t head = arcs[i].h;
+    while (head != start) {
+      status = gshgeom_flat_path_add(result, key_point(head));
       if (status != GSHGEOM_OK) {
         goto done;
       }
-      size_t j = first_unused(skip, lower_bound(arcs, m, hx, hy));
-      if (j >= m || arcs[j].x0 != hx || arcs[j].y0 != hy) {
+      size_t j = first_unused(skip, lower_bound(arcs, m, head));
+      if (j >= m || arcs[j].t != head) {
         status = GSHGEOM_ERR_INTERNAL; /* a point with more edges entering than leaving: not a union of closed subpaths */
         goto done;
       }
       used[j] = 1;
       skip[j] = j + 1;
-      hx = arcs[j].x1;
-      hy = arcs[j].y1;
+      head = arcs[j].h;
     }
     gshgeom_flat_path_close_last(result);
   }
 done:
-  gcu_allocator_free(alloc, pairs);
-  gcu_allocator_free(alloc, arcs);
+  gcu_allocator_free(alloc, buf);
   gcu_allocator_free(alloc, used);
   gcu_allocator_free(alloc, skip);
   if (status != GSHGEOM_OK) {

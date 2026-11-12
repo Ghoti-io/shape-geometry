@@ -492,3 +492,118 @@ int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+namespace {
+
+/** The documented answer, by std::sort on signed coordinates: the net of each edge, then walks from the first unused edge in
+ * the order of (tail, head), each step taking the first unused edge that leaves the point it reached. */
+std::vector<std::vector<Dp>> reference_cancel(const std::vector<std::vector<Dp>> & polys) {
+  std::map<Edge, long> net;
+  for (const auto & poly : polys) {
+    for (size_t k = 0; k < poly.size(); k++) {
+      Dp a = poly[k], b = poly[(k + 1) % poly.size()];
+      if (a.x == b.x && a.y == b.y) {
+        continue;
+      }
+      if (std::make_pair(a.x, a.y) < std::make_pair(b.x, b.y)) {
+        net[Edge(a.x, a.y, b.x, b.y)]++;
+      } else {
+        net[Edge(b.x, b.y, a.x, a.y)]--;
+      }
+    }
+  }
+  std::vector<Edge> arcs;
+  for (const auto & [e, c] : net) {
+    for (long r = 0; r < std::labs(c); r++) {
+      arcs.push_back(c > 0 ? e : Edge(std::get<2>(e), std::get<3>(e), std::get<0>(e), std::get<1>(e)));
+    }
+  }
+  std::sort(arcs.begin(), arcs.end());
+  std::vector<bool> used(arcs.size(), false);
+  std::vector<std::vector<Dp>> out;
+  for (size_t i = 0; i < arcs.size(); i++) {
+    if (used[i]) {
+      continue;
+    }
+    used[i] = true;
+    std::vector<Dp> walk{Dp{std::get<0>(arcs[i]), std::get<1>(arcs[i])}};
+    int32_t hx = std::get<2>(arcs[i]), hy = std::get<3>(arcs[i]);
+    while (hx != walk[0].x || hy != walk[0].y) {
+      walk.push_back(Dp{hx, hy});
+      size_t j = 0;
+      while (j < arcs.size() && (used[j] || std::get<0>(arcs[j]) != hx || std::get<1>(arcs[j]) != hy)) {
+        j++;
+      }
+      EXPECT_LT(j, arcs.size());
+      if (j == arcs.size()) {
+        return out;
+      }
+      used[j] = true;
+      hx = std::get<2>(arcs[j]);
+      hy = std::get<3>(arcs[j]);
+    }
+    out.push_back(walk);
+  }
+  return out;
+}
+
+} // namespace
+
+// The result, point for point and subpath for subpath, is the documented walk over the sorted edges, on paths whose points are
+// drawn from a few values across the whole int32 range (both signs and both extremes, so the order of a negative coordinate
+// against a positive one is exercised), with every polygon followed by its reverse or a copy often, so runs of one edge in both
+// directions and repeated edges are common.  A sort that ordered by unsigned coordinates, or that lost an element, fails here.
+TEST(FlatPathSeams, TheResultIsTheDocumentedWalkOverTheSortedEdgesPointForPoint) {
+  const int32_t values[] = {INT32_MIN, INT32_MIN + 1, -70000, -64, -1, 0, 1, 64, 70000, INT32_MAX - 1, INT32_MAX};
+  uint32_t r = 12345;
+  auto next = [&r](uint32_t n) {
+    r = r * 1664525u + 1013904223u;
+    return (r >> 8) % n;
+  };
+  for (int trial = 0; trial < 400; trial++) {
+    std::vector<std::vector<Dp>> polys;
+    const size_t count = 1 + next(12);
+    for (size_t p = 0; p < count; p++) {
+      std::vector<Dp> poly;
+      const size_t sides = 2 + next(6);
+      for (size_t k = 0; k < sides; k++) {
+        poly.push_back(Dp{values[next(11)], values[next(11)]});
+      }
+      polys.push_back(poly);
+      const uint32_t twin = next(3);
+      if (twin == 0) {
+        polys.push_back(std::vector<Dp>(poly.rbegin(), poly.rend()));
+      } else if (twin == 1) {
+        polys.push_back(poly);
+      }
+    }
+    std::vector<Dp> pts;
+    std::vector<GSHGEOM_Flat_Subpath> subs;
+    for (const auto & poly : polys) {
+      GSHGEOM_Flat_Subpath s;
+      s.first = pts.size();
+      s.count = poly.size();
+      s.closed = 1;
+      subs.push_back(s);
+      pts.insert(pts.end(), poly.begin(), poly.end());
+    }
+    GSHGEOM_Flat_Path * fp = nullptr;
+    ASSERT_EQ(gshgeom_flat_path_from_points(pts.data(), pts.size(), subs.data(), subs.size(), nullptr, nullptr, &fp), GSHGEOM_OK);
+    GSHGEOM_Flat_Path * out = nullptr;
+    ASSERT_EQ(gshgeom_flat_path_cancel_seams(fp, nullptr, nullptr, &out), GSHGEOM_OK) << trial;
+    const auto want = reference_cancel(polys);
+    ASSERT_EQ(gshgeom_flat_path_subpath_count(out), want.size()) << trial;
+    const Dp * got = gshgeom_flat_path_points(out);
+    for (size_t s = 0; s < want.size(); s++) {
+      GSHGEOM_Flat_Subpath sub;
+      ASSERT_EQ(gshgeom_flat_path_subpath(out, s, &sub), GSHGEOM_OK);
+      ASSERT_EQ(sub.count, want[s].size()) << trial << " subpath " << s;
+      for (size_t k = 0; k < sub.count; k++) {
+        EXPECT_EQ(got[sub.first + k].x, want[s][k].x) << trial << " " << s << " " << k;
+        EXPECT_EQ(got[sub.first + k].y, want[s][k].y) << trial << " " << s << " " << k;
+      }
+    }
+    gshgeom_flat_path_destroy(out);
+    gshgeom_flat_path_destroy(fp);
+  }
+}
