@@ -223,6 +223,105 @@ TEST(Orient2d, TheFilterAgreesWithTheExactPath) {
   }
 }
 
+// A double of a random sign and mantissa at a random exponent in [lo, hi] (powers of two), or 0, or a small integer, or a value one ulp
+// from a power of two: the mixes that break a two-product, a grow-expansion or a range test.
+static double adversarial(int lo, int hi) {
+  const uint64_t r = next();
+  switch (r % 9) {
+    case 0:
+      return 0.0;
+    case 1:
+      return (double)((int64_t)((r >> 8) % 2001) - 1000);
+    case 2:
+      return std::ldexp(1.0, lo + (int)((r >> 8) % (uint64_t)(hi - lo + 1)));
+    case 3: {
+      const double p = std::ldexp(1.0, lo + (int)((r >> 8) % (uint64_t)(hi - lo + 1)));
+      return (r >> 40) & 1 ? std::nextafter(p, 0.0) : std::nextafter(p, 1e300);
+    }
+    default: {
+      const double m = 1.0 + (double)(next() >> 11) / 9007199254740992.0;
+      const double v = std::ldexp(m, lo + (int)((r >> 8) % (uint64_t)(hi - lo + 1)));
+      return (r >> 50) & 1 ? -v : v;
+    }
+  }
+}
+
+// The filter falls to the expansion sum for the cases it cannot certify; that sum must give the multiword sum's sign everywhere,
+// across the whole range of exponents, at and beyond the edges of the range the expansions are exact for (2^-400 and 2^400), for points
+// that are exactly collinear (the zero the filter can never certify) and one ulp off it.
+TEST(Orient2d, TheExpansionSumGivesTheMultiwordSumsSignEverywhere) {
+  struct Band {
+    int lo, hi;
+  };
+  const Band bands[] = {{-20, 20}, {-400, 400}, {-420, -380}, {380, 420}, {-1070, -900}, {900, 1020}, {-60, 60}};
+  unsigned zeros = 0;
+  unsigned positives = 0;
+  unsigned negatives = 0;
+  for (const Band & band : bands) {
+    for (int n = 0; n < 60000; n++) {
+      GSHGEOM_Point a = {adversarial(band.lo, band.hi), adversarial(band.lo, band.hi), 0.0};
+      GSHGEOM_Point b = {adversarial(band.lo, band.hi), adversarial(band.lo, band.hi), 0.0};
+      GSHGEOM_Point c = {adversarial(band.lo, band.hi), adversarial(band.lo, band.hi), 0.0};
+      const int kind = n % 12;
+      if (kind % 3 == 1) {
+        // c on the line through a and b where a double can hold it exactly: a + t (b - a) with t a power of two and a, b integers.
+        a = {(double)((int64_t)(next() % 4001) - 2000), (double)((int64_t)(next() % 4001) - 2000), 0.0};
+        b = {(double)((int64_t)(next() % 4001) - 2000), (double)((int64_t)(next() % 4001) - 2000), 0.0};
+        const double t = std::ldexp(1.0, -(int)(next() % 4));
+        c = {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), 0.0};
+      } else if (kind == 3 || kind == 9) {
+        // exactly collinear with full 53-bit mantissas: three power-of-two multiples of one vector (a line through the origin).
+        const double ux = adversarial(band.lo + 3, band.hi - 3);
+        const double uy = adversarial(band.lo + 3, band.hi - 3);
+        a = {std::ldexp(ux, (int)(next() % 5) - 2), std::ldexp(uy, 0), 0.0};
+        a.y = std::ldexp(uy, (int)(next() % 5) - 2);
+        const int ea = (int)(next() % 5) - 2;
+        const int eb = (int)(next() % 5) - 2;
+        const int ec = (int)(next() % 5) - 2;
+        a = {std::ldexp(ux, ea), std::ldexp(uy, ea), 0.0};
+        b = {std::ldexp(ux, eb), std::ldexp(uy, eb), 0.0};
+        c = {std::ldexp(ux, ec), std::ldexp(uy, ec), 0.0};
+        if ((next() & 1) == 0) {
+          c.y = std::nextafter(c.y, (next() & 1) ? 1e300 : -1e300); // one ulp off the line
+        }
+      } else if (kind == 5 || kind == 11) {
+        // near collinear with full mantissas: c is the rounded point a + t (b - a), so the determinant is a tiny residue of rounding.
+        const double t = 0.25 + (double)(next() >> 11) / 9007199254740992.0 * 0.5;
+        c = {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), 0.0};
+      } else if (kind == 0) {
+        // collinear, or one rounding off it, on y = x + 2^-12, off the origin, with full 53-bit mantissas near 2^41: the six products
+        // differ, none pairs with another, and each has a rounding error (a low half of up to 27 bits) the sum must keep.
+        const double d = 0x1p-12;
+        const double p0 = std::ldexp((double)((next() >> 11) | (UINT64_C(1) << 52)), -12);
+        const double q0 = std::ldexp((double)((next() >> 11) | (UINT64_C(1) << 52)), -12);
+        const double r0 = std::ldexp((double)((next() >> 11) | (UINT64_C(1) << 52)), -12);
+        a = {p0, p0 + d, 0.0};
+        b = {q0, q0 + d, 0.0};
+        c = {r0, r0 + d, 0.0};
+        if ((next() & 3) == 0) {
+          c.y = std::nextafter(c.y, 1e300);
+        }
+      } else if (kind == 2 || kind == 8) {
+        // collinear on an axis, then one ulp off it.
+        c = {a.x, adversarial(band.lo, band.hi), 0.0};
+        b = {a.x, adversarial(band.lo, band.hi), 0.0};
+        if ((next() & 3) == 0) {
+          c.x = std::nextafter(c.x, 1e300);
+        }
+      }
+      const int fast = o2(a, b, c);
+      const int exact = o2x(a, b, c);
+      ASSERT_EQ(fast, exact) << std::hexfloat << a.x << " " << a.y << " | " << b.x << " " << b.y << " | " << c.x << " " << c.y;
+      zeros += exact == 0;
+      positives += exact > 0;
+      negatives += exact < 0;
+    }
+  }
+  EXPECT_GT(zeros, 1000u) << "the sweep must reach exact collinearity, the case the filter cannot certify";
+  EXPECT_GT(positives, 1000u);
+  EXPECT_GT(negatives, 1000u);
+}
+
 TEST(Orient2d, TheLimitOfTheFilterIsNotAnEdgeOfTheAnswer) {
   // Coordinates at the filter's limit (2^100), one step past it either way, and coincident or collinear triples among them:
   // the answer is the exact one on both sides of the limit, and a point past it is not refused (only a non-finite one is).

@@ -154,6 +154,96 @@ static int exact2(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c) {
   return gshgeom_exact_sign(t, n);
 }
 
+/* The exact sign of orient2d by floating-point expansions (Shewchuk's two-product and grow-expansion), for the cases the filter cannot
+ * certify, which are mostly points that are exactly collinear (the filter can never certify a zero).
+ *
+ * The sum is the one exact2 forms, ax by - ax cy - ay bx + ay cx + bx cy - by cx, each product split into a rounded product and the
+ * exact rounding error (Dekker's split, which needs no fused multiply-add and so no particular target), and the twelve doubles added
+ * into a nonoverlapping expansion whose largest component carries the sign.  Every step is exact while no product or error term
+ * overflows or underflows, which holds when each coordinate is zero or has a magnitude in [2^-400, 2^400]: a product is then within
+ * [2^-800, 2^800], its error term within 2^-53 of that and above 2^-1000 (a split half is at least 2^-453 and the product of the two
+ * low halves is the smallest piece, above 2^-906 and so above the smallest normal double).  A coordinate outside that range, which
+ * no drawing makes, goes to the multiword sum, so that the result is the exact sign everywhere (the tests compare the two). */
+#define EXPANSION_LO 0x1p-400
+#define EXPANSION_HI 0x1p400
+
+static int expansion_ok(double v) {
+  const double m = absolute(v);
+  return m == 0.0 || (m >= EXPANSION_LO && m <= EXPANSION_HI);
+}
+
+static void split_double(double a, double * hi, double * lo) {
+  const double c = 134217729.0 * a; /* 2^27 + 1 */
+  const double big = c - a;
+  *hi = c - big;
+  *lo = a - *hi;
+}
+
+static void two_product(double a, double b, double * x, double * y) {
+  double ahi, alo, bhi, blo;
+  split_double(a, &ahi, &alo);
+  split_double(b, &bhi, &blo);
+  const double p = a * b;
+  const double e1 = p - ahi * bhi;
+  const double e2 = e1 - alo * bhi;
+  const double e3 = e2 - ahi * blo;
+  *x = p;
+  *y = alo * blo - e3;
+}
+
+/** Add @p v to the expansion e[0..*n) (increasing magnitude, nonoverlapping, no zeros), dropping zeros: Shewchuk's grow-expansion. */
+static void grow(double * e, size_t * n, double v) {
+  double q = v;
+  size_t k = 0;
+  for (size_t i = 0; i < *n; i++) {
+    const double sum = q + e[i];
+    const double bv = sum - q;
+    const double av = sum - bv;
+    const double h = (q - av) + (e[i] - bv);
+    q = sum;
+    if (h != 0.0) {
+      e[k++] = h;
+    }
+  }
+  if (q != 0.0 || k == 0) {
+    e[k++] = q;
+  }
+  *n = k;
+}
+
+/** 1 and *sign set when every coordinate is in the range the expansions are exact for, else 0. */
+static int exact2_expansion(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c, int * sign) {
+  if (!(expansion_ok(a.x) && expansion_ok(a.y) && expansion_ok(b.x) && expansion_ok(b.y) && expansion_ok(c.x) && expansion_ok(c.y))) {
+    return 0;
+  }
+  const double fa[6] = {a.x, a.x, a.y, a.y, b.x, b.y};
+  const double fb[6] = {b.y, c.y, b.x, c.x, c.y, c.x};
+  const int neg[6] = {0, 1, 1, 0, 0, 1};
+  double e[12];
+  size_t n = 0;
+  for (int i = 0; i < 6; i++) {
+    double hi, lo;
+    two_product(fa[i], fb[i], &hi, &lo);
+    if (lo != 0.0) {
+      grow(e, &n, neg[i] ? 0.0 - lo : lo);
+    }
+    if (hi != 0.0) {
+      grow(e, &n, neg[i] ? 0.0 - hi : hi);
+    }
+  }
+  *sign = n == 0 || e[n - 1] == 0.0 ? 0 : e[n - 1] > 0.0 ? 1 : -1;
+  return 1;
+}
+
+/** The exact sign of orient2d: expansions where they are exact, else the multiword sum. */
+static int exact2_fast(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c) {
+  int s;
+  if (exact2_expansion(a, b, c, &s)) {
+    return s;
+  }
+  return exact2(a, b, c);
+}
+
 static int exact3(GSHGEOM_Point a, GSHGEOM_Point b, GSHGEOM_Point c,
     GSHGEOM_Point d) {
   GSHGEOM_ExactTerm t[24];
@@ -191,7 +281,7 @@ GSHGEOM_Result gshgeom_orient2d(
     int s;
     /* Within the limit is finite, so the checks below would pass: the filter is all that is left of them. */
     if (!filter2_small(a, b, c, &s)) {
-      s = exact2(a, b, c);
+      s = exact2_fast(a, b, c);
     }
     *sign = s;
     return GSHGEOM_OK;
@@ -200,7 +290,7 @@ GSHGEOM_Result gshgeom_orient2d(
     return GSHGEOM_ERR_INVALID;
   }
   /* A coordinate past the limit: the filter's bound does not hold there, and the exact form decides. */
-  *sign = exact2(a, b, c);
+  *sign = exact2_fast(a, b, c);
   return GSHGEOM_OK;
 }
 
