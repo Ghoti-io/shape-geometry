@@ -48,6 +48,9 @@ Paths, transforms and flattening for the shape family, bit-identical on every ho
   point and direction, the four Canvas `rect` sign cases as two flips (and `roundRect` with a negative size as Chromium draws it: the radii to the mirrored corners, the path reversed for one flip), radii that overlap refused on an exact sum, and every coordinate
   the correctly rounded value of its expression. `examples/shapes.c` builds them.
 - The conic route: the device path of a rational curve or an arc, proved within the tolerance less 0.29 units.
+- Hit testing (`hit.h`): where a 26.6 point lies against a flattened path, outside, inside or on the boundary under either fill rule, and its
+  winding number, decided exactly in integers (an edge, a vertex, a vertex on the ray and an edge along it all included, over the whole
+  `int32_t` lattice), so that a hit agrees with the pixels a fill of the same path covers wholly.
 - The fill rules (`fill.h`: nonzero 0, even-odd 1, pinned), which `shape-cpu`
   fills under and `font`'s `GFNT_FillRule` is the type of.
 - Strokes (`stroke.h`): the region a stroke covers, stated once as rules SG1 to
@@ -83,6 +86,15 @@ Determinism is a requirement, not a hope: every `double` stage builds with
 `-ffp-contract=off` and no x87, and elementary functions come from `math`, not
 libm. `make check-gates` shows each of those rules failing on a planted
 violation.
+
+## Not implemented
+
+- Boolean operations on regions (union, intersection and difference of paths as paths), and offset curves.
+- Hit testing of a stroke is the hit test of its expansion (`gshgeom_stroke_expand`, then `gshgeom_flat_path_hit` under nonzero); there is no
+  distance-to-path query, and a hit on a model path is a hit on its flattening.
+- Quaternions, projective (4 x 4) maps and NURBS: a map is affine, 2D or 3D, and a curve is a Bezier or a rational one of degree two or three.
+- A stroke's width profile is reserved (`ERR_UNSUPPORTED`).
+- Scattered-data interpolation, fields (distance, density, height, color) and unit conversion.
 
 ## License
 

@@ -1318,6 +1318,33 @@ rule and branch.
 `GSHGEOM_HATCH_REVISION` is 1 and is in no hash.  A change to HX4 to HX7 is a new revision; before the library's first
 release exactly one is live and none selectable.
 
+## Hit testing
+
+`hit.h` says where a point of the device lattice is against a flattened path (HT1 to HT6): `gshgeom_flat_path_winding` gives the
+winding number and whether the point is on the boundary, and `gshgeom_flat_path_hit` gives outside, inside or boundary under a fill
+rule. It decides what the scan converter draws wholly, and nothing else: the path is the flattened one, so a caller that wants a hit
+against what is drawn flattens under the map and the tolerance it draws with and converts its position by the one rounding rule.
+
+The method is the crossing count along the ray to the left of the point, with the rule that makes it consistent at a vertex: an edge
+spans the height `y` of the point when `min(y0, y1) <= y < max(y0, y1)`. Of two edges that meet at a vertex on the ray, one spans
+it when the contour crosses the ray there and neither or both do when it only touches it, so a vertex is neither lost nor counted
+twice, and an edge along the ray spans nothing. An edge directed down counts +1 and one directed up -1 when the point is to its right,
+the sign of the scan converter's winding. Whether the point is to the right of an edge is the sign of the clip's exact side test
+(`gshgeom_clip_side`: two products of 33-bit differences held in 64 bits and compared without forming their difference), so no
+coordinate of the whole `int32_t` lattice overflows and no sign is rounded.
+
+The boundary is the closed edge: a point on an edge, an end point included, is `BOUNDARY` under both rules and is not counted
+(its winding is reported 0), so the answer does not depend on which way a contour runs or which side the ray leaves from. Every
+subpath is closed (a fill closes an open one), and an edge whose ends are the same point is not an edge: a subpath of one point
+takes no part, and a point on it is not on the boundary.
+
+What checks it: the hand cases pin each rule (the vertex on the ray from both sides, an edge along the ray, a hole, two turns, an
+open subpath, the empty path, the corners of the lattice); the random cases compare every point of a grid, and large coordinates,
+and on a host with a 128-bit integer the whole `int32_t` range, with Hormann and Agathos's quadrant count, which shares no code with
+the library, in about 9,400 random paths. Five of the six mutants of `hit.c` that were tried fail them; the sixth (the strict test
+for "to its right" made inclusive) is equivalent, because a point on the line of an edge inside its height range is on the edge and
+has returned as boundary before the test is asked.
+
 ## The work budget
 
 The counts of `GSHGEOM_Limits` (`max_elements`, `max_points`, `max_dash_steps`, a hatch's `max_lines`) bound what a call outputs. They
