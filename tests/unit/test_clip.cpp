@@ -392,6 +392,58 @@ TEST(Clip, ANonConvexOrDegenerateQuadrilateralIsRefused) {
   gshgeom_flat_path_destroy(fp);
 }
 
+/**
+ * The turns of the quadrilateral are decided by the filtered orientation (the exact path answers where the filter cannot certify a sign).
+ * Whether a quadrilateral is accepted must be what the always-exact turns say, on corners that make the filter fail: the extremes of the
+ * range, thin slivers off a long line by one unit, and corners that are collinear exactly.
+ */
+TEST(Clip, TheQuadrilateralVerdictIsTheExactTurnsOnCornersThatDefeatTheFilter) {
+  const int32_t hi = INT32_MAX;
+  const int32_t lo = INT32_MIN;
+  const std::vector<Dp> corners = {D(0, 0), D(1, 0), D(0, 1), D(hi, hi), D(lo, lo), D(hi, lo), D(lo, hi), D(hi, hi - 1), D(hi - 1, hi),
+      D(lo + 1, lo), D(1, hi), D(hi, 1), D(-1, lo), D(3, 5), D(hi - 2, hi - 3), D(lo / 2, hi / 2)};
+  unsigned accepted = 0;
+  unsigned refused = 0;
+  GSHGEOM_Flat_Path * fp = make({rect(0, 0, 64, 64)});
+  for (size_t a = 0; a < corners.size(); a++) {
+    for (size_t b = 0; b < corners.size(); b++) {
+      for (size_t c = 0; c < corners.size(); c++) {
+        for (size_t d = 0; d < corners.size(); d += 3) {
+          const Quad q = {corners[a], corners[b], corners[c], corners[d]};
+          int sigma = 0;
+          bool mixed = false;
+          for (int i = 0; i < 4; i++) {
+            const Dp & p0 = q[(i + 3) % 4];
+            const Dp & p1 = q[i];
+            const Dp & p2 = q[(i + 1) % 4];
+            int turn = 0;
+            ASSERT_EQ(gshgeom_orient2d_exact(GSHGEOM_Point{(double)p0.x, (double)p0.y, 0}, GSHGEOM_Point{(double)p1.x, (double)p1.y, 0},
+                          GSHGEOM_Point{(double)p2.x, (double)p2.y, 0}, &turn),
+                GSHGEOM_OK);
+            if (turn != 0) {
+              mixed = mixed || (sigma != 0 && turn != sigma);
+              sigma = turn;
+            }
+          }
+          GSHGEOM_Flat_Path * res = nullptr;
+          const GSHGEOM_Result r = gshgeom_flat_path_clip_convex(fp, q.data(), nullptr, nullptr, &res);
+          const bool expect_refused = mixed || sigma == 0;
+          if (r == GSHGEOM_OK) {
+            gshgeom_flat_path_destroy(res);
+            accepted++;
+          } else {
+            refused++;
+          }
+          ASSERT_EQ(r, expect_refused ? GSHGEOM_ERR_INVALID : GSHGEOM_OK) << a << " " << b << " " << c << " " << d;
+        }
+      }
+    }
+  }
+  gshgeom_flat_path_destroy(fp);
+  EXPECT_GT(accepted, 0u) << "the sweep must reach the accepting side";
+  EXPECT_GT(refused, 0u) << "the sweep must reach the refusing side";
+}
+
 TEST(Clip, TheQuadrilateralIsJudgedBeforeAnythingIsAllocatedOrCut) {
   tracker::Tracker t;
   GSHGEOM_Allocator a = tracker::allocator_for(&t);

@@ -308,13 +308,15 @@ static GSHGEOM_Point as_point(Pt p) {
 
 /**
  * The sides of the quadrilateral that cut (a side of zero length is skipped), or ::GSHGEOM_ERR_INVALID.  The turn at
- * each corner is ::gshgeom_orient2d_exact of the corner and its neighbours (CK1).
+ * each corner is ::gshgeom_orient2d of the corner and its neighbours (CK1): the sign is the exact one (the filter answers only
+ * where its error bound certifies the sign, and the exact path decides every other case), so this costs a few multiplications for
+ * the corners of a cell, which are small integers, and not the multiword sum the exact path makes for every call.
  */
 static GSHGEOM_Result sides_of(const Pt quad[4], Side sides[4], int * count) {
   int turn[4];
   int sigma = 0;
   for (int i = 0; i < 4; i++) {
-    const GSHGEOM_Result r = gshgeom_orient2d_exact(as_point(quad[(i + 3) % 4]), as_point(quad[i]), as_point(quad[(i + 1) % 4]), &turn[i]);
+    const GSHGEOM_Result r = gshgeom_orient2d(as_point(quad[(i + 3) % 4]), as_point(quad[i]), as_point(quad[(i + 1) % 4]), &turn[i]);
     if (r != GSHGEOM_OK) {
       return GSHGEOM_ERR_INTERNAL;
     }
