@@ -434,7 +434,8 @@ static double dash_value(Input * in) {
   return table[next(in) % (sizeof table / sizeof table[0])];
 }
 
-static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, const GSHGEOM_Width_Profile * profile) {
+static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, const GSHGEOM_Width_Profile * profile,
+    const GSHGEOM_Width_Profile * taper) {
   gshgeom_stroke_init(s);
   s->width = coordinate(in);
   s->width_space = next(in) % 3;
@@ -463,9 +464,22 @@ static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, const 
     s->dash_count = 2; /* NULL dashes */
     break;
   case 4:
-    s->join = GSHGEOM_STROKE_JOIN_MITER; /* a valid profile with a miter join and a butt cap: drawn (SW10) */
-    s->width_profile = profile;
+    s->width_profile = profile; /* a constant profile with any join, cap and alignment: drawn (SW10) */
     break;
+  case 5: {
+    /* a tapering profile (no factor above 1, so the stroke box holds) with a dash pattern from the table, any join, cap
+     * and alignment (SW10 to SW13) */
+    const int n = 2 + next(in) % 3;
+    for (int i = 0; i < n; i++) {
+      dashes[i] = dash_value(in);
+    }
+    s->dashes = dashes;
+    s->dash_count = (size_t)n;
+    s->dash_offset = dash_value(in);
+    s->dash_scope = next(in) % 3;
+    s->width_profile = taper;
+    break;
+  }
   case 6:
   case 7: {
     /* a pattern of two to four entries, from the table (case 6) or any coordinate (case 7), an offset, a scope */
@@ -621,7 +635,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   double dashes[4];
   const GSHGEOM_Width_Stop stop = {0.0, 1.0};
   const GSHGEOM_Width_Profile profile = {1, &stop};
-  build_stroke(&in, &s, dashes, &profile);
+  const GSHGEOM_Width_Stop taper_stops[2] = {{0.0, 1.0}, {6.0, 0.25}};
+  const GSHGEOM_Width_Profile taper = {2, taper_stops};
+  build_stroke(&in, &s, dashes, &profile, &taper);
   GSHGEOM_Map map;
   if (build_map(&in, &map) != GSHGEOM_OK) {
     gshgeom_map_identity(2, &map);

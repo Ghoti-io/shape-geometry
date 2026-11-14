@@ -354,6 +354,10 @@ def stroke_scripted():
     out["s-dashed-inside.bin"] = s_input(s_params(align=1, dash=bytes([6, 0, 5, 3, 0, 0])), S_SQUARE)
     out["s-dashed-bad-scope.bin"] = s_input(s_params(dash=bytes([6, 0, 5, 3, 0, 2])), S_POLY)
     out["s-profile.bin"] = s_input(s_params(dash=bytes([4])), S_POLY)
+    # dash mode 5: a count byte, the entries and the offset from the table, a scope byte; the profile tapers
+    out["s-profile-dashed.bin"] = s_input(s_params(join=1, dash=bytes([5, 1, 0, 5, 3, 0, 0])), S_POLY)
+    out["s-profile-aligned.bin"] = s_input(s_params(align=1, join=3, cap=1, dash=bytes([5, 0, 5, 3, 0, 0])),
+                                           S_SQUARE)
     p3 = s_path(S_POLY)
     base = s_input(s_params(), S_POLY)
     out["s-path-3d.bin"] = base[: len(base) - len(p3)] + bytes([7]) + p3[1:]  # a 3D centerline: unsupported
