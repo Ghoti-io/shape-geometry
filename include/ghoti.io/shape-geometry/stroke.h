@@ -38,7 +38,7 @@
  *
  * ## The rules
  *
- * **Width profile, SW1 to SW9** (documentation/design.md has the whole text).  **SW1** A profile is `count` stops (at least 1, at most
+ * **Width profile, SW1 to SW14** (documentation/design.md has the whole text).  **SW1** A profile is `count` stops (at least 1, at most
  * ::GSHGEOM_WIDTH_STOPS_MAX), each a position and a factor, all finite, positions at least 0 and not decreasing, factors at
  * least 0 (`INVALID`), positions and factors in SG2's bands (`LIMIT`).  **SW2** The width at position `s` is `width f(s)` with `f`
  * linear between stops and constant before the first and after the last; two stops at one position are a jump, `f` has both
@@ -46,11 +46,20 @@
  * of the centerline as the integer flattener makes it at the tolerance, measured in model space (through the inverse of the
  * map's linear part), a closed subpath's closing line included.  **SW4** The region is the union over the points of the
  * centerline of the disc of radius `width f(s) / 2` (local width: the image of that disc under the map's linear part), which for
- * a polyline is the union over its pieces of the convex hull of the two end discs, so that joins and caps are round.  **SW5** A
- * profile needs round joins, round caps, no dashes and center alignment (`UNSUPPORTED`).  **SW6** A disc is
- * the inscribed polygon whose side count keeps it within half the tolerance of the disc.  **SW7** The outline has a body and no
- * aligned or clip part.  **SW8** A subpath of one point is a disc of `f(0)` unless `degenerate` omits it.  **SW9** Width 0, and a
- * singular map, are SG14 and SG15.
+ * a polyline is the union over its pieces of the convex hull of the two end discs, so that joins and caps are round.  **SW5** (A profile
+ * once needed round joins and caps, no dashes and center alignment; SW10 to SW13 define the rest, and nothing is refused for them now.)  **SW6** A disc is
+ * the inscribed polygon whose side count keeps it within half the tolerance of the disc.  **SW7** The outline has a body, and SW13's aligned and clip parts.  **SW8** A subpath of one point is a disc of `f(0)` unless `degenerate` omits it.  **SW9** Width 0, and a
+ * singular map, are SG14 and SG15.  **SW10** With a join or a cap that is not round the region is built from trapezoids (the end
+ * radii of a piece cut at the stops, offset along the whole segment's normals), SG8's joins and SG7's caps at the radius there, on the
+ * flattened centerline, a constant profile being the stroke without one.  **SW11** Dashes cut the flattened centerline by SG19 to SG25 and
+ * each dash is stroked with the profile's positions unchanged.  **SW12** Position is model arc length, dash distance is the width space's
+ * unit.  **SW13** Inside and outside alignment make the aligned part at twice the width.  **SW14** The curve form draws the polygon
+ * outline as lines at the lattice's tolerance (`LIMIT` below 1/32 pixel); a hatch's pen may carry a profile (each piece from its start).  **SW10** With a join or a cap that is not round the region is built from trapezoids (the end
+ * radii of a piece cut at the stops, offset along the whole segment's normals), SG8's joins and SG7's caps at the radius there, on the
+ * flattened centerline, a constant profile being the stroke without one.  **SW11** Dashes cut the flattened centerline by SG19 to SG25 and
+ * each dash is stroked with the profile's positions unchanged.  **SW12** Position is model arc length, dash distance is the width space's
+ * unit.  **SW13** Inside and outside alignment make the aligned part at twice the width.  **SW14** The curve form draws the polygon
+ * outline as lines at the lattice's tolerance (`LIMIT` below 1/32 pixel); a hatch's pen may carry a profile (each piece from its start).
  *
  * **SG1 The parameters.**  ::GSHGEOM_Stroke is plain data, checked by every
  * function that takes it.  Its enumerations carry fixed values (the scene's
@@ -63,8 +72,7 @@
  * **SG2 Validity and bounds.**  ::gshgeom_stroke_check decides, in this order:
  * ::GSHGEOM_ERR_INVALID for NULL, `dash_count > 0` with NULL `dashes`, a
  * non-finite double, an enumeration out of range, `width < 0`, or a nonzero
- * `_reserved` byte, or a width profile that SW1 refuses; ::GSHGEOM_ERR_UNSUPPORTED for a width profile with a join or cap
- * other than round, dashes or an alignment other than center (SW5);
+ * `_reserved` byte, or a width profile that SW1 refuses;
  * then ::GSHGEOM_ERR_LIMIT: `width`, each dash (by magnitude) and `dash_offset`
  * must be 0 or of magnitude in [::GSHGEOM_STROKE_VALUE_MIN,
  * ::GSHGEOM_STROKE_VALUE_MAX], `miter_limit` in [1,
@@ -465,7 +473,7 @@ typedef struct GSHGEOM_Width_Stop {
 } GSHGEOM_Width_Stop;
 
 /**
- * A width profile (SW1 to SW9): the stroke's width as a function of the position along each subpath, so that a stroke can taper
+ * A width profile (SW1 to SW14): the stroke's width as a function of the position along each subpath, so that a stroke can taper
  * or swell (a pressure brush, a DXF polyline's segment widths, a calligraphic line).  `count` stops, ascending in position (two
  * equal positions are a jump), linear between them and constant outside them.
  */
@@ -493,7 +501,7 @@ typedef struct GSHGEOM_Stroke {
   uint32_t dash_scope;              ///< A ::GSHGEOM_Stroke_Dash_Scope; read only with dashes.
   uint32_t alignment;               ///< A ::GSHGEOM_Stroke_Alignment.
   GSHGEOM_Fill_Rule alignment_rule; ///< The rule of `F` (SG12); read only off center.
-  const GSHGEOM_Width_Profile * width_profile; ///< NULL (the default): the width is constant.  Else SW1 to SW9: the width is `width` times the profile; it needs round joins, round caps, no dashes and center alignment, and only ::gshgeom_stroke_expand and its tolerance form draw it.
+  const GSHGEOM_Width_Profile * width_profile; ///< NULL (the default): the width is constant.  Else SW1 to SW14: the width is `width` times the profile.
   uint8_t _reserved[8];             ///< Zero.
 } GSHGEOM_Stroke;
 

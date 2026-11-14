@@ -145,6 +145,42 @@ TEST(Walkers, StrokeExpansionTakesAnArcSolidOrDashed) {
   gshgeom_path_destroy(lowered);
 }
 
+// stroke/profile.c: gshgeom_sk_profile_expand, read_model (updated, AR15): the profile's expansion flattens an arc as the stroke does,
+// and reads a direction from the path only where the subpath is made of lines
+TEST(Walkers, ProfileExpansionTakesAnArcAsItsLoweredPieces) {
+  GSHGEOM_Path * p = arc_path();
+  GSHGEOM_Path * lowered = nullptr;
+  ASSERT_EQ(gshgeom_path_lower_arcs(p, nullptr, nullptr, &lowered), GSHGEOM_OK);
+  GSHGEOM_Map m;
+  ASSERT_EQ(gshgeom_map_identity(2, &m), GSHGEOM_OK);
+  const GSHGEOM_Width_Stop stops[2] = {{0, 1}, {12, 0.3}};
+  const GSHGEOM_Width_Profile wp = {2, stops};
+  const double dashes[2] = {3.0, 2.0};
+  for (int mode = 0; mode < 3; mode++) {
+    GSHGEOM_Stroke s;
+    gshgeom_stroke_init(&s);
+    s.width = 2.0;
+    s.width_profile = &wp;
+    if (mode == 1) {
+      s.join = GSHGEOM_STROKE_JOIN_MITER;
+      s.cap = GSHGEOM_STROKE_CAP_BUTT;
+    }
+    if (mode == 2) {
+      s.dashes = dashes;
+      s.dash_count = 2;
+    }
+    GSHGEOM_Stroke_Outline * a = nullptr;
+    GSHGEOM_Stroke_Outline * b = nullptr;
+    ASSERT_EQ(gshgeom_stroke_expand(p, &s, &m, nullptr, nullptr, &a), GSHGEOM_OK) << mode;
+    ASSERT_EQ(gshgeom_stroke_expand(lowered, &s, &m, nullptr, nullptr, &b), GSHGEOM_OK) << mode;
+    EXPECT_EQ(gshgeom_stroke_outline_hash(a), gshgeom_stroke_outline_hash(b)) << mode;
+    gshgeom_stroke_outline_destroy(a);
+    gshgeom_stroke_outline_destroy(b);
+  }
+  gshgeom_path_destroy(p);
+  gshgeom_path_destroy(lowered);
+}
+
 // stroke_curves/lower.c: gshgeom_stroke_curves_lower_cubic (updated, AR8, AR15)
 TEST(Walkers, StrokeCurvesLowerTakesAnArc) {
   GSHGEOM_Path * p = arc_path();

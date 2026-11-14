@@ -354,6 +354,9 @@ def stroke_scripted():
     out["s-dashed-inside.bin"] = s_input(s_params(align=1, dash=bytes([6, 0, 5, 3, 0, 0])), S_SQUARE)
     out["s-dashed-bad-scope.bin"] = s_input(s_params(dash=bytes([6, 0, 5, 3, 0, 2])), S_POLY)
     out["s-profile.bin"] = s_input(s_params(dash=bytes([4])), S_POLY)
+    p3 = s_path(S_POLY)
+    base = s_input(s_params(), S_POLY)
+    out["s-path-3d.bin"] = base[: len(base) - len(p3)] + bytes([7]) + p3[1:]  # a 3D centerline: unsupported
     out["s-limit.bin"] = s_input(s_params(limit=raw(8)), S_POLY)
     out["s-tolerance.bin"] = s_input(s_params(), S_POLY, opts=8, tol=1)
     out["s-point-cap.bin"] = s_input(s_params(join=1), S_CURVE, opts=2)

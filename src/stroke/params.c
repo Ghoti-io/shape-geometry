@@ -133,10 +133,6 @@ GSHGEOM_Result gshgeom_stroke_check(const GSHGEOM_Stroke * s) {
     if (wp->count > GSHGEOM_WIDTH_STOPS_MAX) {
       return GSHGEOM_ERR_LIMIT;
     }
-    if (s->join != (uint32_t)GSHGEOM_STROKE_JOIN_ROUND || s->cap != (uint32_t)GSHGEOM_STROKE_CAP_ROUND || s->dash_count != 0 ||
-        s->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER) {
-      return GSHGEOM_ERR_UNSUPPORTED; /* SW5: the region is a swept disc */
-    }
     for (size_t i = 0; i < wp->count; i++) {
       if (!within(wp->stops[i].position) || !within(wp->stops[i].factor) || wp->stops[i].factor > GSHGEOM_WIDTH_FACTOR_MAX) {
         return GSHGEOM_ERR_LIMIT;

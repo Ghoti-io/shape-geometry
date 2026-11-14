@@ -811,7 +811,7 @@ there is no selector for another revision.
 
 The construction is the pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. Dashes (SG19 to SG30) are part of it.
 
-## Width profile (SW1 to SW9)
+## Width profile (SW1 to SW14)
 
 A stroke's width may vary along each subpath: a pressure brush, a tapered calligraphic line, the segment widths of a DXF polyline.
 `GSHGEOM_Stroke.width_profile` names a `GSHGEOM_Width_Profile`, and the width at a point of the centerline is `width` times the
@@ -826,25 +826,58 @@ model space through the inverse of the map's linear part; a closed subpath's clo
 Measuring the flattened centerline and not the exact curve is a choice: it makes the position a function of what is drawn, and the
 two differ by less than the tolerance's effect on a length.
 
-**SW4 The region** is the union over the points of the centerline of the disc of radius `width f(s) / 2` (under local width the image
-of that disc under the map's linear part; under device width a disc of device pixels). Along a straight piece whose factor is linear the
-swept disc is the convex hull of the two end discs, so the region of a polyline is the union of those hulls, and joins and caps are
-round by construction. A piece is cut where a stop falls inside it, so the factor is linear on every piece. **SW5** A profile needs
-round joins, round caps, no dashes and center alignment (`UNSUPPORTED`, decided after `INVALID` and before `LIMIT`): the region of a
-butt or mitered stroke of varying width is a different construction that is not defined here. **SW6** A disc is an inscribed
-polygon whose side count (8 to 512) keeps it within half the tolerance of the true disc, so the body is within the
-tolerance of the region of SW4 plus the flattener's; the hulls are exact integer convex hulls on the 26.6 lattice, wound one way so
-that the nonzero rule never cancels them. **SW7** The outline has a body and no aligned or clip part. **SW8** A subpath of one point
-is a disc of `f(0)` (both limits of a jump there) unless `degenerate` omits it. **SW9** Width 0 and a singular map are SG14 and
-SG15 and are decided before the profile is read.
+**SW4 The region of round joins and round caps** is the union over the points of the centerline of the disc of radius
+`width f(s) / 2` (under local width the image of that disc under the map's linear part; under device width a disc of device pixels).
+Along a straight piece whose factor is linear the swept disc is the convex hull of the two end discs, so the region of a polyline is the
+union of those hulls, and joins and caps are round by construction. A piece is cut where a stop falls inside it, so the factor is
+linear on every piece. **SW6** A disc is an inscribed polygon whose side count (8 to 512) keeps it within half the tolerance of the
+true disc, so the body is within the tolerance of the region plus the flattener's; the hulls are exact integer convex hulls on the
+26.6 lattice, wound one way so that the nonzero rule never cancels them. **SW7** The outline's body is the region of the subpaths that
+are not aligned; its aligned and clip parts are SW13's. **SW8** A subpath of one point is a disc of `f(0)` (both limits of a jump
+there) unless `degenerate` omits it. **SW9** Width 0 and a singular map are SG14 and SG15 and are decided before the profile is read.
 
-Only the polygon form (`gshgeom_stroke_expand` and its tolerance form) draws a profile; the curve form, the dots form and the hatch
-expansions refuse one (`UNSUPPORTED`, `INVALID` for a hatch's pen). The work is `2 n` units for each hull of `n`-sided pens, against
-`max_work`; the points against `max_points`.
+**SW10 Any other join or cap.** Where the joins are not round or the caps are not round, the swept disc cannot give the shape (a butt
+end is not a disc), so the region is built from the pieces the stroke is made of, on the flattened centerline of SW3, a polyline whose
+vertices are the joins. In the model space under local width and in device pixels under device width (the build space), each piece of a
+segment, cut at the profile's stops, is the **trapezoid** of its two end radii: the corners are the piece's ends offset by `r_0` and
+`r_1` along the left and the right normal of the whole segment, so that a constant factor gives SG6's rectangle. At a vertex the join
+is SG8's with `h` the radius there (a miter, its clip, a bevel, a round sector; a polyline has no curvature, so *arcs* is
+*miter-clip*; a reversal is SG8's limit), decided from the segments that meet and exactly (the orientation of their model points,
+when the centerline gives them as lines, so that a segment the lattice collapses to a point or a hair keeps its direction); at an end
+the cap is SG7's with `h` the radius there. A vertex or an end where the profile jumps has the join or the cap of each of its limits.
+A dot (SW8, SG24) is SG24's shape of the radius, aligned to SG11's effective tangent. Where the limits at a vertex differ the join
+of the earlier piece's end limit and the join of the later piece's start limit are both in the region. A constant profile
+is the stroke without a profile for every join, cap, miter limit and width space; the tests compare the two, point by point.
+
+**SW11 Dashes.** The pattern (SG19 to SG25) is measured along the flattened centerline in the width space's unit (SG19) and cuts it
+into dashes; each dash is the stretch of the polyline between two distances, stroked as an open run by SW4 or SW10 with the profile's
+position of each point (SW3) unchanged, so that a dash in the tail of a tapering stroke is thin. A dash across the start of a closed
+subpath is one dash (SG23), a join at the start vertex, its positions running to the subpath's length and on from 0. A zero-length
+dash is a dot. The cut is placed to the lattice (26.6) and its direction is the whole segment's (SG22), so a dash that ends or begins
+within about a hundredth of a pixel of a vertex may differ from the stroke without a profile on whether that vertex is a join or an end:
+the pattern is measured on the lattice's points, the plain stroke on the exact curve.
+
+**SW12 Position and distance.** The position of SW3 is in model units whatever the width space; the distance of a dash is in the width
+space's unit. They are the same measure under local width, and under device width the position is the model arc length and the dash
+distance the length in pixels.
+
+**SW13 Alignment.** Inside and outside (SG12) apply to the closed subpaths with extent: their region at twice the width (profile
+included) is the outline's aligned part, the clip the flattened closed subpaths, and `R_o` (the other subpaths) the body.
+
+**SW14 The curve form** (`stroke_curves.h`) draws the polygon outline as paths of lines at the tolerance `floor(64 t)` of the 26.6
+lattice; a tolerance below the lattice's least, 1/32 pixel, is `LIMIT`, since the lattice cannot hold it. A hatch's pen may carry a
+profile (`gshgeom_hatch_expand` and its variants): each piece is a subpath of its own and its positions run from the piece's start;
+dashes and alignment stay refused for a hatch's pen (the hatch has its own pattern, HX6).
+
+The work is `2 n` units for each hull of `n`-sided pens, and the points of each trapezoid, join, cap and dot, against `max_work`; the
+points against `max_points`; the dash steps against `max_dash_steps`.
 
 `tests/unit/test_stroke_profile.cpp` checks the body against an oracle that knows only SW4 (a convex minimization of the distance
 minus the radius over each piece, in model space) for constant, tapering, swelling and jumping profiles, closed, several and point
 subpaths, three kinds of map, a curved centerline against its densely sampled polyline, and random polylines, profiles and maps.
+`tests/unit/test_stroke_profile_forms.cpp` compares a constant profile with the stroke without one, point by point, for every join, cap, miter
+limit, pattern, alignment, rule, width space and map (and a hatch's pen), and checks the trapezoid, the flat end, a jump and a dash in a
+taper against their definitions; a mutation of the miter test, the sector's direction, the dash wrap and the alignment is caught.
 
 ## Stroke curves
 

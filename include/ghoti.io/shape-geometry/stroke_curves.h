@@ -234,7 +234,7 @@ typedef struct GSHGEOM_Stroke_Curves GSHGEOM_Stroke_Curves;
  * @param out        Receives the outline, only on success; free it with ::gshgeom_stroke_curves_destroy.
  * @return ::GSHGEOM_OK (a not-invertible map and width 0 included); ::GSHGEOM_ERR_INVALID for NULL, an invalid
  *   map, a 3D map, a tolerance outside its range or not finite, a form out of range, and as stroke.h's SG2;
- *   ::GSHGEOM_ERR_UNSUPPORTED for a 3D centerline or a width profile; ::GSHGEOM_ERR_LIMIT as stroke.h states
+ *   ::GSHGEOM_ERR_UNSUPPORTED for a 3D centerline; ::GSHGEOM_ERR_LIMIT as stroke.h states (a width profile is drawn as lines at a tolerance of at least 1/32, SW14, and is a limit below it)
  *   for the polygon expansion, and for a magnitude past what the tolerance can be certified for (the double
  *   arithmetic's reach must be within `t / 8`), a coordinate past ::GSHGEOM_COORD_LIMIT, a part past
  *   `max_elements`, a piece the depth cap would force; ::GSHGEOM_ERR_OOM.  Nothing is returned on failure.

@@ -93,7 +93,7 @@ violation.
 - Hit testing of a stroke is the hit test of its expansion (`gshgeom_stroke_expand`, then `gshgeom_flat_path_hit` under nonzero); there is no
   distance-to-path query, and a hit on a model path is a hit on its flattening.
 - Quaternions, projective (4 x 4) maps and NURBS: a map is affine, 2D or 3D, and a curve is a Bezier or a rational one of degree two or three.
-- A width profile draws only with round joins and round caps, no dashes and center alignment, and only in the polygon form of the expansion (SW5); a butt or mitered stroke of varying width, a profile in the curve form and a profile on a hatch's pen are not defined.
+- A width profile draws with any join, cap, dash array and alignment (SW10 to SW13), in the polygon form and in the curve form (as lines, at a tolerance of 1/32 pixel or more, SW14), and on a hatch's pen; its region is built on the flattened centerline.
 - Scattered-data interpolation, fields (distance, density, height, color) and unit conversion.
 
 ## License

@@ -188,7 +188,14 @@ TEST(StrokeCurvesInputs, RefusalsAndTheFormRange) {
   const GSHGEOM_Width_Stop stop = {0, 1};
   const GSHGEOM_Width_Profile dummy = {1, &stop};
   prof.width_profile = &dummy;
-  EXPECT_EQ(expand(p, prof, m, t, F, &o), GSHGEOM_ERR_UNSUPPORTED);
+  // a width profile is drawn as lines at the lattice's tolerance (SW14), and a finer tolerance is a limit
+  ASSERT_EQ(expand(p, prof, m, 0.1, F, &o), GSHGEOM_OK);
+  EXPECT_EQ(gshgeom_stroke_curves_status(o), GSHGEOM_STROKE_DRAWN);
+  EXPECT_GT(gshgeom_path_element_count(gshgeom_stroke_curves_body(o)), 0u);
+  gshgeom_stroke_curves_destroy(o);
+  o = nullptr;
+  EXPECT_EQ(expand(p, prof, m, 0.01, F, &o), GSHGEOM_ERR_LIMIT);
+  EXPECT_EQ(o, nullptr);
   GSHGEOM_Path * p3 = nullptr;
   ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 3, &p3), GSHGEOM_OK);
   GSHGEOM_Point a = {0, 0, 0}, b = {1, 1, 1};

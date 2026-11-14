@@ -578,9 +578,6 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
     const GSHGEOM_Map * map, int32_t tolerance, const CurveReq * cr, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, int depth_cap, int conform, int * redo, const double * dirs, size_t dir_count,
     GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc, GSHGEOM_Stroke_Work * work) {
-  if (stroke->width_profile) {
-    return GSHGEOM_ERR_UNSUPPORTED; /* SW: only the polygon form draws a profile (gshgeom_stroke_expand_counted) */
-  }
   GSHGEOM_Result r = gshgeom_map_check(map);
   if (r != GSHGEOM_OK) {
     return r;
@@ -808,7 +805,7 @@ GSHGEOM_Result gshgeom_stroke_expand_counted(const GSHGEOM_Path * centerline, co
   GSHGEOM_Stroke_Work * w = work ? work : &local;
   w->spent = 0;
   if (stroke->width_profile) {
-    return gshgeom_sk_profile_expand(centerline, stroke, map, tolerance, alloc, limits, out, w);
+    return gshgeom_sk_profile_expand(centerline, stroke, map, tolerance, alloc, limits, NULL, 0, out, w);
   }
   int redo = 0;
   GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, NULL, 0, out, NULL, w);
@@ -836,6 +833,9 @@ GSHGEOM_Result gshgeom_stroke_expand_dots_counted(const GSHGEOM_Path * centerlin
   GSHGEOM_Stroke_Work local = {0};
   GSHGEOM_Stroke_Work * w = work ? work : &local;
   w->spent = 0;
+  if (stroke->width_profile) {
+    return gshgeom_sk_profile_expand(centerline, stroke, map, tolerance, alloc, limits, d, dir_count, out, w);
+  }
   int redo = 0;
   GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, GSHGEOM_STROKE_MAX_DEPTH, 1, &redo, d, dir_count, out, NULL, w);
   if (r == GSHGEOM_OK && redo) {
@@ -850,6 +850,83 @@ GSHGEOM_Result gshgeom_stroke_expand_dots(const GSHGEOM_Path * centerline, const
   return gshgeom_stroke_expand_dots_counted(centerline, stroke, map, tolerance, alloc, limits, dirs, dir_count, out, NULL);
 }
 
+/** The lines of a flattened path as a path of the curve form's units (pixels). */
+static GSHGEOM_Result flat_to_path(const GSHGEOM_Flat_Path * f, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Path ** out) {
+  *out = NULL;
+  if (!f) {
+    return GSHGEOM_OK;
+  }
+  GSHGEOM_Path * mp = NULL;
+  GSHGEOM_Result r = gshgeom_path_create(alloc, limits, 2, &mp);
+  const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(f);
+  const size_t subs = gshgeom_flat_path_subpath_count(f);
+  for (size_t i = 0; i < subs && r == GSHGEOM_OK; i++) {
+    GSHGEOM_Flat_Subpath sp;
+    r = gshgeom_flat_path_subpath(f, i, &sp);
+    for (size_t k = 0; k < sp.count && r == GSHGEOM_OK; k++) {
+      GSHGEOM_Point q = {(double)pts[sp.first + k].x / 64.0, (double)pts[sp.first + k].y / 64.0, 0.0};
+      r = k == 0 ? gshgeom_path_move_to(mp, q) : gshgeom_path_line_to(mp, q);
+    }
+    if (r == GSHGEOM_OK && sp.closed) {
+      r = gshgeom_path_close(mp);
+    }
+  }
+  if (r != GSHGEOM_OK) {
+    gshgeom_path_destroy(mp);
+    return r;
+  }
+  *out = mp;
+  return GSHGEOM_OK;
+}
+
+/**
+ * A width profile in the curve form (SW14): the polygon outline of SW10 to SW13 at the tolerance `floor(64 t)` of the 26.6 lattice,
+ * its parts as paths of lines.  A tolerance below the lattice's least (1/32 pixel) is ::GSHGEOM_ERR_LIMIT: the lattice cannot hold it.
+ */
+static GSHGEOM_Result profile_curves(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map, double t,
+    GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Stroke_Curves ** out,
+    GSHGEOM_Stroke_Work * work) {
+  const double units = t * 64.0;
+  if (!(units >= (double)GSHGEOM_FLATTEN_MIN_TOLERANCE)) {
+    return GSHGEOM_ERR_LIMIT;
+  }
+  const int32_t tau = (int32_t)units;
+  GSHGEOM_Stroke_Outline * o = NULL;
+  GSHGEOM_Stroke_Work local = {0};
+  GSHGEOM_Result r = gshgeom_sk_profile_expand(centerline, stroke, map, tau, alloc, limits, NULL, 0, &o, work ? work : &local);
+  if (r != GSHGEOM_OK) {
+    return r;
+  }
+  if (!alloc) {
+    alloc = gshgeom_allocator_default();
+  }
+  GSHGEOM_Stroke_Curves * cu = gcu_allocator_calloc(alloc, 1, sizeof *cu);
+  if (!cu) {
+    gshgeom_stroke_outline_destroy(o);
+    return GSHGEOM_ERR_OOM;
+  }
+  cu->alloc = *alloc;
+  cu->form = form;
+  cu->status = o->status;
+  cu->alignment = o->alignment;
+  cu->rule = o->rule;
+  cu->complement = o->complement;
+  r = flat_to_path(o->body, alloc, limits, &cu->body);
+  if (r == GSHGEOM_OK) {
+    r = flat_to_path(o->aligned, alloc, limits, &cu->aligned);
+  }
+  if (r == GSHGEOM_OK) {
+    r = flat_to_path(o->clip, alloc, limits, &cu->clip);
+  }
+  gshgeom_stroke_outline_destroy(o);
+  if (r != GSHGEOM_OK) {
+    gshgeom_stroke_curves_destroy(cu);
+    return r;
+  }
+  *out = cu;
+  return GSHGEOM_OK;
+}
+
 GSHGEOM_Result gshgeom_stroke_curves_expand_counted(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke,
     const GSHGEOM_Map * map, double tolerance, GSHGEOM_Stroke_Curves_Form form, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, int depth_cap, GSHGEOM_Stroke_Curves ** out, GSHGEOM_Stroke_Work * work) {
@@ -862,6 +939,9 @@ GSHGEOM_Result gshgeom_stroke_curves_expand_counted(const GSHGEOM_Path * centerl
   if (!(tolerance >= GSHGEOM_STROKE_CURVES_MIN_TOLERANCE) || !(tolerance <= GSHGEOM_STROKE_CURVES_MAX_TOLERANCE) ||
       (unsigned)form >= (unsigned)GSHGEOM_STROKE_CURVES_FORM_COUNT) {
     return GSHGEOM_ERR_INVALID;
+  }
+  if (stroke->width_profile) {
+    return profile_curves(centerline, stroke, map, tolerance, form, alloc, limits, out, work);
   }
   CurveReq cr = {tolerance, form};
   int redo = 0;

@@ -238,23 +238,14 @@ TEST(StrokeProfile, TheOrderOfTheRefusals) {
   GSHGEOM_Width_Profile np{1, neg_pos};
   s.width_profile = &np;
   EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_INVALID);
-  /* invalid before unsupported before limit */
+  /* any join, cap, dash array and alignment is drawn (SW10 to SW13); a bad profile is invalid whatever the style is */
   s = round_stroke(4, &wp);
   s.join = GSHGEOM_STROKE_JOIN_MITER;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED) << "SW5: round joins";
-  s = round_stroke(4, &wp);
   s.cap = GSHGEOM_STROKE_CAP_BUTT;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED);
-  s = round_stroke(4, &wp);
-  static const double dashes[2] = {2, 2};
-  s.dash_count = 2;
-  s.dashes = dashes;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED);
-  s = round_stroke(4, &wp);
   s.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED);
+  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_OK);
   s.width_profile = &b;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_INVALID) << "a bad profile is invalid before the combination is unsupported";
+  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_INVALID) << "a bad profile is invalid whatever the style";
   const Stop huge[1] = {{0, 0x1p20}};
   GSHGEOM_Width_Profile h{1, huge};
   s = round_stroke(4, &h);
@@ -266,7 +257,7 @@ TEST(StrokeProfile, TheOrderOfTheRefusals) {
   s = round_stroke(4, &wp);
   s.join = GSHGEOM_STROKE_JOIN_MITER;
   s.width = 1e30;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED) << "unsupported before limit";
+  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_LIMIT) << "a width past the band";
 }
 
 TEST(StrokeProfile, StatusesAndTheFormsThatDoNotDrawAProfile) {
@@ -285,7 +276,12 @@ TEST(StrokeProfile, StatusesAndTheFormsThatDoNotDrawAProfile) {
   ASSERT_EQ(gshgeom_stroke_expand(path, &s, &flat, nullptr, nullptr, &sing.o), GSHGEOM_OK);
   EXPECT_EQ(gshgeom_stroke_outline_status(sing.o), GSHGEOM_STROKE_NOT_INVERTIBLE) << "SG15 before SG14";
   GSHGEOM_Stroke_Curves * cu = nullptr;
-  EXPECT_EQ(gshgeom_stroke_curves_expand(path, &s, &m, 0.1, GSHGEOM_STROKE_CURVES_RATIONAL, nullptr, nullptr, &cu), GSHGEOM_ERR_UNSUPPORTED);
+  ASSERT_EQ(gshgeom_stroke_curves_expand(path, &s, &m, 0.1, GSHGEOM_STROKE_CURVES_RATIONAL, nullptr, nullptr, &cu), GSHGEOM_OK) << "SW14";
+  EXPECT_EQ(gshgeom_stroke_curves_status(cu), GSHGEOM_STROKE_DRAWN);
+  EXPECT_GT(gshgeom_path_element_count(gshgeom_stroke_curves_body(cu)), 0u);
+  gshgeom_stroke_curves_destroy(cu);
+  cu = nullptr;
+  EXPECT_EQ(gshgeom_stroke_curves_expand(path, &s, &m, 0.01, GSHGEOM_STROKE_CURVES_RATIONAL, nullptr, nullptr, &cu), GSHGEOM_ERR_LIMIT);
   EXPECT_EQ(cu, nullptr);
   Outline three;
   GSHGEOM_Map m3;

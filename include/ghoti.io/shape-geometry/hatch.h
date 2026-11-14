@@ -80,7 +80,7 @@
  *
  * **HX7 The stroke of a piece.**  A piece with `s0 < s1` is the straight open centerline from `H(O_k + s0 u)` to
  * `H(O_k + s1 u)` in the item's local space (`H` the hatch map), stroked by stroke.h's SG6 and SG7 with the style's width,
- * width space and cap at both ends; there is no join, a piece being one segment.  A dot is SG24's shape along the mapped
+ * width space and cap at both ends; there is no join, a piece being one segment (a width profile, stroke.h's SW14, runs from the piece's own start).  A dot is SG24's shape along the mapped
  * line direction `H_lin u`: the disc of radius `h` for a round cap, the square of side `2h` for a square cap, nothing for
  * a butt cap, drawn whatever the style's `degenerate` says.  All the pieces of all the families are one union (SG13), so
  * translucent ink does not darken where two lines cross.  The expansion is **the code of ::gshgeom_stroke_expand_with_tolerance**

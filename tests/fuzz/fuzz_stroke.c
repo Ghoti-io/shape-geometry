@@ -157,7 +157,7 @@ enum {
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"an outline drawn", "width 0 (EMPTY)",
-    "a singular map (NOT_INVERTIBLE)", "an invalid argument refused", "an unsupported stroke refused",
+    "a singular map (NOT_INVERTIBLE)", "an invalid argument refused", "a 3D centerline refused as unsupported",
     "a limit refused", "a failed allocation", "an aligned part", "a curve stroked", "an arcs join drawn",
     "device width drawn", "a degenerate subpath drawn", "a dashed stroke drawn", "a dashed stroke with one pattern for the path",
     "a dashed stroke with zero-length dashes", "a curve outline drawn", "a curve outline in the cubic form",
@@ -463,7 +463,7 @@ static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, const 
     s->dash_count = 2; /* NULL dashes */
     break;
   case 4:
-    s->join = GSHGEOM_STROKE_JOIN_MITER; /* a valid profile with a miter join: unsupported (SW5) */
+    s->join = GSHGEOM_STROKE_JOIN_MITER; /* a valid profile with a miter join and a butt cap: drawn (SW10) */
     s->width_profile = profile;
     break;
   case 6:

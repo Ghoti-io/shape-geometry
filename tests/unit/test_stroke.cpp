@@ -192,14 +192,14 @@ TEST(StrokeParams, InvalidIsDecidedFirst) {
   EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_INVALID);
 }
 
-TEST(StrokeParams, AWidthProfileIsUnsupportedBeforeAnyLimit) {
+TEST(StrokeParams, AWidthProfileWithAnyStyleIsCheckedLikeTheRest) {
   GSHGEOM_Stroke s = plain();
   const GSHGEOM_Width_Stop stop = {0, 1};
   const GSHGEOM_Width_Profile profile = {1, &stop};
   s.width_profile = &profile;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED);
+  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_OK) << "a miter join and a butt cap are drawn (SW10)";
   s.miter_limit = 0.5;
-  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED);
+  EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_LIMIT) << "the limits are decided as for a stroke without one";
 }
 
 TEST(StrokeParams, EveryBoundAtAndPastItsEdge) {
