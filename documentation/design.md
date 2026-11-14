@@ -811,6 +811,41 @@ there is no selector for another revision.
 
 The construction is the pieces above: octagon-inflated convex hulls, bands and fans split at 7/16, arcs by halved rational quadratics; within `tau - 1/4` units outward, containing the region. Dashes (SG19 to SG30) are part of it.
 
+## Width profile (SW1 to SW9)
+
+A stroke's width may vary along each subpath: a pressure brush, a tapered calligraphic line, the segment widths of a DXF polyline.
+`GSHGEOM_Stroke.width_profile` names a `GSHGEOM_Width_Profile`, and the width at a point of the centerline is `width` times the
+profile's factor there.
+
+**SW1 The profile.** `count` stops (1 to 65535), each a `position` and a `factor`, all finite, positions at least 0 and not decreasing,
+factors at least 0 (`INVALID`); a position or factor that is not 0 is at least 2^-64, a position at most 2^64 and a factor at most
+2^16 (`LIMIT`). **SW2 The factor** `f(s)` is linear between stops and constant before the first and after the last; two stops at one
+position are a jump, where `f` has both limits and the region both. **SW3 The position** of a point of a subpath is the arc length
+from the start of the subpath of the centerline as the integer flattener makes it (at the tolerance, under the map), measured in
+model space through the inverse of the map's linear part; a closed subpath's closing line is included, and each subpath starts at 0.
+Measuring the flattened centerline and not the exact curve is a choice: it makes the position a function of what is drawn, and the
+two differ by less than the tolerance's effect on a length.
+
+**SW4 The region** is the union over the points of the centerline of the disc of radius `width f(s) / 2` (under local width the image
+of that disc under the map's linear part; under device width a disc of device pixels). Along a straight piece whose factor is linear the
+swept disc is the convex hull of the two end discs, so the region of a polyline is the union of those hulls, and joins and caps are
+round by construction. A piece is cut where a stop falls inside it, so the factor is linear on every piece. **SW5** A profile needs
+round joins, round caps, no dashes and center alignment (`UNSUPPORTED`, decided after `INVALID` and before `LIMIT`): the region of a
+butt or mitered stroke of varying width is a different construction that is not defined here. **SW6** A disc is an inscribed
+polygon whose side count (8 to 512) keeps it within half the tolerance of the true disc, so the body is within the
+tolerance of the region of SW4 plus the flattener's; the hulls are exact integer convex hulls on the 26.6 lattice, wound one way so
+that the nonzero rule never cancels them. **SW7** The outline has a body and no aligned or clip part. **SW8** A subpath of one point
+is a disc of `f(0)` (both limits of a jump there) unless `degenerate` omits it. **SW9** Width 0 and a singular map are SG14 and
+SG15 and are decided before the profile is read.
+
+Only the polygon form (`gshgeom_stroke_expand` and its tolerance form) draws a profile; the curve form, the dots form and the hatch
+expansions refuse one (`UNSUPPORTED`, `INVALID` for a hatch's pen). The work is `2 n` units for each hull of `n`-sided pens, against
+`max_work`; the points against `max_points`.
+
+`tests/unit/test_stroke_profile.cpp` checks the body against an oracle that knows only SW4 (a convex minimization of the distance
+minus the radius over each piece, in model space) for constant, tapering, swelling and jumping profiles, closed, several and point
+subpaths, three kinds of map, a curved centerline against its densely sampled polyline, and random polylines, profiles and maps.
+
 ## Stroke curves
 
 `stroke_curves.h` returns the region of `stroke.h` (SG6 to SG13) as a path of

@@ -185,7 +185,8 @@ TEST(StrokeCurvesInputs, RefusalsAndTheFormRange) {
   neg.width = -1;
   EXPECT_EQ(expand(p, neg, m, t, F, &o), GSHGEOM_ERR_INVALID);
   GSHGEOM_Stroke prof = s;
-  int dummy;
+  const GSHGEOM_Width_Stop stop = {0, 1};
+  const GSHGEOM_Width_Profile dummy = {1, &stop};
   prof.width_profile = &dummy;
   EXPECT_EQ(expand(p, prof, m, t, F, &o), GSHGEOM_ERR_UNSUPPORTED);
   GSHGEOM_Path * p3 = nullptr;

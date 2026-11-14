@@ -279,6 +279,11 @@ GSHGEOM_Result gshgeom_stroke_curves_expand_capped(const GSHGEOM_Path * centerli
 /** SG2 then SG3: the canonical parameters (a non-solid array keeps the caller's entries; see params.c). */
 GSHGEOM_Result gshgeom_stroke_canonical(const GSHGEOM_Stroke * in, GSHGEOM_Stroke * out);
 
+/** The expansion of a stroke with a width profile (profile.c, SW1 to SW9): the polygon form's outline, a body of hulls of discs. */
+GSHGEOM_Result gshgeom_sk_profile_expand(const GSHGEOM_Path * centerline, const GSHGEOM_Stroke * stroke, const GSHGEOM_Map * map,
+    int32_t tolerance, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits, GSHGEOM_Stroke_Outline ** out,
+    GSHGEOM_Stroke_Work * work);
+
 /* --- dash.c ----------------------------------------------------------------- */
 
 /** The sum of the first @p n canonical entries of a raw array (count entries, repeated), in order. */

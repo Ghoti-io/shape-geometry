@@ -38,6 +38,20 @@
  *
  * ## The rules
  *
+ * **Width profile, SW1 to SW9** (documentation/design.md has the whole text).  **SW1** A profile is `count` stops (at least 1, at most
+ * ::GSHGEOM_WIDTH_STOPS_MAX), each a position and a factor, all finite, positions at least 0 and not decreasing, factors at
+ * least 0 (`INVALID`), positions and factors in SG2's bands (`LIMIT`).  **SW2** The width at position `s` is `width f(s)` with `f`
+ * linear between stops and constant before the first and after the last; two stops at one position are a jump, `f` has both
+ * limits there and the region has both.  **SW3** The position of a point of a subpath is the arc length from its start
+ * of the centerline as the integer flattener makes it at the tolerance, measured in model space (through the inverse of the
+ * map's linear part), a closed subpath's closing line included.  **SW4** The region is the union over the points of the
+ * centerline of the disc of radius `width f(s) / 2` (local width: the image of that disc under the map's linear part), which for
+ * a polyline is the union over its pieces of the convex hull of the two end discs, so that joins and caps are round.  **SW5** A
+ * profile needs round joins, round caps, no dashes and center alignment (`UNSUPPORTED`).  **SW6** A disc is
+ * the inscribed polygon whose side count keeps it within half the tolerance of the disc.  **SW7** The outline has a body and no
+ * aligned or clip part.  **SW8** A subpath of one point is a disc of `f(0)` unless `degenerate` omits it.  **SW9** Width 0, and a
+ * singular map, are SG14 and SG15.
+ *
  * **SG1 The parameters.**  ::GSHGEOM_Stroke is plain data, checked by every
  * function that takes it.  Its enumerations carry fixed values (the scene's
  * stroke style uses the same ones, so a conversion is the identity), and
@@ -49,7 +63,8 @@
  * **SG2 Validity and bounds.**  ::gshgeom_stroke_check decides, in this order:
  * ::GSHGEOM_ERR_INVALID for NULL, `dash_count > 0` with NULL `dashes`, a
  * non-finite double, an enumeration out of range, `width < 0`, or a nonzero
- * `_reserved` byte; ::GSHGEOM_ERR_UNSUPPORTED for a non-NULL `width_profile`;
+ * `_reserved` byte, or a width profile that SW1 refuses; ::GSHGEOM_ERR_UNSUPPORTED for a width profile with a join or cap
+ * other than round, dashes or an alignment other than center (SW5);
  * then ::GSHGEOM_ERR_LIMIT: `width`, each dash (by magnitude) and `dash_offset`
  * must be 0 or of magnitude in [::GSHGEOM_STROKE_VALUE_MIN,
  * ::GSHGEOM_STROKE_VALUE_MAX], `miter_limit` in [1,
@@ -443,6 +458,27 @@ typedef enum GSHGEOM_Stroke_Alignment {
 /** How many times a curve segment may be halved before a piece is refused (::GSHGEOM_ERR_LIMIT). */
 #define GSHGEOM_STROKE_MAX_DEPTH 64
 
+/** One stop of a width profile (SW1): the factor `width` is multiplied by at a position along a subpath. */
+typedef struct GSHGEOM_Width_Stop {
+  double position; ///< Arc length from the start of the subpath, in model units (SW3): 0 or at most 2^64, and at least 2^-64 if not 0.
+  double factor;   ///< At least 0 and at most ::GSHGEOM_WIDTH_FACTOR_MAX; 0 or at least 2^-64.
+} GSHGEOM_Width_Stop;
+
+/**
+ * A width profile (SW1 to SW9): the stroke's width as a function of the position along each subpath, so that a stroke can taper
+ * or swell (a pressure brush, a DXF polyline's segment widths, a calligraphic line).  `count` stops, ascending in position (two
+ * equal positions are a jump), linear between them and constant outside them.
+ */
+typedef struct GSHGEOM_Width_Profile {
+  size_t count;                    ///< From 1 to ::GSHGEOM_WIDTH_STOPS_MAX.
+  const GSHGEOM_Width_Stop * stops; ///< Borrowed.
+} GSHGEOM_Width_Profile;
+
+/** The most stops of a width profile (SW1). */
+#define GSHGEOM_WIDTH_STOPS_MAX ((size_t)65535)
+/** The largest factor of a width profile (SW1): 2^16. */
+#define GSHGEOM_WIDTH_FACTOR_MAX 0x1p16
+
 /** A stroke's parameters (SG1).  Plain data; start from ::gshgeom_stroke_init. */
 typedef struct GSHGEOM_Stroke {
   double width;                     ///< 0 or of magnitude in [2^-64, 2^64]; 0 draws nothing (SG14).
@@ -457,7 +493,7 @@ typedef struct GSHGEOM_Stroke {
   uint32_t dash_scope;              ///< A ::GSHGEOM_Stroke_Dash_Scope; read only with dashes.
   uint32_t alignment;               ///< A ::GSHGEOM_Stroke_Alignment.
   GSHGEOM_Fill_Rule alignment_rule; ///< The rule of `F` (SG12); read only off center.
-  const void * width_profile;       ///< Reserved: NULL; anything else is ::GSHGEOM_ERR_UNSUPPORTED.
+  const GSHGEOM_Width_Profile * width_profile; ///< NULL (the default): the width is constant.  Else SW1 to SW9: the width is `width` times the profile; it needs round joins, round caps, no dashes and center alignment, and only ::gshgeom_stroke_expand and its tolerance form draw it.
   uint8_t _reserved[8];             ///< Zero.
 } GSHGEOM_Stroke;
 

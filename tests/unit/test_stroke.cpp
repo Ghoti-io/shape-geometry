@@ -186,14 +186,16 @@ TEST(StrokeParams, InvalidIsDecidedFirst) {
   s = plain();
   s.width = -1;
   s.miter_limit = 0.5;
-  int profile = 0;
+  const GSHGEOM_Width_Stop stop = {0, 1};
+  const GSHGEOM_Width_Profile profile = {1, &stop};
   s.width_profile = &profile;
   EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_INVALID);
 }
 
 TEST(StrokeParams, AWidthProfileIsUnsupportedBeforeAnyLimit) {
   GSHGEOM_Stroke s = plain();
-  int profile = 0;
+  const GSHGEOM_Width_Stop stop = {0, 1};
+  const GSHGEOM_Width_Profile profile = {1, &stop};
   s.width_profile = &profile;
   EXPECT_EQ(gshgeom_stroke_check(&s), GSHGEOM_ERR_UNSUPPORTED);
   s.miter_limit = 0.5;

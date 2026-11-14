@@ -928,7 +928,7 @@ GSHGEOM_Result gshgeom_hatch_expand_pieces(const GSHGEOM_Hatch_Pieces * pieces, 
   if (r != GSHGEOM_OK) {
     return r;
   }
-  if (stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER) {
+  if (stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER || stroke->width_profile) {
     return GSHGEOM_ERR_INVALID;
   }
   if (!alloc) {
@@ -1006,7 +1006,7 @@ static GSHGEOM_Result expand_check(const GSHGEOM_Stroke * stroke) {
   if (r != GSHGEOM_OK) {
     return r;
   }
-  return stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;
+  return stroke->dash_count != 0 || stroke->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER || stroke->width_profile ? GSHGEOM_ERR_INVALID : GSHGEOM_OK;
 }
 
 GSHGEOM_Result gshgeom_hatch_expand_from_flat(const GSHGEOM_Flat_Path * region, GSHGEOM_Fill_Rule rule, const GSHGEOM_Hatch * hatch,

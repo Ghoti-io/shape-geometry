@@ -578,6 +578,9 @@ static GSHGEOM_Result expand_core(const GSHGEOM_Path * centerline, const GSHGEOM
     const GSHGEOM_Map * map, int32_t tolerance, const CurveReq * cr, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, int depth_cap, int conform, int * redo, const double * dirs, size_t dir_count,
     GSHGEOM_Stroke_Outline ** po, GSHGEOM_Stroke_Curves ** pc, GSHGEOM_Stroke_Work * work) {
+  if (stroke->width_profile) {
+    return GSHGEOM_ERR_UNSUPPORTED; /* SW: only the polygon form draws a profile (gshgeom_stroke_expand_counted) */
+  }
   GSHGEOM_Result r = gshgeom_map_check(map);
   if (r != GSHGEOM_OK) {
     return r;
@@ -804,6 +807,9 @@ GSHGEOM_Result gshgeom_stroke_expand_counted(const GSHGEOM_Path * centerline, co
   GSHGEOM_Stroke_Work local = {0};
   GSHGEOM_Stroke_Work * w = work ? work : &local;
   w->spent = 0;
+  if (stroke->width_profile) {
+    return gshgeom_sk_profile_expand(centerline, stroke, map, tolerance, alloc, limits, out, w);
+  }
   int redo = 0;
   GSHGEOM_Result r = expand_core(centerline, stroke, map, tolerance, NULL, alloc, limits, depth_cap, 1, &redo, NULL, 0, out, NULL, w);
   if (r == GSHGEOM_OK && redo) {

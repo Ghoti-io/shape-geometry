@@ -309,6 +309,7 @@
 #define gshgeom_sk_dash_phase GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_phase)
 #define gshgeom_sk_dash_positions GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_positions)
 #define gshgeom_sk_dash_begin GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_begin)
+#define gshgeom_sk_profile_expand GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_profile_expand)
 #define gshgeom_sk_dash_end GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_end)
 #define gshgeom_sk_dash_sub GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_dash_sub)
 #define gshgeom_sk_effective_tangent GHOTIIO_SHAPE_GEOMETRY(gshgeom_sk_effective_tangent)

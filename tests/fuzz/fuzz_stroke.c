@@ -434,7 +434,7 @@ static double dash_value(Input * in) {
   return table[next(in) % (sizeof table / sizeof table[0])];
 }
 
-static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, int * profile) {
+static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, const GSHGEOM_Width_Profile * profile) {
   gshgeom_stroke_init(s);
   s->width = coordinate(in);
   s->width_space = next(in) % 3;
@@ -463,6 +463,7 @@ static void build_stroke(Input * in, GSHGEOM_Stroke * s, double * dashes, int * 
     s->dash_count = 2; /* NULL dashes */
     break;
   case 4:
+    s->join = GSHGEOM_STROKE_JOIN_MITER; /* a valid profile with a miter join: unsupported (SW5) */
     s->width_profile = profile;
     break;
   case 6:
@@ -618,7 +619,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   int32_t tau = (opts & 8) ? (int32_t)tol : GSHGEOM_FLATTEN_TOLERANCE;
   GSHGEOM_Stroke s;
   double dashes[4];
-  int profile = 0;
+  const GSHGEOM_Width_Stop stop = {0.0, 1.0};
+  const GSHGEOM_Width_Profile profile = {1, &stop};
   build_stroke(&in, &s, dashes, &profile);
   GSHGEOM_Map map;
   if (build_map(&in, &map) != GSHGEOM_OK) {

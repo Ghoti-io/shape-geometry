@@ -117,7 +117,31 @@ GSHGEOM_Result gshgeom_stroke_check(const GSHGEOM_Stroke * s) {
     }
   }
   if (s->width_profile) {
-    return GSHGEOM_ERR_UNSUPPORTED; /* reserved until a profile is defined */
+    const GSHGEOM_Width_Profile * wp = s->width_profile;
+    if (wp->count == 0 || !wp->stops) {
+      return GSHGEOM_ERR_INVALID;
+    }
+    double last = 0.0;
+    for (size_t i = 0; i < wp->count && i < GSHGEOM_WIDTH_STOPS_MAX + 1u; i++) {
+      const GSHGEOM_Width_Stop * st = &wp->stops[i];
+      if (!is_finite_value(st->position) || !is_finite_value(st->factor) || st->position < 0.0 || st->factor < 0.0 ||
+          st->position < last) {
+        return GSHGEOM_ERR_INVALID;
+      }
+      last = st->position;
+    }
+    if (wp->count > GSHGEOM_WIDTH_STOPS_MAX) {
+      return GSHGEOM_ERR_LIMIT;
+    }
+    if (s->join != (uint32_t)GSHGEOM_STROKE_JOIN_ROUND || s->cap != (uint32_t)GSHGEOM_STROKE_CAP_ROUND || s->dash_count != 0 ||
+        s->alignment != (uint32_t)GSHGEOM_STROKE_ALIGN_CENTER) {
+      return GSHGEOM_ERR_UNSUPPORTED; /* SW5: the region is a swept disc */
+    }
+    for (size_t i = 0; i < wp->count; i++) {
+      if (!within(wp->stops[i].position) || !within(wp->stops[i].factor) || wp->stops[i].factor > GSHGEOM_WIDTH_FACTOR_MAX) {
+        return GSHGEOM_ERR_LIMIT;
+      }
+    }
   }
   if (!within(s->width) || !within(s->dash_offset) ||
       !(s->miter_limit >= 1.0 && s->miter_limit <= GSHGEOM_STROKE_MITER_LIMIT_MAX)) {
