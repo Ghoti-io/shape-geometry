@@ -47,6 +47,31 @@
 /** Side counts a pen polygon may have, in order: the first that is within the error is used. */
 static const unsigned kSides[] = {8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512};
 
+/*
+ * The conversions between a 64-bit integer and a double, without the x87 instruction an i686 build makes them with (the
+ * determinism gate refuses it): a value of magnitude below 2^40 splits into 20-bit halves, each of which converts through a
+ * 32-bit integer (SSE2), so the results are the same bits on every target.  Device coordinates are 26.6 numbers of 32 bits, so
+ * a difference of two is below 2^33.
+ */
+static double d64(int64_t v) {
+  const int64_t lo = v & 0xFFFFF;
+  return (double)(int32_t)((v - lo) >> 20) * 0x1p20 + (double)(int32_t)lo;
+}
+
+static int64_t i64(double w) {
+  const int neg = w < 0.0;
+  const double m = neg ? 0.0 - w : w;
+  const double hi = gmath_floor(m * 0x1p-20);
+  const double lo = m - hi * 0x1p20;
+  const int64_t v = ((int64_t)(int32_t)hi << 20) + (int64_t)(int32_t)lo;
+  return neg ? -v : v;
+}
+
+/** An unsigned count as a double (a 32-bit unsigned converts through x87 on i686, so it goes through a signed one). */
+static double du(unsigned v) {
+  return (double)(int32_t)v;
+}
+
 /** A point of a hull's construction. */
 typedef struct Pt {
   int64_t x, y;
@@ -302,7 +327,7 @@ static GSHGEOM_Result piece(Prof * p, int64_t x0, int64_t y0, double s0, int64_t
     } else {
       const double t = s1 > s0 ? (es - s0) / (s1 - s0) : 0.0;
       int32_t ox, oy;
-      if (gshgeom_round_26_6((double)(x1 - x0) * t / 64.0, &ox) != GSHGEOM_OK || gshgeom_round_26_6((double)(y1 - y0) * t / 64.0, &oy) != GSHGEOM_OK) {
+      if (gshgeom_round_26_6(d64(x1 - x0) * t / 64.0, &ox) != GSHGEOM_OK || gshgeom_round_26_6(d64(y1 - y0) * t / 64.0, &oy) != GSHGEOM_OK) {
         return GSHGEOM_ERR_LIMIT;
       }
       ex = x0 + ox;
@@ -334,7 +359,7 @@ static GSHGEOM_Result piece(Prof * p, int64_t x0, int64_t y0, double s0, int64_t
 
 /** The point (x, y) of the device in the build space: model units relative to the origin under local width, pixels under device width. */
 static void to_build(const Prof * p, int64_t x, int64_t y, double * u, double * v) {
-  const double dx = (double)(x - p->ox) / 64.0, dy = (double)(y - p->oy) / 64.0;
+  const double dx = d64(x - p->ox) / 64.0, dy = d64(y - p->oy) / 64.0;
   if (p->local) {
     *u = p->inv[0][0] * dx + p->inv[0][1] * dy;
     *v = p->inv[1][0] * dx + p->inv[1][1] * dy;
@@ -389,8 +414,8 @@ static GSHGEOM_Result emit_poly(Prof * p, unsigned m) {
   }
   double area = 0.0; /* twice the signed area, relative to the first point */
   for (unsigned i = 1; i + 1 < k; i++) {
-    area += (double)(p->pts[i].x - p->pts[0].x) * (double)(p->pts[i + 1].y - p->pts[0].y) -
-        (double)(p->pts[i + 1].x - p->pts[0].x) * (double)(p->pts[i].y - p->pts[0].y);
+    area += d64(p->pts[i].x - p->pts[0].x) * d64(p->pts[i + 1].y - p->pts[0].y) -
+        d64(p->pts[i + 1].x - p->pts[0].x) * d64(p->pts[i].y - p->pts[0].y);
   }
   if (area == 0.0) {
     return GSHGEOM_OK;
@@ -514,11 +539,11 @@ static GSHGEOM_Result join_shape(Prof * p, const Seg * a, const Seg * b, double 
     dot_dev = (a->mx1 - a->mx0) * (b->mx1 - b->mx0) + (a->my1 - a->my0) * (b->my1 - b->my0);
     turn = (double)sg * (p->local ? 1.0 : p->sdet); /* the model's turn, in the build space */
   } else {
-    GSHGEOM_Point pa = {(double)a->ax0, (double)a->ay0, 0.0}, pv = {(double)a->ax1, (double)a->ay1, 0.0}, pb = {(double)b->ax1, (double)b->ay1, 0.0};
+    GSHGEOM_Point pa = {d64(a->ax0), d64(a->ay0), 0.0}, pv = {d64(a->ax1), d64(a->ay1), 0.0}, pb = {d64(b->ax1), d64(b->ay1), 0.0};
     if (gshgeom_orient2d(pa, pv, pb, &sg) != GSHGEOM_OK) {
       return GSHGEOM_ERR_INTERNAL;
     }
-    dot_dev = (double)(a->ax1 - a->ax0) * (double)(b->ax1 - b->ax0) + (double)(a->ay1 - a->ay0) * (double)(b->ay1 - b->ay0);
+    dot_dev = d64(a->ax1 - a->ax0) * d64(b->ax1 - b->ax0) + d64(a->ay1 - a->ay0) * d64(b->ay1 - b->ay0);
     turn = (double)sg * p->detsign; /* the lattice's turn, in the build space */
   }
   if (sg == 0 && dot_dev > 0.0) {
@@ -531,7 +556,7 @@ static GSHGEOM_Result join_shape(Prof * p, const Seg * a, const Seg * b, double 
     if (p->join == (uint32_t)GSHGEOM_STROKE_JOIN_ROUND) {
       const unsigned M = (p->sides + 1u) / 2u;
       for (unsigned k = 0; k <= M; k++) {
-        const double al = PI_ / 2.0 - PI_ * (double)k / (double)M;
+        const double al = PI_ / 2.0 - PI_ * du(k) / du(M);
         double c = gmath_cos(al), s2 = gmath_sin(al);
         if (k == 0) {
           c = 0.0;
@@ -561,13 +586,13 @@ static GSHGEOM_Result join_shape(Prof * p, const Seg * a, const Seg * b, double 
   if (p->join == (uint32_t)GSHGEOM_STROKE_JOIN_ROUND) {
     double cr = ax * by - ay * bx;
     double phi = gmath_atan2(cr < 0.0 ? -cr : cr, dt);
-    unsigned m = (unsigned)gmath_ceil(phi * (double)p->sides / (2.0 * PI_));
+    unsigned m = (unsigned)(int32_t)gmath_ceil(phi * du(p->sides) / (2.0 * PI_));
     m = m < 1u ? 1u : m;
     BQ(0, vu, vv);
     BQ(1, Au, Av);
     const double ca = turn > 0.0 ? 1.0 : -1.0;
     for (unsigned k = 1; k < m; k++) {
-      const double th = ca * phi * (double)k / (double)m;
+      const double th = ca * phi * du(k) / du(m);
       const double c = gmath_cos(th), s2 = gmath_sin(th);
       BQ(1u + k, vu + r * (c * oax - s2 * oay), vv + r * (s2 * oax + c * oay));
     }
@@ -631,7 +656,7 @@ static GSHGEOM_Result cap_shape(Prof * p, int64_t sx, int64_t sy, double dx, dou
       c = 0.0;
       s2 = -1.0;
     } else {
-      const double al = PI_ / 2.0 - PI_ * (double)k / (double)M;
+      const double al = PI_ / 2.0 - PI_ * du(k) / du(M);
       c = gmath_cos(al);
       s2 = gmath_sin(al);
     }
@@ -748,16 +773,16 @@ static GSHGEOM_Result push_part(Prof * p, const Seg * g, double t0, double t1) {
   }
   p->st = mem;
   Seg o = *g;
-  const double dx = (double)(g->x1 - g->x0), dy = (double)(g->y1 - g->y0);
+  const double dx = d64(g->x1 - g->x0), dy = d64(g->y1 - g->y0);
   if (t0 > 0.0) {
-    o.x0 = g->x0 + (int64_t)gmath_floor(dx * t0 + 0.5);
-    o.y0 = g->y0 + (int64_t)gmath_floor(dy * t0 + 0.5);
+    o.x0 = g->x0 + i64(gmath_floor(dx * t0 + 0.5));
+    o.y0 = g->y0 + i64(gmath_floor(dy * t0 + 0.5));
     o.s0 = g->s0 + (g->s1 - g->s0) * t0;
     o.d0 = g->d0 + (g->d1 - g->d0) * t0;
   }
   if (t1 < 1.0) {
-    o.x1 = g->x0 + (int64_t)gmath_floor(dx * t1 + 0.5);
-    o.y1 = g->y0 + (int64_t)gmath_floor(dy * t1 + 0.5);
+    o.x1 = g->x0 + i64(gmath_floor(dx * t1 + 0.5));
+    o.y1 = g->y0 + i64(gmath_floor(dy * t1 + 0.5));
     o.s1 = g->s0 + (g->s1 - g->s0) * t1;
     o.d1 = g->d0 + (g->d1 - g->d0) * t1;
   }
@@ -810,8 +835,8 @@ static GSHGEOM_Result dash_dot(Prof * p, double a) {
   int64_t x = k->x1, y = k->y1;
   double s = k->s1;
   if (!at_end && t > 0.0) {
-    x = k->x0 + (int64_t)gmath_floor((double)(k->x1 - k->x0) * t + 0.5);
-    y = k->y0 + (int64_t)gmath_floor((double)(k->y1 - k->y0) * t + 0.5);
+    x = k->x0 + i64(gmath_floor(d64(k->x1 - k->x0) * t + 0.5));
+    y = k->y0 + i64(gmath_floor(d64(k->y1 - k->y0) * t + 0.5));
     s = k->s0 + (k->s1 - k->s0) * t;
   } else if (!at_end) {
     x = k->x0;
@@ -911,7 +936,7 @@ static GSHGEOM_Result dashed(Prof * p, const GSHGEOM_Stroke * canon, const GSHGE
         goto done;
       }
       d.wrap = 1;
-      d.total = (size_t)k[0];
+      d.total = (size_t)i64(k[0]);
     }
   }
   if (r == GSHGEOM_OK) {
@@ -1185,14 +1210,14 @@ GSHGEOM_Result gshgeom_sk_profile_expand(const GSHGEOM_Path * centerline, const 
   p.err = (double)tolerance / 128.0; /* half the tolerance, in pixels */
   p.sides = kSides[sizeof kSides / sizeof kSides[0] - 1];
   for (size_t i = 0; i < sizeof kSides / sizeof kSides[0]; i++) {
-    const double a = 3.14159265358979323846 / (double)kSides[i];
+    const double a = 3.14159265358979323846 / du(kSides[i]);
     if (rmax * (1.0 - gmath_cos(a)) <= p.err) {
       p.sides = kSides[i];
       break;
     }
   }
   for (unsigned k = 0; k < p.sides; k++) {
-    const double a = 6.283185307179586476925 * (double)k / (double)p.sides;
+    const double a = 6.283185307179586476925 * du(k) / du(p.sides);
     p.cs[k] = gmath_cos(a);
     p.sn[k] = gmath_sin(a);
   }
